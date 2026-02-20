@@ -131,12 +131,7 @@ classdef DrawRectangle < guitools.widgets.ImageAxesTool
 
         function updateAnnotations(obj)
 
-            % % -- Update WidthMidline --
-            % % get Width midline
-            % widthML = obj.getWidthMidline(); % [x1 x2; y1 y2]
-            % % set XData and YData
-            % set(obj.WidthMidline,"XData",widthML(1,:),"YData",widthML(2,:));
-
+            % get coordinates for annotations
             [WidthMidlineXY,XRayXY,ArcPolylineXY,LabelXY] = obj.getAnnotationData();
             % set XData and YData of annotation lines
             set(obj.WidthMidline,"XData",WidthMidlineXY(1,:),"YData",WidthMidlineXY(2,:));
@@ -259,15 +254,17 @@ classdef DrawRectangle < guitools.widgets.ImageAxesTool
         end
 
         function onROIMoved(obj,roi)
-            % snap roi to integer height and width
-            guitools.utils.snapAndRefresh(roi,1)
-            % update annotations
+            % 1) snap width/height to integer pixels (optional but ok)
+            guitools.utils.snapRectangleSize(roi, 1);
+            % 2) clamp rotated ROI to full image bounds (region-local image size)
+            sz = obj.Host.ImageSize();
+            guitools.utils.clampRotatedRectangleToImage(roi, sz(1:2));
+            % 3) refresh overlay / derived graphics
             obj.updateAnnotations();
+            % 4) push to model
             if ~isempty(obj.ROIMoveCommittedFcn)
-                % get the event data
-                data = obj.getROIDataStruct(roi);
-                % fire callback
-                obj.ROIMoveCommittedFcn(obj,data)
+                data = obj.getROIDataStruct(roi);  % get event data
+                obj.ROIMoveCommittedFcn(obj, data); % fire callback
             end
         end
 

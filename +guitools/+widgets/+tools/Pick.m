@@ -356,26 +356,33 @@ classdef Pick < guitools.widgets.ImageAxesTool
 
     methods (Hidden=true)
 
-        function [cX,cY] = clampCenter(obj, ctr, boxSize)
+        function [cX,cY] = clampCenter(obj, C, boxSize)
 
-            % x and y coordinates of the center
-            x = ctr(1); y = ctr(2);
+            % % x and y coordinates of the center
+            % x = ctr(1); y = ctr(2);
+            % 
+            % % snap center to pixel center if boxSize is odd, pixel edge if even
+            % if mod(boxSize,2)==1
+            %     % Odd size: center must be at integer pixel centers
+            %     cX = round(x);
+            %     cY = round(y);
+            % else
+            %     % Even size: center must be at half-integers (i.e. nearest .5)
+            %     cX = floor(x) + 0.5;
+            %     cY = floor(y) + 0.5;
+            % end
+            % 
+            % % clamp the center coordinates so the box remains in the image bounds
+            % half = boxSize/2;
+            % cX = clip(cX, 0.5+half, obj.Host.ImageWidth +0.5-half);
+            % cY = clip(cY, 0.5+half, obj.Host.ImageHeight+0.5-half);
 
-            % snap center to pixel center if boxSize is odd, pixel edge if even
-            if mod(boxSize,2)==1
-                % Odd size: center must be at integer pixel centers
-                cX = round(x);
-                cY = round(y);
-            else
-                % Even size: center must be at half-integers (i.e. nearest .5)
-                cX = floor(x) + 0.5;
-                cY = floor(y) + 0.5;
-            end
+            W = obj.Host.ImageWidth;
+            H = obj.Host.ImageHeight;
+            C = imtools.clampBoxToImage(C,boxSize,[W, H]);
 
-            % clamp the center coordinates so the box remains in the image bounds
-            half = boxSize/2;
-            cX = clip(cX, 0.5+half, obj.Host.ImageWidth +0.5-half);
-            cY = clip(cY, 0.5+half, obj.Host.ImageHeight+0.5-half);
+            cX = C(1);
+            cY = C(2);
 
         end
 
