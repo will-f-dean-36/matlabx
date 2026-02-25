@@ -10,6 +10,9 @@ classdef ROIBox < handle & matlab.mixin.SetGetExactNames
         ButtonDownFcn                    % use validator if you like
         HoverHighlight (1,1) matlab.lang.OnOffSwitchState = 'off'
         SelectionHighlight (1,1) matlab.lang.OnOffSwitchState = 'off'
+        ActiveHighlight (1,1) matlab.lang.OnOffSwitchState = 'off'
+        Label (1,1) string = ""
+        FontSize (1,1) double = 10
     end
 
     properties (Access=private, Transient, NonCopyable)
@@ -20,19 +23,24 @@ classdef ROIBox < handle & matlab.mixin.SetGetExactNames
         pendingUpdate logical = false
         % dynamic properties
         P (:,1) matlab.metadata.DynamicProperty
+
+        BoxLabel (1,1) matlab.graphics.primitive.Text
     end
 
     % appearance properties
     properties (SetObservable, AbortSet)
         FaceColor = [1 1 1]
+        EdgeColor = [1 1 1]
 
         LineWidth = 0.5
         HoverLineWidth = 2
         SelectionLineWidth = 1
+        ActiveLineWidth = 2
 
         FaceAlpha = 0
-        HoverFaceAlpha = 0.25
+        HoverFaceAlpha = 0.5
         SelectionFaceAlpha = 0.1
+        ActiveFaceAlpha = 0.1
     end
 
 
@@ -46,40 +54,74 @@ classdef ROIBox < handle & matlab.mixin.SetGetExactNames
                 opts.BoxSize  (1,1) double {mustBePositive} = 50
                 opts.ButtonDownFcn = []
                 opts.ID (1,1) string = ""
+                opts.Label (1,1) string = ""
+                opts.EdgeColor = [1 1 1]
+                opts.FaceColor = [1 1 1]
             end
 
+            % patch object to form a square box
             obj.BoxPatch = patch(ax, ...
-                NaN, ...
-                NaN, ...
-                'w', ...
+                'XData',NaN, ...
+                'YData',NaN, ...
+                'EdgeColor',obj.EdgeColor, ...
                 'FaceColor',obj.FaceColor, ...
-                'FaceAlpha',obj.FaceAlpha,...
+                'FaceAlpha',obj.FaceAlpha, ...
                 'HitTest','on', ...
                 'PickableParts','all', ...
                 'LineWidth', obj.LineWidth, ...
                 'Tag','ROIBox');
 
+            % label in top-left corner of box
+            obj.BoxLabel = text('Parent',ax,...
+                'Units','data',...
+                'Position',[NaN NaN],...
+                'Color',[1 1 1],...
+                'BackgroundColor','none',...
+                'String','',...
+                'FontSize',10,...
+                'Clipping','off',...
+                'Margin',3,...
+                'HorizontalAlignment','left',...
+                'VerticalAlignment','top',...
+                'HitTest','off');
+
             % add ID property to the BoxPatch for tracking ownership
             obj.P(1) = addprop(obj.BoxPatch,'ID');
 
             % apply inputs
-            obj.Center        = opts.Center;
-            obj.BoxSize       = opts.BoxSize;
-            obj.ButtonDownFcn = opts.ButtonDownFcn;
-            obj.ID = opts.ID;
+            obj.Center          = opts.Center;
+            obj.BoxSize         = opts.BoxSize;
+            obj.ButtonDownFcn   = opts.ButtonDownFcn;
+            obj.ID              = opts.ID;
+            obj.FaceColor       = opts.FaceColor;
+            obj.EdgeColor       = opts.EdgeColor;
 
             % set dynamic property (ID)
             obj.BoxPatch.ID = opts.ID;
 
-            % one listener covers Center, BoxSize, and ButtonDownFcn
-            obj.L = addlistener(obj, {'Center','BoxSize','ButtonDownFcn'}, ...
-                'PostSet', @(~,~) obj.queueGeometryUpdate());
+            % one listener covers geometry properties and ButtonDownFcn callback
+            geomProps = {...
+                'Center',...
+                'BoxSize',...
+                'ButtonDownFcn'...
+                };
+            obj.L = addlistener(obj, geomProps, 'PostSet', @(~,~) obj.queueGeometryUpdate());
 
-            % one listener covers HoverHighlight and SelectionHighlight
-            obj.L(2) = addlistener(obj, {'HoverHighlight', 'SelectionHighlight', 'FaceColor'}, ...
-                'PostSet', @(~,~) obj.updateAppearance());
+            % one listener covers appearance properties
+            appProps = {...
+                'HoverHighlight',...
+                'SelectionHighlight',...
+                'ActiveHighlight',...
+                'FaceColor',...
+                'EdgeColor',...
+                'Label',...
+                'FontSize'...
+                };
+            obj.L(2) = addlistener(obj, appProps, 'PostSet', @(~,~) obj.updateAppearance());
 
-            obj.updateGeometry();  % initial draw
+            % initial draw
+            obj.updateGeometry();
+            obj.updateAppearance();
 
         end
 
@@ -97,6 +139,11 @@ classdef ROIBox < handle & matlab.mixin.SetGetExactNames
                 % delete patch if it exists
                 if ~isempty(obj(k).BoxPatch) && isgraphics(obj(k).BoxPatch)
                     delete(obj(k).BoxPatch);
+                end
+
+                % delete text if it exists
+                if ~isempty(obj(k).BoxLabel) && isgraphics(obj(k).BoxLabel)
+                    delete(obj(k).BoxLabel);
                 end
             end
         end
@@ -117,11 +164,16 @@ classdef ROIBox < handle & matlab.mixin.SetGetExactNames
         end
 
         function updateGeometry(obj)
-            % geometry
+            % box patch geometry
             c = obj.Center; s = obj.BoxSize/2;
             X = [c(1)-s c(1)+s c(1)+s c(1)-s];
             Y = [c(2)-s c(2)-s c(2)+s c(2)+s];
-            set(obj.BoxPatch, 'XData',X, 'YData',Y);
+            set(obj.BoxPatch, 'XData', X, 'YData', Y);
+
+            % label coordinates
+            shift = 0.05*s; % amount to shift label
+            set(obj.BoxLabel, 'Position', [X(1) Y(1)]);
+
 
             % callback (forward as-is)
             if isempty(obj.ButtonDownFcn)
@@ -133,12 +185,21 @@ classdef ROIBox < handle & matlab.mixin.SetGetExactNames
 
         function updateAppearance(obj)
 
+            % update patch colors
+            obj.BoxPatch.EdgeColor = obj.EdgeColor;
             obj.BoxPatch.FaceColor = obj.FaceColor;
 
-            % set patch appearance properties based on status flags
+            % update label
+            obj.BoxLabel.String = obj.Label;
+            obj.BoxLabel.FontSize = obj.FontSize;
+
+            % update patch LineWidth and FaceAlpha based on highlight status
             if obj.HoverHighlight
                 obj.BoxPatch.LineWidth = obj.HoverLineWidth;
                 obj.BoxPatch.FaceAlpha = obj.HoverFaceAlpha;
+            elseif obj.ActiveHighlight
+                obj.BoxPatch.LineWidth = obj.ActiveLineWidth;
+                obj.BoxPatch.FaceAlpha = obj.ActiveFaceAlpha;
             elseif obj.SelectionHighlight
                 obj.BoxPatch.LineWidth = obj.SelectionLineWidth;
                 obj.BoxPatch.FaceAlpha = obj.SelectionFaceAlpha;
