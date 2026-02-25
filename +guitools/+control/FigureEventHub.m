@@ -38,11 +38,11 @@ classdef FigureEventHub < handle
         % Registry entries: struct('obj',handle,'Priority',double,'CaptureDuringDrag',logical)
         Registry = struct('obj',{},'id',{},'Priority',{},'CaptureDuringDrag',{});
 
-        % ID to add to the next registrant
+        % ID to assign to the next registrant
         NextID double = 1
-
-
+        % ID of the current hover claimant
         HoverID double = NaN
+        % ID of the registrant holding capture
         CaptureID double = NaN
     end
 
@@ -198,14 +198,13 @@ classdef FigureEventHub < handle
             % iterate Registry in priority order
             for k = 1:numel(obj.Registry)
                 e = obj.Registry(k);
-                try
-                    % if matches() returns true, this registrant becomes the claimant
+                % if matches() returns true, this registrant becomes the claimant
+                try % wrap in try-catch to stay resilient to errors
                     if obj.matches(e.obj, tgt, kind, evt)
                         claimantID = e.id;
                         break
                     end
                 catch
-                    % keep hub resilient to tool errors
                 end
             end
 
@@ -235,31 +234,18 @@ classdef FigureEventHub < handle
 
         end
 
-
-
         % Helper: map ID -> current index
         function idx = indexOfID(obj, id)
             ids = [obj.Registry.id];
             idx = find(ids==id, 1, 'first');
         end
 
-
-
         function safeCall(~, h, methodName, evt, tgt)
-            % if isvalid(h) && ismethod(h, methodName)
-            %     try
-            %         h.(methodName)(evt, tgt)
-            %     catch err
-            %         %disp('Error using safeCall()')
-            %         warning('Hub safeCall() error in %s: %s', methodName, err.message);
-            %     end
-            % end
-
+            % try to route callback, warn on fail
             if isvalid(h)
                 try
                     h.(methodName)(evt, tgt)
                 catch err
-                    %disp('Error using safeCall()')
                     warning('Hub safeCall() error in %s: %s', methodName, err.message);
                 end
             end
@@ -268,21 +254,14 @@ classdef FigureEventHub < handle
 
         function tf = matches(~, h, tgt, kind, evt)
             % Expect registrant to implement "matches(tgt,kind,evt)"
-            % tf = false;
-            % if isvalid(h) && ismethod(h,'matches')
-            %     tf = h.matches(tgt, kind, evt);
-            % end
-
             tf = false;
             if isvalid(h)
                 tf = h.matches(tgt, kind, evt);
             end
-
-
         end
 
         function call(~, h, kind, evt, tgt)
-            % Call method if present; ignore if missing
+            % route callback, error on fail
             if ~isvalid(h), return; end
             % switch kind
             %     case 'down',   if ismethod(h,'onDown'),     h.onDown(evt,tgt);     end
@@ -304,6 +283,21 @@ classdef FigureEventHub < handle
 
     end
 
+    %% Public helpers
+    methods
+
+        function listRegistrants(obj)
+            for i = 1:numel(obj.Registry)
+                entry = obj.Registry(i);
+                fprintf('Entry %d: %s\n',i,class(entry.obj));
+            end
+            fprintf('\n');
+        end
+
+
+
+    end
+
 
     methods (Static)
 
@@ -313,9 +307,13 @@ classdef FigureEventHub < handle
                 'onDown',...
                 'onUp',...
                 'onMove',...
-                'onScroll'...
+                'onScroll',...
+                'onKeyPress',...
+                'onEnter',...
+                'onLeave'...
                 };
         end
+
 
 
 
