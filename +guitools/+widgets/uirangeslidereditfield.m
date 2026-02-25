@@ -636,9 +636,21 @@ classdef uirangeslidereditfield < matlab.ui.componentcontainer.ComponentContaine
     methods
 
         function tf = matches(obj, tgt, ~, ~)
-            tf = (obj.sliderThumbAxes == ancestor(tgt, 'matlab.ui.control.UIAxes'));
-            % not true if tgt is the actual axes
-            tf = tf && ~isa(tgt,'matlab.ui.control.UIAxes');
+
+            tgtAncestor = ancestor(tgt, 'matlab.ui.control.UIAxes');
+
+            if isempty(tgtAncestor) || isa(tgt,'matlab.ui.control.UIAxes')
+                tf = false;
+                return
+            end
+
+            % true if sliderThumbAxes is the ancestor of the tgt
+            tf = obj.sliderThumbAxes == tgtAncestor;
+
+            % tf = (obj.sliderThumbAxes == ancestor(tgt, 'matlab.ui.control.UIAxes'));
+            % 
+            % % not true if tgt is the actual axes
+            % tf = tf && ~isa(tgt,'matlab.ui.control.UIAxes');
         end
 
         function onDown(obj, ~, tgt)
