@@ -1,7 +1,6 @@
 classdef Pick < guitools.widgets.ImageAxesTool
 % guitools.widgets.tools.Pick - optimistic box creation on click
 
-
     %% Draggable box management
 
     %% Private UI/Graphics
@@ -12,18 +11,20 @@ classdef Pick < guitools.widgets.ImageAxesTool
     % Callbacks
     properties
         % Optimistic, widget-first events (controller may ignore them):
-        % BoxCreatedFcn:        data.ID, data.CenterPx, data.BoxSize
-        % BoxMoveStartedFcn:    data.ID
-        % BoxPreviewMovedFcn:   data.ID, data.CenterPx
-        % BoxMoveCommittedFcn:  data.ID, data.CenterPx
-        % BoxDeletedFcn:        data.ID
-        % BoxActivatedFcn:      data.ID
+        % BoxCreatedFcn:            data.ID, data.CenterPx, data.BoxSize
+        % BoxMoveStartedFcn:        data.ID
+        % BoxPreviewMovedFcn:       data.ID, data.CenterPx
+        % BoxMoveCommittedFcn:      data.ID, data.CenterPx
+        % BoxDeletedFcn:            data.ID
+        % BoxActivatedFcn:          data.ID
+        % BoxSelectionChangedFcn:   data.IDs
         BoxCreatedFcn
         BoxMoveStartedFcn
         BoxPreviewMovedFcn
         BoxMoveCommittedFcn
         BoxDeletedFcn
         BoxActivatedFcn
+        BoxSelectionChangedFcn
     end
 
     % Identity
@@ -32,6 +33,7 @@ classdef Pick < guitools.widgets.ImageAxesTool
         BoxIds (1,:) string = string.empty(1,0)
         ActiveBoxIdx = []
         ActiveHoverIdx = []
+        SelectedBoxIds (1,:) string = string.empty(1,0)
     end
 
     % Box Settings/Info
@@ -44,7 +46,7 @@ classdef Pick < guitools.widgets.ImageAxesTool
         nBoxes
     end
 
-
+    %% Lifecycle toggles
     methods
         function obj = Pick(host)
             obj@guitools.widgets.ImageAxesTool(host, "Pick",...
@@ -105,16 +107,22 @@ classdef Pick < guitools.widgets.ImageAxesTool
 
             s = obj.BoxSize;
             [cx,cy] = obj.clampCenter(XY, s);
-            % ID = string(char(java.util.UUID.randomUUID()));
             ID = guitools.utils.uniqueID();
 
             % Draw now; notify controller (optimistic)
-            obj.addBox(ID, [cx cy], s);
+            obj.addBox(ID, [cx cy], s);      
 
             if ~isempty(obj.BoxCreatedFcn)
                 obj.BoxCreatedFcn(H, struct('ID', ID, 'CenterPx', [cx cy], 'BoxSize', s));
             end
 
+            % selection behavior: normal replaces, extend adds
+            switch obj.Host.ParentFig.SelectionType
+                case 'extend'
+                    obj.addToSelection(ID, 'Emit', true);
+                otherwise
+                    obj.setSelection(ID, 'Emit', true);
+            end    
         end
 
     end
@@ -123,18 +131,7 @@ classdef Pick < guitools.widgets.ImageAxesTool
     methods
 
         function tf = onDistractDown(obj,~,tgt)
-            % tf = onDistractDown(obj,evt,tgt)
-
             obj.printStatus(sprintf('%s.onDistractDown()\n',obj.Name));
-
-
-            % % ROIBox clicks handled by patch (drag/delete)
-            % if isa(tgt,'matlab.graphics.primitive.Patch') && strcmp(get(tgt,'Tag'),'ROIBox')
-            %     tf = true;
-            % else
-            %     tf = false;
-            % end
-
 
             % ROIBox clicks handled by patch (drag/delete)
             if isprop(tgt,'ID') && obj.hasBox(tgt.ID)
@@ -142,9 +139,6 @@ classdef Pick < guitools.widgets.ImageAxesTool
             else
                 tf = false;
             end
-
-
-
         end
 
 
@@ -223,9 +217,13 @@ classdef Pick < guitools.widgets.ImageAxesTool
                 obj.ActiveHoverIdx = [];
             end
 
+            % remove from selection first
+            id = obj.BoxIds(idx);
+            obj.SelectedBoxIds(obj.SelectedBoxIds == id) = [];
+
             % reset ActiveBoxIdx if necessary
             if ~isempty(obj.ActiveBoxIdx) && obj.ActiveBoxIdx == obj.nBoxes
-                obj.setActiveBoxByIdx([]);
+                obj.ActiveBoxIdx = [];
             end
 
             delete(obj.BoxROI(idx));
@@ -233,29 +231,166 @@ classdef Pick < guitools.widgets.ImageAxesTool
             obj.BoxCenters(idx,:) = [];
             obj.BoxIds(idx) = [];
 
-        end
-
-        % executes on mouse down when the target is an ROIBox patch
-        function boxClickedById(obj, id)
-
-            idx = obj.idxOfId(id);
-
-            if isempty(idx), return; end
-
-            obj.setActiveBoxByIdx(idx);
-
-            switch obj.Host.ParentFig.SelectionType
-                case 'normal'
-                    % indicate that we are primed for drag
-                    obj.Host.setMode('PrimedForDrag',true);
-                case 'alt'   % delete immediately (optimistic), then notify
-                    obj.deleteBoxByIdx(idx);   % remove overlay now
-                    % call BoxDeletedFcn if it exists, pass ID
-                    if ~isempty(obj.BoxDeletedFcn)
-                        obj.BoxDeletedFcn(obj, struct('ID', string(id)));
-                    end
+            % repair active idx if needed (best-effort)
+            if ~isempty(obj.SelectedBoxIds)
+                obj.ActiveBoxIdx = obj.idxOfId(obj.SelectedBoxIds(1));
             end
 
+            obj.applySelectionHighlights();
+            obj.emitSelectionChanged();
+
+        end
+
+        function boxClickedById(obj, id)
+            id = string(id);
+            idx = obj.idxOfId(id);
+            if isempty(idx), return; end
+        
+            switch obj.Host.ParentFig.SelectionType
+                case 'alt'   % delete immediately (optimistic), then notify
+                    obj.deleteBoxByIdx(idx);   % remove overlay now
+                    if ~isempty(obj.BoxDeletedFcn)
+                        obj.BoxDeletedFcn(obj, struct('ID', id));
+                    end
+                    return
+        
+                case 'extend' % shift-click toggles selection membership
+                    if ismember(id, obj.SelectedBoxIds)
+                        obj.removeFromSelection(id, 'Emit', true);
+                    else
+                        obj.addToSelection(id, 'Emit', true);
+                    end
+        
+                otherwise
+                    obj.setSelection(id, 'Emit', true);
+            end
+        
+            % prime drag only for normal click (single select)
+            if obj.Host.ParentFig.SelectionType == "normal"
+                obj.Host.setMode('PrimedForDrag', true);
+            end
+        end
+
+
+        function setSelection(obj, id, opts)
+            arguments
+                obj
+                id
+                opts.Emit (1,1) logical = false
+            end
+
+            id = string(id);
+            obj.SelectedBoxIds = id;
+            obj.ActiveBoxIdx = obj.idxOfId(id);
+        
+            obj.applySelectionHighlights();
+
+
+            % testing below
+            if ~isempty(obj.BoxActivatedFcn)
+                obj.BoxActivatedFcn(obj, struct('ID', id));
+            end
+            % end testing
+
+        
+            if opts.Emit
+                obj.emitSelectionChanged();
+            end
+        end
+
+
+        function addToSelection(obj, id, opts)
+            arguments
+                obj
+                id
+                opts.Emit (1,1) logical = false
+            end
+
+            % id = string(id);
+            if ~ismember(id, obj.SelectedBoxIds)
+                obj.SelectedBoxIds(end+1) = id;
+            end
+            obj.ActiveBoxIdx = obj.idxOfId(id);
+            obj.applySelectionHighlights();
+
+            % testing below
+            if ~isempty(obj.BoxActivatedFcn)
+                obj.BoxActivatedFcn(obj, struct('ID', id));
+            end
+            % end testing
+
+            if opts.Emit
+                obj.emitSelectionChanged();
+            end
+        end
+
+        function removeFromSelection(obj, id, opts)
+            arguments
+                obj
+                id
+                opts.Emit (1,1) logical = false
+            end
+
+            % id = string(id);
+            obj.SelectedBoxIds(obj.SelectedBoxIds == id) = [];
+
+
+            % active box was deselected
+            if obj.idxOfId(id) == obj.ActiveBoxIdx
+                % some boxes are still selected
+                if ~isempty(obj.SelectedBoxIds)
+                    % make the last one active
+                    newID = obj.SelectedBoxIds(end);
+                    obj.ActiveBoxIdx = obj.idxOfId(newID);
+                else
+                    % no selection -> no active box
+                    newID = [];
+                    obj.ActiveBoxIdx = [];
+                end
+
+                % testing below
+                if ~isempty(obj.BoxActivatedFcn)
+                    obj.BoxActivatedFcn(obj, struct('ID', newID));
+                end
+                % end testing
+
+            end
+
+            obj.applySelectionHighlights();
+
+            if opts.Emit
+                obj.emitSelectionChanged();
+            end
+        end
+
+        function applySelectionHighlights(obj)
+            % clear all selection and active highlights
+            if isempty(obj.BoxROI), return; end
+            for k = 1:numel(obj.BoxROI)
+                if isvalid(obj.BoxROI(k))
+                    set(obj.BoxROI(k),'SelectionHighlight','off','ActiveHighlight','off');
+                end
+            end
+
+            % apply selected highlights
+            if isempty(obj.SelectedBoxIds), return; end
+            for i = 1:numel(obj.SelectedBoxIds)
+                idx = obj.idxOfId(obj.SelectedBoxIds(i));
+                if ~isempty(idx) && idx>=1 && idx<=numel(obj.BoxROI) && isvalid(obj.BoxROI(idx))
+                    obj.BoxROI(idx).SelectionHighlight = 'on';
+                end
+            end
+
+            % apply active highlight
+            if ~isempty(obj.ActiveBoxIdx)
+                obj.BoxROI(obj.ActiveBoxIdx).ActiveHighlight = 'on';
+            end
+
+        end
+
+        function emitSelectionChanged(obj)
+            if isempty(obj.BoxSelectionChangedFcn), return; end
+            obj.BoxSelectionChangedFcn(obj, struct('IDs', obj.SelectedBoxIds));
         end
 
         % executes on mouse move when DragBox Mode is on
@@ -303,7 +438,6 @@ classdef Pick < guitools.widgets.ImageAxesTool
                 end
             end
             obj.Host.setMode('DragBox',false);
-            % obj.setActiveBoxByIdx([]);
             obj.Host.updateFromTool();
         end
 
@@ -332,15 +466,8 @@ classdef Pick < guitools.widgets.ImageAxesTool
             if ~obj.Host.Mode.HoverBox, return; end
             % if ActiveHoverIdx is empty, return
             if isempty(obj.ActiveHoverIdx), return; end
-            % set HoverHighlight off on current active box (if valid)
-            % try
-            %     if isvalid(obj.BoxROI(obj.ActiveHoverIdx))
-            %         obj.BoxROI(obj.ActiveHoverIdx).HoverHighlight = 'off';
-            %     end
-            % catch
-            %     blah = 0;
-            % end
 
+            % set HoverHighlight off on current active box (if valid)
             if isvalid(obj.BoxROI(obj.ActiveHoverIdx))
                 obj.BoxROI(obj.ActiveHoverIdx).HoverHighlight = 'off';
             end
@@ -357,33 +484,11 @@ classdef Pick < guitools.widgets.ImageAxesTool
     methods (Hidden=true)
 
         function [cX,cY] = clampCenter(obj, C, boxSize)
-
-            % % x and y coordinates of the center
-            % x = ctr(1); y = ctr(2);
-            % 
-            % % snap center to pixel center if boxSize is odd, pixel edge if even
-            % if mod(boxSize,2)==1
-            %     % Odd size: center must be at integer pixel centers
-            %     cX = round(x);
-            %     cY = round(y);
-            % else
-            %     % Even size: center must be at half-integers (i.e. nearest .5)
-            %     cX = floor(x) + 0.5;
-            %     cY = floor(y) + 0.5;
-            % end
-            % 
-            % % clamp the center coordinates so the box remains in the image bounds
-            % half = boxSize/2;
-            % cX = clip(cX, 0.5+half, obj.Host.ImageWidth +0.5-half);
-            % cY = clip(cY, 0.5+half, obj.Host.ImageHeight+0.5-half);
-
             W = obj.Host.ImageWidth;
             H = obj.Host.ImageHeight;
             C = imtools.clampBoxToImage(C,boxSize,[W, H]);
-
             cX = C(1);
             cY = C(2);
-
         end
 
     end
@@ -393,8 +498,18 @@ classdef Pick < guitools.widgets.ImageAxesTool
 
     methods
 
-        function addBox(obj, id, center_px, boxSize)
-            if nargin<4 || isempty(boxSize)
+        function addBox(obj, id, center_px, boxSize, opts)
+            arguments
+                obj
+                id
+                center_px
+                boxSize = []
+                opts.EdgeColor = [1 1 1]
+                opts.FaceColor = [1 1 1]
+                opts.Label (1,1) string =  ""
+            end
+
+            if isempty(boxSize)
                 boxSize = obj.BoxSize;
             end
 
@@ -407,6 +522,9 @@ classdef Pick < guitools.widgets.ImageAxesTool
                 "Center",[cx cy], ...
                 "BoxSize", boxSize, ...
                 "ID", string(id), ...
+                "Label", opts.Label, ...
+                "EdgeColor", opts.EdgeColor, ...
+                "FaceColor", opts.FaceColor, ...
                 "ButtonDownFcn", @(~,~) obj.boxClickedById(string(id)));
 
             obj.BoxCenters(end+1,:) = [cx cy];
@@ -425,46 +543,61 @@ classdef Pick < guitools.widgets.ImageAxesTool
             obj.BoxROI = guitools.widgets.overlays.ROIBox.empty();
             obj.BoxCenters = zeros(0,2);
             obj.BoxIds = string.empty(1,0);
-            obj.setActiveBoxByIdx([]);
+            obj.ActiveBoxIdx = [];
+            obj.SelectedBoxIds = string.empty(1,0);
         end
 
-        function setActiveBoxByID(obj, id)
-            % get box idx from ID
-            idx = obj.idxOfId(id); 
-            % if empty, return
-            if isempty(idx), return; end
-            % set active box using its idx
-            obj.setActiveBoxByIdx(idx);
-        end
-
-        function setActiveBoxByIdx(obj, idx)
-            % if no boxes exist, set empty and return
-            if obj.nBoxes == 0
-                obj.ActiveBoxIdx = [];
-                return
+        function setSelectedBoxIDs(obj, ids, opts)
+            arguments
+                obj
+                ids
+                opts.Emit (1,1) logical = false
             end
 
-            % deselect current active box
-            if ~isempty(obj.ActiveBoxIdx)
-                obj.BoxROI(obj.ActiveBoxIdx).SelectionHighlight = 'off';
+            ids = string(ids);
+            ids = ids(ismember(ids, obj.BoxIds));
+            obj.SelectedBoxIds = ids(:).';
+            if ~isempty(obj.SelectedBoxIds)
+                obj.ActiveBoxIdx = obj.idxOfId(obj.SelectedBoxIds(1));
+            else
                 obj.ActiveBoxIdx = [];
             end
-
-            % if empty, return
-            if isempty(idx), return; end
-
-            % set new ActiveBoxIdx
-            obj.ActiveBoxIdx = idx;
-            % and turn on the SelectionHighlight for that box
-            obj.BoxROI(obj.ActiveBoxIdx).SelectionHighlight = 'on';
-
-            % call BoxActivatedFcn if it exists
-            if ~isempty(obj.BoxActivatedFcn)
-                ID = obj.BoxIds(idx);
-                obj.BoxActivatedFcn(obj, struct('ID', ID));
+        
+            obj.applySelectionHighlights();
+        
+            if opts.Emit
+                obj.emitSelectionChanged();
             end
         end
 
+
+        function ids = getSelectedBoxIDs(obj)
+            ids = obj.SelectedBoxIds;
+        end
+
+
+        function setBoxLabelByID(obj, id, label)
+            idx = obj.idxOfId(id);
+            if isempty(idx), return; end
+            if idx>=1 && idx<=numel(obj.BoxROI) && isvalid(obj.BoxROI(idx))
+                set(obj.BoxROI(idx),'Label',label);
+            end
+        end
+
+        function setBoxColorByID(obj, id, color)
+            idx = obj.idxOfId(id);
+            if isempty(idx), return; end
+            if idx>=1 && idx<=numel(obj.BoxROI) && isvalid(obj.BoxROI(idx))
+                set(obj.BoxROI(idx),'EdgeColor',color,'FaceColor',color);
+            end
+        end
+
+        function setBoxesColorByIDs(obj, ids, color)
+            ids = string(ids);
+            for i = 1:numel(ids)
+                obj.setBoxColorByID(ids(i), color);
+            end
+        end
 
     end
 
