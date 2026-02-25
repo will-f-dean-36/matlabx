@@ -255,10 +255,10 @@ classdef DrawRectangle < guitools.widgets.ImageAxesTool
 
         function onROIMoved(obj,roi)
             % 1) snap width/height to integer pixels (optional but ok)
-            guitools.utils.snapRectangleSize(roi, 1);
+            guitools.utils.snapRectangleROISize(roi, 1);
             % 2) clamp rotated ROI to full image bounds (region-local image size)
             sz = obj.Host.ImageSize();
-            guitools.utils.clampRotatedRectangleToImage(roi, sz(1:2));
+            guitools.utils.clampRectangleROIToImage(roi, sz(1:2));
             % 3) refresh overlay / derived graphics
             obj.updateAnnotations();
             % 4) push to model
