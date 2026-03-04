@@ -1,5 +1,5 @@
 classdef UICalibration < handle
-%UICalibration  Small per-machine UI calibration cache for App Designer / uifigure UIs.
+%UICALIBRATION  Small per-machine UI calibration cache for App Designer / uifigure UIs.
 %
 % Typical use:
 %   UIcal = guitools.calibration.UICalibration();
@@ -15,17 +15,17 @@ classdef UICalibration < handle
 
     properties (SetAccess=private)
         % Core display scaling
-        PixelsPerInch (1,1) double = NaN
-        PixelsPerPoint  (1,1) double = NaN  % PPI/72
+        PixelsPerInch       (1,1) double = NaN
+        PixelsPerPoint      (1,1) double = NaN  % PPI/72
 
         % Panel title/border overhead model:
-        %   overheadPx ~= A * (FontSizePt * PixelsPerPoint) + B
-        PanelOverheadA (1,1) double = NaN
-        PanelOverheadB (1,1) double = NaN
+        %   overheadPx ~ A * (FontSizePt * PixelsPerPoint) + B
+        PanelOverheadA      (1,1) double = NaN
+        PanelOverheadB      (1,1) double = NaN
 
         % Metadata / debug
-        Timestamp datetime = datetime.empty
-        Notes (1,:) char = ''
+        Timestamp           datetime = datetime.empty
+        Notes               (1,:) char = ''
 
         % status flags
         uipanelCalibrated (1,1) logical = false
@@ -37,7 +37,7 @@ classdef UICalibration < handle
 
     end
 
-    %% Constructor
+    %% Constructor and global calibration controller
     methods
 
         function obj = UICalibration(opts)
@@ -51,21 +51,67 @@ classdef UICalibration < handle
             % set up logger
             obj.Log = guitools.Logger;
 
-            obj.Log.info("Calibration starting...","Source","UICalibration");
-
             % set up conversion factors
             obj.PixelsPerInch = get(groot, 'ScreenPixelsPerInch');
             obj.PixelsPerPoint   = obj.PixelsPerInch / 72;
 
-            if opts.uipanel
-                obj.calibrate_uipanel();
+            % --- calibrate ---
+            obj.Log.info("Calibration starting...","Source","UICalibration");
+            try
+                obj.calibrate(opts);
+            catch ME
+                obj.Log.error(ME,"Source","UICalibration");
             end
+            obj.Log.info("Calibration complete.","Source","UICalibration");
 
         end
 
     end
 
-    %% Calibration methods and helpers
+    %% Main calibration driver
+    methods
+
+        function calibrate(obj,opts)
+            arguments
+                obj (1,1) guitools.calibration.UICalibration
+                opts.uipanel (1,1) logical = true
+            end
+
+            % --- uipanel ---
+            if opts.uipanel
+                try
+                    obj.calibrate_uipanel();
+                catch ME
+                    obj.Log.error(ME,"Source","UICalibration");
+                end
+            end
+        end
+
+    end
+
+    %% General helpers
+    methods
+
+        function px = pt2px(obj, pt)
+            arguments
+                obj (1,1) guitools.calibration.UICalibration
+                pt (:,1) double
+            end
+            px = pt * obj.PixelsPerPoint;
+        end
+
+        function pt = px2pt(obj, px)
+            arguments
+                obj (1,1) guitools.calibration.UICalibration
+                px (:,1) double
+            end
+            pt = px / obj.PixelsPerPoint;
+        end
+
+    end
+
+
+    %% Individual calibrations
     methods
         function calibrate_uipanel(obj, opts)
             %CALIBRATE_UIPANEL Calibrate uipanel to estimate title bar height
@@ -74,7 +120,7 @@ classdef UICalibration < handle
                 opts.FontName (1,:) char = ''     % '' = default UI font
                 opts.FontSizes (1,:) double = [10 12 14 16 18]  % pts
             end
-
+            % log
             obj.Log.info("Calibrating uipanel...","Source","UICalibration");
 
             % Create a uifigure to measure platform-specific chrome
@@ -103,7 +149,7 @@ classdef UICalibration < handle
                 delete(p);
             end
 
-            % Fit y = A*x + B. Use polyfit when n>=2.
+            % Fit y ~ A*x + B. Use polyfit when n>=2.
             if n >= 2
                 cfit = polyfit(x, y, 1);
                 obj.PanelOverheadA = cfit(1);
@@ -114,25 +160,15 @@ classdef UICalibration < handle
                 obj.PanelOverheadB = max(0, y(1) - x(1));
             end
 
+            % update log and status
+            obj.Log.info("uipanel calibration completed successfully.","Source","UICalibration");
             obj.uipanelCalibrated = true;
-            obj.Log.info("Calibrated uipanel title bar height.","Source","UICalibration");
         end
 
-        function px = pt2px(obj, pt)
-            arguments
-                obj (1,1) guitools.calibration.UICalibration
-                pt (:,1) double
-            end
-            px = pt * obj.PixelsPerPoint;
-        end
+    end
 
-        function pt = px2pt(obj, px)
-            arguments
-                obj (1,1) guitools.calibration.UICalibration
-                px (:,1) double
-            end
-            pt = px / obj.PixelsPerPoint;
-        end
+    %% Getters for calibrated values
+    methods
 
         function overheadPx = uipanelTitleBarHeightPx(obj, fontSizePt)
             %UIPANELTITLEBARHEIGHTPX Estimate height of uipanel title bar in px based on font size in pts
