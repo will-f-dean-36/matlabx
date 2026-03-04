@@ -95,6 +95,7 @@ classdef ROIBox < handle & matlab.mixin.SetGetExactNames
             obj.ID              = opts.ID;
             obj.FaceColor       = opts.FaceColor;
             obj.EdgeColor       = opts.EdgeColor;
+            obj.Label           = opts.Label;
 
             % set dynamic property (ID)
             obj.BoxPatch.ID = opts.ID;
