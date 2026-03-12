@@ -27,7 +27,8 @@ classdef DrawRectangle < matlabx.ui.widgets.ImageAxesTool
         ROIColor (1,3) double = [1 1 1]
         ROILineWidth (1,1) double = 1
         ROIFaceAlpha (1,1) double = 0.1
-        ROIMarkerSize (1,1) double = 3
+        %ROIMarkerSize (1,1) double = 3
+        ROIMarkerSize (1,1) double = 8
 
         AnnotationLineColor (1,3) double = [1 1 1]
         AnnotationLineWidth (1,1) double = 0.5
