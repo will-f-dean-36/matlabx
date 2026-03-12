@@ -26,6 +26,8 @@ classdef Logger < handle
         IncludeLevel (1,1) logical = true
         IncludeSource (1,1) logical = true
         IncludeTag (1,1) logical = false
+        AutoDetectSource (1,1) logical = true
+        SourceDetail (1,1) string {mustBeMember(SourceDetail,["short","full"])} = "short"
 
         % Sinks toggles
         PrintToCommandWindow (1,1) logical = true
@@ -71,6 +73,8 @@ classdef Logger < handle
                 opts.PrintToCommandWindow (1,1) logical = true
                 opts.FlushEveryN (1,1) double {mustBePositive, mustBeInteger} = 1
                 opts.FlushMinIntervalSec (1,1) double {mustBeNonnegative} = 0.05
+                opts.AutoDetectSource (1,1) logical = true
+                opts.SourceDetail (1,1) string {mustBeMember(opts.SourceDetail,["short","full"])} = "short"
             end
 
             self.KeepAll = opts.KeepAll;
@@ -78,6 +82,8 @@ classdef Logger < handle
             self.PrintToCommandWindow = opts.PrintToCommandWindow;
             self.FlushEveryN = opts.FlushEveryN;
             self.FlushMinIntervalSec = opts.FlushMinIntervalSec;
+            self.AutoDetectSource = opts.AutoDetectSource;
+            self.SourceDetail = opts.SourceDetail;
 
             self.StartTime = datetime('now');
             self.LastFlushTic = tic;
@@ -107,15 +113,20 @@ classdef Logger < handle
                 opts.AlsoPrint (1,1) logical = false  % force print even if PrintToCommandWindow=false
             end
 
-            % if msg is an MException
+            % --- normalize msg to string ---
             if isa(msg,'MException')
                 ME = msg;
                 msg = string(ME.message);
             
-                if isempty(opts.Source)
-                    opts.Source = string(ME.stack(1).name);
+                % if isempty(opts.Source)
+                %     opts.Source = string(ME.stack(1).name);
+                % end
+
+                if strlength(opts.Source) == 0 && ~isempty(ME.stack)
+                    opts.Source = matlabx.logging.formatCallerName( ...
+                        ME.stack(1).name, Detail=self.SourceDetail);
                 end
-            
+
                 if isempty(opts.Data)
                     opts.Data = struct( ...
                         "identifier", ME.identifier, ...
@@ -127,6 +138,18 @@ classdef Logger < handle
 
             if ~isa(msg,'string')
                 error('Logger:incorrectType','msg must be a string, char, or MException, not a %s',class(msg))
+            end
+
+            % --- auto-detect Source if not provided ---
+            if self.AutoDetectSource && strlength(opts.Source) == 0
+                st = dbstack(2, '-completenames');
+            
+                if ~isempty(st)
+                    opts.Source = matlabx.logging.formatCallerName( ...
+                        st(1).name, "Detail", self.SourceDetail);
+                else
+                    opts.Source = "unknown";
+                end
             end
 
             e = struct( ...
