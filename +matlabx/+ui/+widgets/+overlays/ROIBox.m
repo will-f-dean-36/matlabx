@@ -40,7 +40,7 @@ classdef ROIBox < handle & matlab.mixin.SetGetExactNames
         FaceAlpha = 0
         HoverFaceAlpha = 0.5
         SelectionFaceAlpha = 0.1
-        ActiveFaceAlpha = 0.1
+        ActiveFaceAlpha = 0
     end
 
 
@@ -198,6 +198,9 @@ classdef ROIBox < handle & matlab.mixin.SetGetExactNames
             if obj.HoverHighlight
                 obj.BoxPatch.LineWidth = obj.HoverLineWidth;
                 obj.BoxPatch.FaceAlpha = obj.HoverFaceAlpha;
+            elseif obj.ActiveHighlight && obj.SelectionHighlight
+                obj.BoxPatch.LineWidth = obj.ActiveLineWidth;
+                obj.BoxPatch.FaceAlpha = obj.SelectionFaceAlpha;
             elseif obj.ActiveHighlight
                 obj.BoxPatch.LineWidth = obj.ActiveLineWidth;
                 obj.BoxPatch.FaceAlpha = obj.ActiveFaceAlpha;
