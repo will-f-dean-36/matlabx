@@ -121,7 +121,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                 case 'extend'
                     obj.addToSelection(ID, 'Emit', true);
                 otherwise
-                    obj.setSelection(ID, 'Emit', true);
+                    obj.setActive(ID);
             end    
         end
 
@@ -221,22 +221,21 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
             id = obj.BoxIds(idx);
             obj.SelectedBoxIds(obj.SelectedBoxIds == id) = [];
 
+
             % reset ActiveBoxIdx if necessary
-            if ~isempty(obj.ActiveBoxIdx) && obj.ActiveBoxIdx == obj.nBoxes
+            if idx == obj.ActiveBoxIdx
                 obj.ActiveBoxIdx = [];
             end
 
+            % delete
             delete(obj.BoxROI(idx));
             obj.BoxROI(idx) = [];
             obj.BoxCenters(idx,:) = [];
             obj.BoxIds(idx) = [];
 
-            % repair active idx if needed (best-effort)
-            if ~isempty(obj.SelectedBoxIds)
-                obj.ActiveBoxIdx = obj.idxOfId(obj.SelectedBoxIds(1));
-            end
+            %obj.applySelectionHighlights();
 
-            obj.applySelectionHighlights();
+            % notify
             obj.emitSelectionChanged();
 
         end
@@ -262,15 +261,26 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                     end
         
                 otherwise
-                    obj.setSelection(id, 'Emit', true);
+                    %obj.setSelection(id, 'Emit', true);
+                    obj.setActive(id);
             end
         
             % prime drag only for normal click (single select)
-            if obj.Host.ParentFig.SelectionType == "normal"
+            if obj.Host.ParentFig.SelectionType == "normal" && obj.Enabled
                 obj.Host.setMode('PrimedForDrag', true);
             end
         end
 
+        function setActive(obj, id)
+            obj.ActiveBoxIdx = obj.idxOfId(id);
+        
+            obj.applySelectionHighlights();
+
+            if ~isempty(obj.BoxActivatedFcn)
+                obj.BoxActivatedFcn(obj, struct('ID', id));
+            end
+
+        end
 
         function setSelection(obj, id, opts)
             arguments
@@ -279,20 +289,10 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                 opts.Emit (1,1) logical = false
             end
 
-            id = string(id);
             obj.SelectedBoxIds = id;
-            obj.ActiveBoxIdx = obj.idxOfId(id);
-        
+
             obj.applySelectionHighlights();
 
-
-            % testing below
-            if ~isempty(obj.BoxActivatedFcn)
-                obj.BoxActivatedFcn(obj, struct('ID', id));
-            end
-            % end testing
-
-        
             if opts.Emit
                 obj.emitSelectionChanged();
             end
@@ -306,18 +306,11 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                 opts.Emit (1,1) logical = false
             end
 
-            % id = string(id);
             if ~ismember(id, obj.SelectedBoxIds)
                 obj.SelectedBoxIds(end+1) = id;
             end
-            obj.ActiveBoxIdx = obj.idxOfId(id);
-            obj.applySelectionHighlights();
 
-            % testing below
-            if ~isempty(obj.BoxActivatedFcn)
-                obj.BoxActivatedFcn(obj, struct('ID', id));
-            end
-            % end testing
+            obj.applySelectionHighlights();
 
             if opts.Emit
                 obj.emitSelectionChanged();
@@ -331,31 +324,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                 opts.Emit (1,1) logical = false
             end
 
-            % id = string(id);
             obj.SelectedBoxIds(obj.SelectedBoxIds == id) = [];
-
-
-            % active box was deselected
-            if obj.idxOfId(id) == obj.ActiveBoxIdx
-                % some boxes are still selected
-                if ~isempty(obj.SelectedBoxIds)
-                    % make the last one active
-                    newID = obj.SelectedBoxIds(end);
-                    obj.ActiveBoxIdx = obj.idxOfId(newID);
-                else
-                    % no selection -> no active box
-                    newID = [];
-                    obj.ActiveBoxIdx = [];
-                end
-
-                % testing below
-                if ~isempty(obj.BoxActivatedFcn)
-                    obj.BoxActivatedFcn(obj, struct('ID', newID));
-                end
-                % end testing
-
-            end
-
             obj.applySelectionHighlights();
 
             if opts.Emit
@@ -372,6 +341,11 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                 end
             end
 
+            % apply active highlight
+            if ~isempty(obj.ActiveBoxIdx)
+                obj.BoxROI(obj.ActiveBoxIdx).ActiveHighlight = 'on';
+            end
+
             % apply selected highlights
             if isempty(obj.SelectedBoxIds), return; end
             for i = 1:numel(obj.SelectedBoxIds)
@@ -379,11 +353,6 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                 if ~isempty(idx) && idx>=1 && idx<=numel(obj.BoxROI) && isvalid(obj.BoxROI(idx))
                     obj.BoxROI(idx).SelectionHighlight = 'on';
                 end
-            end
-
-            % apply active highlight
-            if ~isempty(obj.ActiveBoxIdx)
-                obj.BoxROI(obj.ActiveBoxIdx).ActiveHighlight = 'on';
             end
 
         end
@@ -557,12 +526,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
             ids = string(ids);
             ids = ids(ismember(ids, obj.BoxIds));
             obj.SelectedBoxIds = ids(:).';
-            if ~isempty(obj.SelectedBoxIds)
-                obj.ActiveBoxIdx = obj.idxOfId(obj.SelectedBoxIds(1));
-            else
-                obj.ActiveBoxIdx = [];
-            end
-        
+
             obj.applySelectionHighlights();
         
             if opts.Emit
@@ -573,6 +537,15 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
 
         function ids = getSelectedBoxIDs(obj)
             ids = obj.SelectedBoxIds;
+        end
+
+        function clearBoxSelection(obj)
+            obj.SelectedBoxIds = [];
+            obj.applySelectionHighlights();
+        end
+
+        function setActiveBoxID(obj,id)
+            obj.setActive(id);
         end
 
 
