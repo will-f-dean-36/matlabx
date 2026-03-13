@@ -259,6 +259,9 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                     else
                         obj.addToSelection(id, 'Emit', true);
                     end
+                case 'open'
+                    %obj.clearBoxSelection();
+                    obj.setSelectedBoxIDs("","Emit",true);
         
                 otherwise
                     %obj.setSelection(id, 'Emit', true);
