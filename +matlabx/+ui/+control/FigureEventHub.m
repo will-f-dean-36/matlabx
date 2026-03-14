@@ -85,7 +85,7 @@ classdef FigureEventHub < handle
             % make sure registrants implement required methods
             requiredMethods = obj.getRequiredMethods();
 
-            for i = numel(requiredMethods)
+            for i = 1:numel(requiredMethods)
                 if ~ismethod(h,requiredMethods{i})
                     error('Registrant missing required method: %s',requiredMethods{i});
                 end
@@ -294,8 +294,6 @@ classdef FigureEventHub < handle
             fprintf('\n');
         end
 
-
-
     end
 
 
@@ -314,13 +312,6 @@ classdef FigureEventHub < handle
                 };
         end
 
-
-
-
-
     end
-
-
-
 
 end
