@@ -41,29 +41,32 @@ classdef CommandRouter < matlab.ui.componentcontainer.ComponentContainer
         end
 
         % FigureEventHub hook: decide if we claim this event
-        function tf = matches(obj, ~, ~, evt)
-            tf = obj.Enabled && ...
-                 isa(evt, 'matlab.ui.eventdata.KeyData') && ...
-                 isKey(obj.HotkeyFcnDict, lower(string(evt.Key)));
+        function tf = matches(obj, E)
+            tf = ...
+                obj.Enabled && ...
+                E.isKeyEvent() && ...
+                strlength(E.Key) > 0 && ...
+                isKey(obj.HotkeyFcnDict, E.Key);
         end
 
         % FigureEventHub hook: handle claimed event
-        function onKeyPress(obj, evt, ~)
-            key = lower(string(evt.Key));
-
+        function onKeyPress(obj, E)
+            key = E.Key;
             if isKey(obj.HotkeyFcnDict, key)
                 func = obj.HotkeyFcnDict(key);
                 func(obj, key);
+                E.markHandled();
             end
         end
 
         % No-ops so FigureEventHub doesn't error
-        function onDown(~, ~, ~), end
-        function onUp(~, ~, ~), end
-        function onMove(~, ~, ~), end
-        function onScroll(~, ~, ~), end
-        function onEnter(~, ~, ~), end
-        function onLeave(~, ~, ~), end
+        function onDown(~, ~),      end
+        function onUp(~, ~),        end
+        function onMove(~, ~),      end
+        function onScroll(~, ~),    end
+        function onKey(~, ~),       end
+        function onEnter(~, ~),     end
+        function onLeave(~, ~),     end
 
     end
 

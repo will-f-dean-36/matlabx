@@ -148,10 +148,10 @@ classdef DrawRectangle < matlabx.ui.widgets.ImageAxesTool
     %% Active event hooks (only when Enabled==true && IsInterceptor==true)
     methods
 
-        function onDown(obj, ~, tgt)
+        function onDown(obj, E)
 
             % skip toolbar buttons
-            if ~isempty(ancestor(tgt,'matlab.ui.container.Toolbar')) || isa(tgt,'matlab.graphics.shape.internal.Button')
+            if ~isempty(ancestor(E.Target,'matlab.ui.container.Toolbar')) || isa(E.Target,'matlab.graphics.shape.internal.Button')
                 return
             end
 
@@ -176,7 +176,7 @@ classdef DrawRectangle < matlabx.ui.widgets.ImageAxesTool
         end
 
 
-        function onUp(obj, ~, ~)
+        function onUp(obj, ~)
 
             % we were drawing a new rectangle before mouse up
             if obj.Host.Mode.DrawingRectangle
@@ -191,11 +191,11 @@ classdef DrawRectangle < matlabx.ui.widgets.ImageAxesTool
     %% Passive event hooks (only when Installed==true && IsDistractor==true)
     methods
 
-        function tf = onDistractMove(obj,~,tgt)
+        function tf = onDistractMove(obj,E)
             tf = false;
 
             % cursor target (parent) is our obj.RectROI
-            if isa(tgt.Parent,'images.roi.Rectangle') && strcmp(tgt.Parent.Tag,'RectROI')
+            if isa(E.Target.Parent,'images.roi.Rectangle') && strcmp(E.Target.Parent.Tag,'RectROI')
                 obj.Host.setMode('HoverRectangle',true);
             else % cursor target is anything else
                 obj.Host.setMode('HoverRectangle',false);

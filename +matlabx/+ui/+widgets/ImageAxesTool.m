@@ -45,12 +45,13 @@ classdef ImageAxesTool < handle
         CapturesMove (1,1) logical = false      % this tool can capture 'Move' events when Enabled=true
         CapturesUp (1,1) logical = false        % this tool can capture 'Up' events when Enabled=true
         CapturesScroll (1,1) logical = false    % this tool can capture 'Scroll' events when Enabled=true
-        CapturesKeyPress (1,1) logical = false  % this tool can capture 'KeyPress' events when Enabled=true
+        CapturesKey (1,1) logical = false       % this tool can capture 'Key' events when Enabled=true
 
         DistractsDown (1,1) logical = false     % this tool will temporarily capture 'Down' events
         DistractsMove (1,1) logical = false     % this tool will temporarily capture 'Move' events
         DistractsUp (1,1) logical = false       % this tool will temporarily capture 'Up' events
         DistractsScroll (1,1) logical = false   % this tool will temporarily capture 'Scroll' events
+        DistractsKey (1,1) logical = false      % this tool will temporarily capture 'Key' events
 
         L event.listener                        % listens to host events
     end
@@ -91,11 +92,12 @@ classdef ImageAxesTool < handle
             p.addParameter('CapturesMove', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('CapturesUp', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('CapturesScroll', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('CapturesKeyPress', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('CapturesKey', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('DistractsDown', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('DistractsMove', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('DistractsUp', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('DistractsScroll', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('DistractsKey', false, @(x)islogical(x)&&isscalar(x));
             p.parse(varargin{:});
             obj.Tooltip = p.Results.Tooltip;
             obj.Icon = p.Results.Icon;
@@ -110,11 +112,12 @@ classdef ImageAxesTool < handle
             obj.CapturesMove = p.Results.CapturesMove;
             obj.CapturesUp = p.Results.CapturesUp;
             obj.CapturesScroll = p.Results.CapturesScroll;
-            obj.CapturesKeyPress = p.Results.CapturesKeyPress;
+            obj.CapturesKey = p.Results.CapturesKey;
             obj.DistractsDown = p.Results.DistractsDown;
             obj.DistractsMove = p.Results.DistractsMove;
             obj.DistractsUp = p.Results.DistractsUp;
             obj.DistractsScroll = p.Results.DistractsScroll;
+            obj.DistractsKey = p.Results.DistractsKey;
 
             % add listener for Host CDataChanged event
             obj.L(1) = addlistener(obj.Host,'CDataChanged',@(~,evt) obj.onHostCDataChanged(evt));
@@ -214,13 +217,14 @@ classdef ImageAxesTool < handle
         function onMove(~,~,~),     end
         function onUp(~,~,~),       end
         function onScroll(~,~,~),   end
-        function onKeyPress(~,~,~), end
+        function onKey(~,~,~),      end
 
         % Pointer routing (only Distractors get these)
         function onDistractDown(~,~,~),   end
         function onDistractMove(~,~,~),   end
         function onDistractUp(~,~,~),     end
         function onDistractScroll(~,~,~), end
+        function onDistractKey(~,~,~),    end
 
         % Adjust pointer shape (override in subclass to set pointer - if empty, Host will set)
         function pointer = getPreferredPointer(~), pointer = ''; end
@@ -238,11 +242,11 @@ classdef ImageAxesTool < handle
     methods
 
         function value = get.IsInterceptor(obj)
-            value = obj.CapturesDown || obj.CapturesMove || obj.CapturesUp || obj.CapturesScroll || obj.CapturesKeyPress;
+            value = obj.CapturesDown || obj.CapturesMove || obj.CapturesUp || obj.CapturesScroll || obj.CapturesKey;
         end
 
         function value = get.IsDistractor(obj)
-            value = obj.DistractsDown || obj.DistractsMove || obj.DistractsUp || obj.DistractsScroll;
+            value = obj.DistractsDown || obj.DistractsMove || obj.DistractsUp || obj.DistractsScroll || obj.DistractsKey;
         end
 
     end

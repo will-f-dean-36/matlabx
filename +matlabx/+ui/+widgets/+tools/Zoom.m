@@ -71,7 +71,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
                 'CapturesMove',     true, ...
                 'CapturesDown',     true, ...
                 'CapturesScroll',   true, ...
-                'CapturesKeyPress', true, ...
+                'CapturesKey',      true, ...
                 'DistractsMove',    false, ...
                 'DistractsDown',    true);
             % set up view box patches
@@ -152,7 +152,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
     %% Active event hooks (only when Enabled==true && IsInterceptor==true)
     methods
 
-        function onDown(obj, ~, ~)
+        function onDown(obj, E)
 
             obj.printStatus(sprintf('%s.onDown()\n',obj.Name));
 
@@ -160,7 +160,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
                 return
             end
 
-            switch obj.Host.ParentFig.SelectionType
+            switch E.SelectionType
                 case 'normal'
                     obj.increaseZoom();
                 case 'alt'
@@ -171,7 +171,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
 
         end
 
-        function onScroll(obj, evt, ~)
+        function onScroll(obj, E)
             % keep track of calls to control how many calls = one zoom increment
             persistent callCount
 
@@ -190,27 +190,27 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
             callCount = 0;
 
             % Adjust zoom level based on scroll direction
-            if evt.VerticalScrollCount < 0
+            if E.VerticalScrollCount < 0
                 obj.increaseZoom();
-            elseif evt.VerticalScrollCount > 0
+            elseif E.VerticalScrollCount > 0
                 obj.decreaseZoom();
             end
         end
 
-        function onMove(obj, ~, ~)
+        function onMove(obj, ~)
             obj.printStatus(sprintf('%s.onMove()\n',obj.Name));
             if obj.Host.Mode.Pan
                 obj.moveViewToCursor();
             end
         end
 
-        function onKeyPress(obj, evt, tgt)
-            obj.printStatus(sprintf('%s.onKeyPress()\n',obj.Name));
+        function onKey(obj, E)
+            obj.printStatus(sprintf('%s.onKey()\n',obj.Name));
             match = true;
 
             % parse event data
             % try modifier+character first
-            keyStr = strip(strjoin([evt.Modifier,{evt.Character}],'|'),'|');
+            keyStr = strip(strjoin([E.Modifier,{E.Character}],'|'),'|');
             % fprintf('Zoom: %s\n',keyStr)
 
             switch keyStr
@@ -224,7 +224,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
 
             % no match found -> try modifier+key
             if ~match
-                keyStr = strip(strjoin([evt.Modifier,{evt.Key}],'|'),'|');
+                keyStr = strip(strjoin([E.Modifier,{E.Key}],'|'),'|');
                 switch keyStr
                     case {'escape'} % escape | disable tool
                         obj.disable();
@@ -241,7 +241,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
     %% Passive event hooks (only when Installed==true && IsDistractor==true)
     methods
 
-        function tf = onDistractDown(obj,~,~)
+        function tf = onDistractDown(obj,~)
             obj.printStatus(sprintf('%s.onDistractDown()\n',obj.Name));
             tf = false;
         end

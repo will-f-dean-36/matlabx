@@ -596,65 +596,32 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     methods
 
         % determine whether this instance should claim event from FigureEventHub
-        function tf = matches(obj, tgt, kind, ~)
-            % tf = matches(obj, tgt, kind, evt)
-            % obj: this component
-            % tgt: hittest result from FigureEventHub that we are checking for a match to this component
-            % kind: the specific kind of mouse event (i.e. 'move', 'down', 'up', 'scroll', or 'key')
-            % evt: event data associated with the event
+        function tf = matches(obj, E)
+            % E.Target: hittest result from FigureEventHub that we are checking for a match to this component
+            % E.Kind: the specific kind of mouse event (i.e. 'Move', 'Down', 'Up', 'Scroll', or 'Key')
+            % E.RawEvent: event data associated with the event
 
-            % get the ancestor axes of tgt
-            ancestorAx = ancestor(tgt,'matlab.ui.control.UIAxes');
-            % empty -> return false
-            if isempty(ancestorAx), tf = false; return, end
+            % true if child of UIAxes in this ImageAxes
+            tf = obj.isChild(E.Target) && obj.isAxesChild(E.Target);
 
-            % axes Tag does not match Name of this ImageAxes -> return false
-            if ~strcmp(ancestorAx.Tag,obj.Name), tf = false; return, end
-
-            % event hit the toolbar
-            if ~isempty(ancestor(tgt,'matlab.ui.controls.AxesToolbar'))
-                % get toolbar button under cursor (if it exists)
-
-                % look for "state" buttons first
-                btn = ancestor(tgt,'matlab.ui.controls.ToolbarStateButton');
-
-                % none found -> look for "push" buttons
-                if isempty(btn)
-                    btn = ancestor(tgt,'matlab.ui.controls.ToolbarPushButton');
-                end
-
-                % button exists and event kind is 'move' -> return true (otherwise return false)
-                if ~isempty(btn) && strcmp(kind,'move')
-                    tf = true;
-                else
-                    tf = false;
-                end
-
-                return
+            if tf && obj.isToolbarButtonChild(E.Target)
+                tf = strcmp(E.Kind,'Move');
             end
-
-            % return true for anything else that belongs to *this* ImageAxes instance
-            ia = ancestor(tgt,'matlabx.ui.widgets.ImageAxes');
-            tf = (ia == obj);
         end
 
-        function onDown(obj, evt, tgt)
-            skipInterceptor = obj.routeToDistractors(evt,tgt,'Down');
-            if skipInterceptor, return; end
-
-            % get highest priority DownInterceptor
-            t = obj.getPriorityInterceptor('Down');
-            % if tool exists, forward this event to the tool
-            if ~isempty(t), t.onDown(evt, tgt); end
+        function onDown(obj, E)
+            obj.routeEventToTools(E);
         end
 
-        function onMove(obj, evt, tgt)
+        function onMove(obj, E)
+            disp(E.CurrentAxes.Tag)
+
             % get the ancestor toolbar button clicked, if it exists
             % look for "state" buttons first
-            btn = ancestor(tgt,'matlab.ui.controls.ToolbarStateButton');
+            btn = ancestor(E.Target,'matlab.ui.controls.ToolbarStateButton');
             % none found -> look for "push" buttons
             if isempty(btn)
-                btn = ancestor(tgt,'matlab.ui.controls.ToolbarPushButton');
+                btn = ancestor(E.Target,'matlab.ui.controls.ToolbarPushButton');
             end
 
             % button exists
@@ -663,56 +630,24 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 obj.BottomLabel.String = sprintf(' %s',btn.Tooltip); return
             end
 
-            skipInterceptor = obj.routeToDistractors(evt,tgt,'Move');
-            if skipInterceptor, return; end
+            obj.routeEventToTools(E);
 
-            % get highest priority MoveInterceptor
-            t = obj.getPriorityInterceptor('Move');
-            % if tool exists, forward this event to the tool
-            if ~isempty(t), t.onMove(evt, tgt); end
             % Host maintenance (update label/pointer/etc. on move if desired)
             obj.onMouseMove();
         end
 
-        function onUp(obj, evt, tgt)
-            skipInterceptor = obj.routeToDistractors(evt,tgt,'Up');
-            if skipInterceptor, return; end
-
-            % get highest priority UpInterceptor
-            t = obj.getPriorityInterceptor('Up');
-            % if tool exists, forward this event to the tool
-            if ~isempty(t), t.onUp(evt, tgt); end
+        function onUp(obj, E)
+            obj.routeEventToTools(E);
         end
 
-        function onScroll(obj, evt, tgt)
-            skipInterceptor = obj.routeToDistractors(evt,tgt,'Scroll');
-            if skipInterceptor, return; end
-
-            % get highest priority ScrollInterceptor
-            t = obj.getPriorityInterceptor('Scroll');
-            % if tool exists, forward this event to the tool
-            if ~isempty(t), t.onScroll(evt, tgt); end
+        function onScroll(obj, E)
+            obj.routeEventToTools(E);
         end
 
-        function onKeyPress(obj, evt, tgt)
-            % get highest priority KeyPressInterceptor
-            t = obj.getPriorityInterceptor('KeyPress');
-            % if tool exists, forward this event to the tool
-            if ~isempty(t), t.onKeyPress(evt, tgt); end
+        function onKey(obj, E)
+            obj.routeEventToTools(E);
 
-
-            % fprintf('matlabx.ui.widgets.ImageAxes.onKeyPressed()\n');
-            % fprintf('Character: %s\n',evt.Character)
-            % fprintf('Key: %s\n',evt.Key)
-            % fprintf('Unicode: %d\n',double(evt.Character))
-            % 
-            % n = 1;
-            % for m = evt.Modifier
-            %     fprintf('Modifier %i: %s\n',n,m{1});
-            %     n = n+1;
-            % end
-
-            switch evt.Key
+            switch E.Hotkey
                 case 'rightarrow'
                     obj.nextChannel();
                 case 'leftarrow'
@@ -720,16 +655,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 case {'uparrow','downarrow'}
                     obj.toggleComposite();
             end
-
-            % fprintf('%s\n',strjoin([evt.Modifier,{evt.Character}],'|'))
         end
 
-        function onEnter(obj,~,~)
+        function onEnter(obj,~)
             obj.BottomLabel.Visible = "on";
             % no-op to tools by default
         end
 
-        function onLeave(obj,~,~)
+        function onLeave(obj,~)
             % hide label
             obj.BottomLabel.Visible = "off";
             % reset pointer to arrow
@@ -737,6 +670,40 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 obj.ParentFig.Pointer = 'arrow';
             end
         end
+
+    end
+
+    %% Private Hub helpers
+    methods (Access=private)
+
+        function tf = isChild(obj,h)
+            % true if h is child of this ImageAxes
+            ia = ancestor(h,'matlabx.ui.widgets.ImageAxes');
+
+            if isempty(ia)
+                tf = false;
+            else
+                tf = ia == obj;
+            end
+        end
+
+        function tf = isAxesChild(obj,h)
+            % true if h is child of UIAxes belonging to this ImageAxes
+            ax = ancestor(h,'matlab.ui.control.UIAxes');
+            tf = ~isempty(ax) && strcmp(ax.Tag,obj.Name);
+        end
+
+        function tf = isToolbarButtonChild(~,h)
+            % true if h is child of ToolbarStateButton or ToolbarPushButton (in any axes)
+            % btn = ancestor(h,'matlab.ui.controls.ToolbarStateButton');
+            % if isempty(btn)
+            %     btn = ancestor(h,'matlab.ui.controls.ToolbarPushButton');
+            % end
+
+            tf = ~isempty(ancestor(h,'matlab.ui.controls.ToolbarStateButton')) || ...
+                ~isempty(ancestor(h,'matlab.ui.controls.ToolbarPushButton'));
+        end
+
 
     end
 
@@ -754,11 +721,19 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     %% Tool event routing
     methods
 
-        function tf = routeToDistractors(obj,evt,tgt,eventType)
-        % eventType: 'Move' | 'Down' | 'Up' | 'Scroll
+        function routeEventToTools(obj,E)
+            skipInterceptor = obj.routeToDistractors(E);
+            if skipInterceptor, return; end
 
+            % get highest priority Interceptor for event kind
+            t = obj.getPriorityInterceptor(E.Kind);
+            % forward event to the tool
+            if ~isempty(t), t.("on"+E.Kind)(E); end
+        end
+
+        function tf = routeToDistractors(obj,E)
             % cell array of Distractors for this eventType, sorted by Priority
-            distractors = obj.getPriorityDistractors(eventType);
+            distractors = obj.getPriorityDistractors(E.Kind);
 
             % whether to bypass the active Interceptor after Distraction event
             tf = false;
@@ -767,7 +742,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             if isempty(distractors), return; end
 
             for i = 1:numel(distractors)
-                tf = distractors{i}.(['onDistract',eventType])(evt,tgt) | tf;
+                tf = distractors{i}.("onDistract"+E.Kind)(E) | tf;
             end
 
         end
@@ -1038,7 +1013,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % no Installed tools, exit early
             if isempty(toolsCell), tool = []; return; end
             % get logical idx of Installed, Enabled tools that can Intercept the given eventType
-            idx = cellfun(@(t) t.Enabled & t.(['Captures',eventType]) ,toolsCell,'UniformOutput',true);
+            idx = cellfun(@(t) t.Enabled & t.("Captures"+eventType) ,toolsCell,'UniformOutput',true);
             % no matching tools, exit early
             if ~any(idx), tool = []; return; end
             % sort the tools by priority (descending order)
@@ -1054,7 +1029,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % no Installed tools, exit early
             if isempty(toolsCell), return; end
             % get logical idx of Installed tools that can Distract the given eventType
-            idx = cellfun(@(t) t.(['Distracts',eventType]),toolsCell,'UniformOutput',true);
+            idx = cellfun(@(t) t.("Distracts"+eventType),toolsCell,'UniformOutput',true);
             % no matching tools, exit early
             if ~any(idx), toolsCell = {}; return; end
             % sort the tools by priority (descending order)
@@ -1546,14 +1521,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     %% Hidden entrypoint for debugging
     methods (Hidden)
-
         function DEBUG_(obj)
-
             debug
-
-
         end
-
     end
 
 
@@ -1605,9 +1575,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         % return names of all classes in matlabx.ui.widgets.tools
         function names = getToolClassNames()
             % get list of tool class names in matlabx.ui.widgets.tools using matlab.metadata.Namespace
-
-            % string array
-            % names = string({matlab.metadata.Namespace.fromName("matlabx.ui.widgets.tools").ClassList.Name})';
 
             % cell array of char vectors
             names = {matlab.metadata.Namespace.fromName("matlabx.ui.widgets.tools").ClassList.Name}';

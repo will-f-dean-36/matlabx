@@ -635,11 +635,11 @@ classdef uirangeslidereditfield < matlab.ui.componentcontainer.ComponentContaine
     %% Hub-facing event handlers
     methods
 
-        function tf = matches(obj, tgt, ~, ~)
+        function tf = matches(obj, E)
 
-            tgtAncestor = ancestor(tgt, 'matlab.ui.control.UIAxes');
+            tgtAncestor = ancestor(E.Target, 'matlab.ui.control.UIAxes');
 
-            if isempty(tgtAncestor) || isa(tgt,'matlab.ui.control.UIAxes')
+            if isempty(tgtAncestor) || isa(E.Target,'matlab.ui.control.UIAxes')
                 tf = false;
                 return
             end
@@ -647,16 +647,12 @@ classdef uirangeslidereditfield < matlab.ui.componentcontainer.ComponentContaine
             % true if sliderThumbAxes is the ancestor of the tgt
             tf = obj.sliderThumbAxes == tgtAncestor;
 
-            % tf = (obj.sliderThumbAxes == ancestor(tgt, 'matlab.ui.control.UIAxes'));
-            % 
-            % % not true if tgt is the actual axes
-            % tf = tf && ~isa(tgt,'matlab.ui.control.UIAxes');
         end
 
-        function onDown(obj, ~, tgt)
+        function onDown(obj, E)
 
-            if isprop(tgt, 'ID')
-                thumbIdx = tgt.ID;
+            if isprop(E.Target, 'ID')
+                thumbIdx = E.Target.ID;
             else
                 cursorX = obj.sliderThumbAxes.CurrentPoint(1,1);
                 [~, thumbIdx] = min(abs(obj.Value - cursorX));
@@ -667,15 +663,15 @@ classdef uirangeslidereditfield < matlab.ui.componentcontainer.ComponentContaine
             obj.moveActiveThumbToCursor();
         end
 
-        function onMove(obj, ~, tgt)
+        function onMove(obj, E)
             if obj.isSliding
                 obj.moveActiveThumbToCursor();
             else
-                obj.handleHover(tgt);
+                obj.handleHover(E.Target);
             end
         end
 
-        function onUp(obj, ~, ~)
+        function onUp(obj, ~)
             % Stop sliding and restore states
             obj.isSliding = false;
             % Deselect the active thumb (return to default size)
@@ -688,18 +684,15 @@ classdef uirangeslidereditfield < matlab.ui.componentcontainer.ComponentContaine
             obj.onValueChanged();
         end
 
-        function onScroll(~, ~, ~)
-            % No scroll behavior
-        end
+        % No-ops so FigureEventHub doesn't error
+        function onScroll(~, ~),    end
+        function onKey(~, ~),       end
 
-        % onKeyPress(obj,evt,tgt)
-        function onKeyPress(~, ~, ~), end
-
-        function onEnter(obj, ~, ~)
+        function onEnter(obj,~)
             obj.parentFig.Pointer = 'hand';
         end
 
-        function onLeave(obj, ~, ~)
+        function onLeave(obj,~)
             obj.clearHover();
             obj.parentFig.Pointer = 'arrow';
         end

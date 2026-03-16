@@ -96,7 +96,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
     %% Active event hooks (only when Enabled==true && IsInterceptor==true)
     methods
 
-        function onDown(obj, ~, ~)
+        function onDown(obj, E)
 
             H = obj.Host;
             XY = H.cursorPosition;
@@ -117,7 +117,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
             end
 
             % selection behavior: normal replaces, extend adds
-            switch obj.Host.ParentFig.SelectionType
+            switch E.SelectionType
                 case 'extend'
                     obj.addToSelection(ID, 'Emit', true);
                 otherwise
@@ -130,11 +130,11 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
     %% Passive event hooks (only when Installed==true && IsDistractor==true)
     methods
 
-        function tf = onDistractDown(obj,~,tgt)
+        function tf = onDistractDown(obj,E)
             obj.printStatus(sprintf('%s.onDistractDown()\n',obj.Name));
 
             % ROIBox clicks handled by patch (drag/delete)
-            if isprop(tgt,'ID') && obj.hasBox(tgt.ID)
+            if isprop(E.Target,'ID') && obj.hasBox(E.Target.ID)
                 tf = true;
             else
                 tf = false;
@@ -142,7 +142,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
         end
 
 
-        function tf = onDistractMove(obj,~,tgt)
+        function tf = onDistractMove(obj,E)
             tf = false;
 
             % if we are primed for drag (button down on box with no cursor movement)
@@ -160,9 +160,9 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
             end
 
             % cursor target is ROIBox patch
-            if isa(tgt,'matlab.graphics.primitive.Patch') && strcmp(get(tgt,'Tag'),'ROIBox')
+            if isa(E.Target,'matlab.graphics.primitive.Patch') && strcmp(get(E.Target,'Tag'),'ROIBox')
                 % turn HoverHighlight mode 'on' on the box (get idx from custom patch property, ID)
-                obj.startHoverByIdx(obj.idxOfId(tgt.ID));
+                obj.startHoverByIdx(obj.idxOfId(E.Target.ID));
             else % cursor target is anything else
                 % turn off HoverHighlight mode for box corresponding to ActiveHoverIdx, if it exists
                 obj.stopHover();
@@ -170,7 +170,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
 
         end
 
-        function tf = onDistractUp(obj,~,~)
+        function tf = onDistractUp(obj,~)
             tf = false;
 
             if obj.Host.Mode.PrimedForDrag
@@ -449,7 +449,6 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
             % set HoverBox Mode to off
             obj.Host.setMode('HoverBox', false);
         end
-
 
     end
 

@@ -110,7 +110,7 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
     methods
 
         % determine whether this instance should claim event from FigureEventHub
-        function tf = matches(~,tgt,~,~)
+        function tf = matches(~,E)
             % tf = matches(obj, tgt, kind, evt)
             % obj: this component
             % tgt: hittest result from FigureEventHub that we are checking for a match to this component
@@ -118,12 +118,11 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
             % evt: event data associated with the event
 
             % only return true if target Tag='TitleBar'
-            tf = strcmp(tgt.Tag,'TitleBar');
+            tf = isprop(E.Target,'Tag') && strcmp(E.Target.Tag,'TitleBar');
         end
 
-        % onDown(obj,evt,tgt)
-        function onDown(obj,~,tgt)
-            ID = obj.getTargetID(tgt);
+        function onDown(obj,E)
+            ID = obj.getTargetID(E.Target);
             item = obj.Items(obj.idxOfID(ID));
             % flip expanded state when title bar is clicked
             if item.expanded
@@ -133,29 +132,22 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
-        % onMove(obj,evt,tgt)
-        function onMove(obj,~,tgt)
-            ID = obj.getTargetID(tgt);
+        function onMove(obj,E)
+            ID = obj.getTargetID(E.Target);
             obj.updateHover(obj.idxOfID(ID));
         end
 
-        % onUp(obj,evt,tgt)
-        function onUp(~,~,~), end
-
-        % onScroll(obj,evt,tgt)
-        function onScroll(~, ~, ~), end
-
-        % onKeyPress(obj,evt,tgt)
-        function onKeyPress(~, ~, ~), end
+        % No-ops so FigureEventHub doesn't error
+        function onUp(~, ~),        end
+        function onScroll(~, ~),    end
+        function onKey(~, ~),       end
         
-        % onEnter(obj,evt,tgt)
-        function onEnter(obj,~,tgt)
-            ID = obj.getTargetID(tgt);
+        function onEnter(obj,E)
+            ID = obj.getTargetID(E.Target);
             obj.updateHover(obj.idxOfID(ID));
         end
 
-        % onLeave(obj,evt,tgt)
-        function onLeave(obj,~,~), obj.updateHover([]); end
+        function onLeave(obj,~), obj.updateHover([]); end
 
         function updateHover(obj,idx)
             % transfers hover mode to item specified by hoverIdx
