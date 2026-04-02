@@ -440,7 +440,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
             if isempty(obj.ActiveHoverIdx), return; end
 
             % set HoverHighlight off on current active box (if valid)
-            if isvalid(obj.BoxROI(obj.ActiveHoverIdx))
+            if obj.ActiveHoverIdx <= obj.nBoxes && isvalid(obj.BoxROI(obj.ActiveHoverIdx))
                 obj.BoxROI(obj.ActiveHoverIdx).HoverHighlight = 'off';
             end
 
