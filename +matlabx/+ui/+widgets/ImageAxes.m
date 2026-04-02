@@ -58,28 +58,21 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     %% CData management
 
-    % Public properties (some with private backing)
     properties (Dependent, AbortSet)
         CLim                (1,2) double
         CanMerge            (1,1) logical
-
-        CData               (:,:,:) {mustBeA(CData,{'double','single','uint8','uint16','logical','cell'})}
+    
+        CData               {mustBeA(CData,{'double','single','uint8','uint16','logical','cell'})}
         CLimMode            (1,:) char
         ChannelIdx          (1,1) double
         ShowComposite       (1,1) matlab.lang.OnOffSwitchState
-        ChannelColors       (1,:) cell {mustBeMember(ChannelColors,{'cyan','magenta','yellow','red','green','blue'})} = {}
+        ChannelColors       (1,:) cell
         ChannelColormaps    (1,:) cell
         ChannelColorMode    (1,:) char {mustBeMember(ChannelColorMode,{'colors','luts'})}
     end
 
-    properties (Access=private)
-        CData_              (:,:,:) = matlabx.ui.widgets.ImageAxes.placeholderImage;
-        CLimMode_           (1,:) char {mustBeMember(CLimMode_,{'auto','manual'})} = 'auto'
-        ChannelIdx_         (1,1) double = 1
-        ShowComposite_      (1,1) matlab.lang.OnOffSwitchState = 'off'
-        ChannelColors_      (1,:) cell {mustBeMember(ChannelColors_,{'cyan','magenta','yellow','red','green','blue'})} = {}
-        ChannelColormaps_   (1,:) cell = {}
-        ChannelColorMode_   (1,:) char {mustBeMember(ChannelColorMode_,{'colors','luts'})} = 'colors'
+    properties (Dependent)
+        ImageData
     end
 
     % read-only
@@ -88,22 +81,29 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         CDataType       (1,:) char {mustBeMember(CDataType,{'grayscale','rgb'})}
         CDataSize       (1,:) double
         CDataClass      (1,:) char {mustBeMember(CDataClass,{'double','single','uint8','uint16','logical',''})}
+        
+        nChannels           (1,1) double
+        MultiChannel        (1,1) matlab.lang.OnOffSwitchState
+        MultiChannelType    (1,:) {mustBeMember(MultiChannelType,{'grayscale','rgb','mixed','none'})}
     end
 
-    properties (SetAccess=private)
-        nChannels           (1,1) double = 1
-        MultiChannel        (1,1) matlab.lang.OnOffSwitchState = 'off'
-        MultiChannelType    (1,:) {mustBeMember(MultiChannelType,{'grayscale','rgb','mixed','none'})} = 'none'
-    end
-
-    % CData prop stores
     properties (Access=private)
-        CDataStore      (1,:) cell = {}
-        CLimStore       (1,:) cell = {}
-        CDataClassStore (1,:) cell = {}
-        CDataSizeStore  (1,:) cell = {}
-        CDataTypeStore  (1,:) cell = {}
-        CDataMapStore   (1,:) cell = {}
+        % small internal view state
+        ViewState_ struct = struct( ...
+            'ChannelIdx', 1, ...
+            'ShowComposite', false, ...
+            'CLimMode', 'auto', ...
+            'ChannelColorMode', 'colors');
+        % image data structure
+        ImageData_ (1,1) matlabx.image.ImageData = matlabx.image.ImageData(zeros(256,256,3))
+        % currently rendered source image (active channel or computed composite)
+        RenderSource_ (:,:,:) = matlabx.ui.widgets.ImageAxes.placeholderImage
+        % per-channel display state
+        ChannelDisplay_ (1,:) struct = struct( ...
+            'CLim', {}, ...
+            'ColorName', {}, ...
+            'Colormap', {}, ...
+            'DisplayMap', {})
     end
 
     %% UI/Graphics
@@ -125,14 +125,23 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         mainAxes matlab.ui.control.UIAxes
     end
 
+    %% Popup/temporary UI management
+
+    % popup windows
+    properties (Access=private, Transient, NonCopyable)
+        contrastTool (:,1) matlabx.app.SliderDialog
+    end
+
+    properties
+        contrastToolOpen (1,1) logical = false
+    end
+
     %% Derived properties (accessible to tools)
     properties (Access=?matlabx.ui.widgets.ImageAxesTool, Dependent)
         ParentFig
-
         ImageSize
         ImageWidth
         ImageHeight
-
         defaultXLim
         defaultYLim
         cursorPosition
@@ -283,16 +292,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 'HorizontalAlignment','left',...
                 'VerticalAlignment','top');
 
-
             % set default colormap
             obj.Colormap = gray;
 
-            % update CData prop stores
-            obj.setChannels(obj.CData_);
-
-            % initial UI sync
-            obj.refreshView();
-
+            % initialize display state from ImageData
+            obj.syncViewStateToImageData();
+            
+            % initial render
+            obj.syncRenderSourceToView();
         end
 
         function update(obj)
@@ -306,6 +313,13 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
+    methods (Access=private)
+        function tf = isNonEmptyText(~, x)
+            tf = (ischar(x) || (isstring(x) && isscalar(x))) && strlength(string(x)) > 0;
+        end
+    end
+
+
     %% Internal update helpers
     methods (Access=private)
 
@@ -316,62 +330,72 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function updateBottomLabelText(obj)
-
+        
             px = obj.activePixel;
-
+        
             if isempty(px), obj.BottomLabel.String ='Hover over image to interact'; return; end
-
-            % posStr = sprintf(' (X, Y)=(%0.f, %0.f)',px(1),px(2));
+        
             posStr = sprintf('Pixel: (%0.f,%0.f)',px(1),px(2));
-
-            switch obj.CDataType
+        
+            if obj.ViewState_.ShowComposite
+                activeData = obj.ImageData_.getChannelData(obj.ViewState_.ChannelIdx);
+                activeType = obj.ImageData_.getChannelType(obj.ViewState_.ChannelIdx);
+                activeClass = obj.ImageData_.getChannelClass(obj.ViewState_.ChannelIdx);
+            else
+                activeData = obj.CData;
+                activeType = obj.CDataType;
+                activeClass = obj.CDataClass;
+            end
+        
+            switch activeType
                 case 'grayscale'
-                    switch obj.CDataClass
+                    switch activeClass
                         case {'double','single'}
-                            valStr = sprintf('Intensity: %0.2f',obj.CData(px(2),px(1)));
+                            valStr = sprintf('Intensity: %0.2f', activeData(px(2),px(1)));
                         case {'uint8','uint16'}
-                            valStr = sprintf('Intensity: %i',obj.CData(px(2),px(1)));
+                            valStr = sprintf('Intensity: %i', activeData(px(2),px(1)));
                         case 'logical'
-                            valStr = sprintf('Value: %i',obj.CData(px(2),px(1)));
+                            valStr = sprintf('Value: %i', activeData(px(2),px(1)));
+                        otherwise
+                            valStr = '';
                     end
                 case 'rgb'
-                    switch obj.CDataClass
+                    switch activeClass
                         case {'double','single'}
-                            valStr = sprintf('RGB: [%0.2f, %0.2f, %0.2f]',obj.CData(px(2),px(1),1:3));
-                        case {'uint8'}
-                            valStr = sprintf('RGB: [%i, %i, %i]',obj.CData(px(2),px(1),1:3));
+                            valStr = sprintf('RGB: [%0.2f, %0.2f, %0.2f]', activeData(px(2),px(1),1:3));
+                        case {'uint8','uint16'}
+                            valStr = sprintf('RGB: [%i, %i, %i]', activeData(px(2),px(1),1:3));
+                        otherwise
+                            valStr = '';
                     end
+                otherwise
+                    valStr = '';
             end
-
-            % get cell array of installed tools, sorted by priority
+        
             tools = obj.prioritySortTools(obj.ToolRegistry);
-
-            % preallocate cell of info label char vectors
             txt = cell(1,numel(tools));
-
-
+        
             for i = 1:numel(tools)
-                % get info label for each tool
                 txt{i} = tools{i}.getLabelString();
             end
-
-            txt = [posStr,valStr,txt];
-
-            % remove empty entries
+        
+            txt = [posStr, valStr, txt];
             txt(ismember(txt,'')) = [];
-
-            % join each fragment with spaced pipe
             txt = strjoin(txt,' | ');
-
+        
             obj.BottomLabel.String = [' ',txt];
         end
 
+
         function updateTopLabelText(obj)
 
-            infoStr = obj.getImageInfoString();
+            %infoStr = obj.getImageInfoString();
+
+            sizeStr = obj.getImageSizeString();
+            bitDepthStr = obj.getImageBitDepthString();
             channelStr = obj.getChannelInfoStr();
 
-            txt = {infoStr,channelStr};
+            txt = {sizeStr,bitDepthStr,channelStr};
 
             % join each fragment with spaced pipe
             txt = strjoin(txt,' | ');
@@ -419,18 +443,16 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function updateColorbar(obj)
-            clim = obj.CLim;
-
             ticks = {};
             labels = {};
 
-            switch obj.CDataType
-                case 'grayscale'
-                    [ticks,labels] = matlabx.ui.widgets.ImageAxes.getColorbarTickLabels(obj.CDataClass,clim);
-                case 'rgb'
-                    if obj.ShowComposite
-                        [ticks,labels] = matlabx.ui.widgets.ImageAxes.getColorbarTickLabels(obj.CDataClassStore{obj.ChannelIdx},clim);
-                    end
+            idx = obj.ViewState_.ChannelIdx;
+            ch = obj.ImageData_.getChannel(idx);
+            clim = obj.ChannelDisplay_(idx).CLim;
+
+            if strcmp(ch.Type, 'grayscale') && ~islogical(ch.Data) && ~isempty(clim)
+                [ticks, labels] = matlabx.ui.widgets.ImageAxes.getColorbarTickLabels( ...
+                    ch.Class, clim);
             end
 
             obj.Colorbar.Ticks = ticks;
@@ -438,7 +460,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function updateAxesColormap(obj)
-            obj.mainAxes.Colormap = obj.CDataMapStore{obj.ChannelIdx};
+            obj.mainAxes.Colormap = obj.ChannelDisplay_(obj.ViewState_.ChannelIdx).DisplayMap;
         end
 
         function refreshView(obj)
@@ -468,14 +490,39 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function s = getChannelInfoStr(obj)
-            switch obj.ShowComposite
-                case 'on'
-                    s = sprintf('Channel: %i/%i (composite)',obj.ChannelIdx,obj.nChannels);
-                case 'off'
-                    s = sprintf('Channel: %i/%i',obj.ChannelIdx,obj.nChannels);
+            idx = obj.ViewState_.ChannelIdx;
+            nm = obj.ImageData_.getChannelName(idx);
+        
+            if strlength(nm) > 0
+                base = sprintf('C: %i/%i (%s)', idx, obj.nChannels, char(nm));
+            else
+                base = sprintf('C: %i/%i', idx, obj.nChannels);
             end
-
+        
+            if obj.ViewState_.ShowComposite
+                s = [base, ' (composite)'];
+            else
+                s = base;
+            end
         end
+
+        function s = getImageSizeString(obj)
+            s = sprintf(strjoin(repmat({'%i'},1,numel(obj.CDataSize)),'x'),obj.CDataSize);
+        end
+
+        function s = getImageBitDepthString(obj)
+            switch obj.CDataClass
+                case {'uint8','logical'}
+                    s = '8-bit';
+                case 'uint16'
+                    s = '16-bit';
+                case 'single'
+                    s = '32-bit';
+                case 'double'
+                    s = '64-bit';
+            end
+        end
+
 
     end
 
@@ -571,8 +618,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % retrieve fig/axes handles
         function f = get.ParentFig(obj),    f = ancestor(obj,'Figure'); end
-        function ax = getAxes(obj), ax = obj.mainAxes; end
-        function ax = getOverlayAxes(obj), ax = obj.staticAxes; end
+        function ax = getAxes(obj),         ax = obj.mainAxes; end
+        function ax = getOverlayAxes(obj),  ax = obj.staticAxes; end
 
         % axes/image passthroughs (Set/Get)
 
@@ -614,8 +661,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function onMove(obj, E)
-            disp(E.CurrentAxes.Tag)
-
             % get the ancestor toolbar button clicked, if it exists
             % look for "state" buttons first
             btn = ancestor(E.Target,'matlab.ui.controls.ToolbarStateButton');
@@ -648,6 +693,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.routeEventToTools(E);
 
             switch E.Hotkey
+                case 'shift+meta+c'
+                    obj.openContrastTool();
                 case 'rightarrow'
                     obj.nextChannel();
                 case 'leftarrow'
@@ -1122,402 +1169,503 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
-    %% Active CData/CLim management
+    %% Active CData / CLim / ImageData management
     methods
-
-        % --- CLim ---
-        function v = get.CLim(obj)
-            v = obj.CLimStore{obj.ChannelIdx};
+    
+        % --- ImageData ---
+        function v = get.ImageData(obj)
+            v = obj.ImageData_;
         end
-
-        function set.CLim(obj,val)
-            % update private backing
-            obj.CLimStore{obj.ChannelIdx} = double(val);
-            % setting the CLim switches CLim mode to manual
-            obj.CLimMode_ = 'manual';
-            if obj.ShowComposite
-                obj.CData_ = obj.getComposite(); % update CData backing with composite
+    
+        function set.ImageData(obj, val)
+            arguments
+                obj
+                val (1,1) matlabx.image.ImageData
             end
-            % update the CData of the Image object
-            obj.updateImageCData();
-            % update the Colorbar
-            obj.updateColorbar();
+    
+            obj.ImageData_ = val;
+            obj.syncViewStateToImageData();
+            obj.syncRenderSourceToView();
         end
-
+    
         % --- CData ---
         function v = get.CData(obj)
-            v = obj.CData_;
+            v = obj.RenderSource_;
         end
-
-        % user-facing setter, resets CDataStore
-        function set.CData(obj,cdata)
-            % empty -> set placeholder
+    
+        function set.CData(obj, cdata)
             if isempty(cdata)
                 cdata = matlabx.ui.widgets.ImageAxes.placeholderImage();
             end
-            % set CDataStore and multi-channel management props
-            obj.setChannels(cdata);
-            % sync CData to active channel
-            obj.syncCDataToActiveChannel();
+    
+            obj.ImageData_ = matlabx.image.ImageData(cdata);
+            obj.syncViewStateToImageData();
+            obj.syncRenderSourceToView();
         end
-
+    
+        % --- CLim ---
+        function v = get.CLim(obj)
+            idx = obj.ViewState_.ChannelIdx;
+            clim = obj.ChannelDisplay_(idx).CLim;
+    
+            if isempty(clim)
+                v = [0 1];
+            else
+                v = clim;
+            end
+        end
+    
+        function set.CLim(obj, val)
+            idx = obj.ViewState_.ChannelIdx;
+            ch = obj.ImageData_.getChannel(idx);
+    
+            % meaningless for rgb/logical
+            if strcmp(ch.Type, 'rgb') || islogical(ch.Data)
+                return
+            end
+    
+            obj.ChannelDisplay_(idx).CLim = double(val);
+            obj.ViewState_.CLimMode = 'manual';
+    
+            if obj.ViewState_.ShowComposite
+                obj.RenderSource_ = obj.getCompositeImage();
+                obj.refreshView();
+            else
+                obj.updateImageCData();
+                obj.updateColorbar();
+            end
+        end
+    
         % --- CLimMode ---
         function v = get.CLimMode(obj)
-            v = obj.CLimMode_;
+            v = obj.ViewState_.CLimMode;
         end
-
-        function set.CLimMode(obj,val)
-            % update private backing
-            obj.CLimMode_ = val;
-            % if set to 'auto'
-            if strcmp(obj.CLimMode_,'auto')
-                % update CLim for each channel
-                obj.updateCLimStore();
+    
+        function set.CLimMode(obj, val)
+            obj.ViewState_.CLimMode = val;
+    
+            if strcmp(val, 'auto')
+                for i = 1:obj.nChannels
+                    obj.ChannelDisplay_(i).CLim = obj.ImageData_.getDefaultCLim(i);
+                end
             end
-            % update the CData on the actual image object
-            obj.updateImageCData();
-            % update the Colorbar
-            obj.updateColorbar();
+    
+            if obj.ViewState_.ShowComposite
+                obj.RenderSource_ = obj.getCompositeImage();
+            end
+    
+            obj.refreshView();
         end
-
+    
         % --- CDataSize ---
         function v = get.CDataSize(obj)
-            if obj.ShowComposite
-                v = size(obj.CData_);
+            if obj.ViewState_.ShowComposite
+                v = size(obj.RenderSource_);
             else
-                v = obj.CDataSizeStore{obj.ChannelIdx};
+                v = obj.ImageData_.getChannelSize(obj.ViewState_.ChannelIdx);
             end
         end
-
+    
         % --- CDataType ---
         function v = get.CDataType(obj)
-            if obj.ShowComposite
+            if obj.ViewState_.ShowComposite
                 v = 'rgb';
             else
-                v = obj.CDataTypeStore{obj.ChannelIdx};
+                v = obj.ImageData_.getChannelType(obj.ViewState_.ChannelIdx);
             end
         end
-
+    
         % --- CDataClass ---
         function v = get.CDataClass(obj)
-            if obj.ShowComposite
-                v = class(obj.CData_);
+            if obj.ViewState_.ShowComposite
+                v = class(obj.RenderSource_);
             else
-                v = obj.CDataClassStore{obj.ChannelIdx};
+                v = obj.ImageData_.getChannelClass(obj.ViewState_.ChannelIdx);
             end
         end
 
+    
         % --- DisplayCData ---
         function v = get.DisplayCData(obj)
-            switch obj.CDataType
+            if obj.ViewState_.ShowComposite
+                v = obj.RenderSource_;
+                return
+            end
+    
+            ch = obj.ImageData_.getChannel(obj.ViewState_.ChannelIdx);
+            clim = obj.ChannelDisplay_(obj.ViewState_.ChannelIdx).CLim;
+    
+            switch ch.Type
                 case 'grayscale'
-                    v = matlabx.image.process.rescaleLinear(obj.CData,obj.CLim);
+                    if islogical(ch.Data) || isempty(clim)
+                        v = ch.Data;
+                    else
+                        v = matlabx.image.process.rescaleLinear(ch.Data, clim);
+                    end
                 case 'rgb'
-                    v = obj.CData_;
+                    v = ch.Data;
             end
         end
+    
+        % --- nChannels ---
+        function v = get.nChannels(obj), v = obj.ImageData_.nChannels; end
+
+        % --- MultiChannel ---
+        function v = get.MultiChannel(obj), v = obj.ImageData_.MultiChannel; end
+
+        % --- MultiChannelType ---
+        function v = get.MultiChannelType(obj), v = obj.ImageData_.MultiChannelType; end
 
     end
 
-    %% Multi-channel CData management (internal)
+    %% ImageData + display/view-state management
     methods (Access=private)
-
-        function setChannels(obj,channels)
-            % not cell input -> make cell
-            if ~iscell(channels), channels = {channels}; end
-
-            obj.CDataStore = channels;
-            obj.nChannels = numel(obj.CDataStore);
-            obj.ChannelIdx_ = 1;
-            obj.MultiChannel = obj.nChannels > 1;
-
-            % determine CDataType, CDataClass, and CDataSize for each channel
-            for c = 1:obj.nChannels
-
-                cdata = obj.CDataStore{c};
-
-                % image dimensions
-                sz = size(cdata);
-
-                % set CDataType based on number of dimensions
-                switch numel(sz)
-                    case 2
-                        cdataType = 'grayscale';
-                    case 3
-                        if sz(3)==3
-                            cdataType = 'rgb';
-                        else
-                            error('ImageAxes:InvalidCDataSize','CData must be MxN (grayscale) or MxNx3 (truecolor)');
-                        end
-                    otherwise
-                        error('ImageAxes:InvalidCDataDimensions','CData must have either 2 or 3 dimensions');
-                end
-
-                obj.CDataTypeStore{c} = cdataType;
-                obj.CDataClassStore{c} = class(cdata);
-                obj.CDataSizeStore{c} = sz;
-                obj.CLimStore{c} = [0 1]; % default
-            end
-
-            % update CLimStore -> determine CLim for each channel
-            obj.updateCLimStore();
-            % update MultiChannelType
-            obj.updateMultiChannelType();
-            % update colormaps
-            obj.updateCDataMapStore();
-        end
-
-        function updateCLimStore(obj)
-        % get auto CLim for each element of CDataStore
-            for c = 1:obj.nChannels
-                cdata = obj.CDataStore{c};
-                switch obj.CDataTypeStore{c}
-                    case 'grayscale'
-                        clim = double([min(min(cdata)) max(max(cdata))]);
-                    case 'rgb'
-                        clim = [0 1];
-                end
-                if clim(1)==clim(2)
-                    obj.CLimStore{c} = getrangefromclass(cdata);
-                else
-                    obj.CLimStore{c} = clim;
-                end
+    
+        function syncViewStateToImageData(obj)
+            n = obj.nChannels;
+    
+            % clip active channel to valid range
+            obj.ViewState_.ChannelIdx = clip(obj.ViewState_.ChannelIdx, 1, n);
+    
+            % resize per-channel display state while preserving old values
+            obj.ChannelDisplay_ = obj.mergeChannelDisplayState(n);
+    
+            % composite only allowed when mergeable
+            if obj.ViewState_.ShowComposite && ~obj.ImageData_.CanMerge
+                obj.ViewState_.ShowComposite = false;
             end
         end
-
-        function updateMultiChannelType(obj)
-            if ~obj.MultiChannel, obj.MultiChannelType = 'none';
-            elseif all(ismember(obj.CDataTypeStore,'grayscale')), obj.MultiChannelType = 'grayscale';
-            elseif all(ismember(obj.CDataTypeStore,'rgb')), obj.MultiChannelType = 'rgb';
-            else, obj.MultiChannelType = 'mixed'; 
+    
+        function displayState = mergeChannelDisplayState(obj, n)
+            old = obj.ChannelDisplay_;
+    
+            displayState = repmat(struct( ...
+                'CLim', [], ...
+                'ColorName', "", ...
+                'Colormap', gray(256), ...
+                'DisplayMap', gray(256)), 1, n);
+    
+            defaultColors = matlabx.ui.widgets.ImageAxes.getColorNames();
+    
+            for i = 1:n
+                % defaults from ImageData
+                displayState(i).CLim = obj.ImageData_.getDefaultCLim(i);
+                displayState(i).ColorName = string(defaultColors{1 + mod(i-1, numel(defaultColors))});
+                displayState(i).Colormap = gray(256);
+    
+                % preserve prior display state when valid
+                if i <= numel(old)
+                    if ~isempty(old(i).CLim) && strcmp(obj.ViewState_.CLimMode, 'manual')
+                        displayState(i).CLim = old(i).CLim;
+                    end
+    
+                    if obj.isNonEmptyText(old(i).ColorName)
+                        displayState(i).ColorName = string(old(i).ColorName);
+                    end
+    
+                    if ~isempty(old(i).Colormap)
+                        displayState(i).Colormap = old(i).Colormap;
+                    end
+                end
+    
+                displayState(i).DisplayMap = obj.getDisplayMap( ...
+                    displayState(i), obj.ViewState_.ChannelColorMode);
             end
         end
-
-        function syncCDataToActiveChannel(obj)
-            if obj.ShowComposite
-                % set CData from composite of all channels
-                obj.setCData(obj.getComposite());
+    
+        function syncRenderSourceToView(obj)
+            oldData = obj.RenderSource_;
+    
+            if obj.ViewState_.ShowComposite
+                newData = obj.getCompositeImage();
             else
-                % set CData from the active channel
-                obj.setCData(obj.CDataStore{obj.ChannelIdx});
+                newData = obj.ImageData_.getChannelData(obj.ViewState_.ChannelIdx);
             end
-        end
-
-        % sets active CData and emits CDataChanged
-        function setCData(obj,cdata)
-            % create event data payload before setting new CData and emitting CDataChanged event
-            evtData = matlabx.ui.widgets.events.CDataChangedEventData(obj.CData_,cdata);
-            % update private backing
-            obj.CData_ = cdata;
-            % refresh view
+    
+            obj.RenderSource_ = newData;
             obj.refreshView();
-            % emit event, send payload
-            notify(obj,'CDataChanged',evtData);
+    
+            evtData = matlabx.ui.widgets.events.CDataChangedEventData(oldData, newData);
+            notify(obj, 'CDataChanged', evtData);
         end
-
-        function I = getComposite(obj)
-
-            switch obj.MultiChannelType
-                case 'grayscale'
-                    clims = cell2mat(obj.CLimStore');
-        
-                    switch obj.ChannelColorMode
-                        case 'colors'
-                            clrs = cellfun(@(C) matlabx.colors.names.getColor(C),obj.ChannelColors,'UniformOutput',false);
-                            colors = cell2mat(clrs');
-                            I = matlabx.image.compose.mergeChannelsRGB_add(obj.CDataStore,clims,colors(1:obj.nChannels,:));
-                        case 'luts'
-                            I = matlabx.image.compose.mergeChannelsRGB_LUT(obj.CDataStore,clims,obj.CDataMapStore);
-                    end
-                case 'rgb'
-                    I = matlabx.image.compose.mergeRGBImages(obj.CDataStore,"Method","additive");
+    
+        function updateAllDisplayMaps(obj)
+            for i = 1:obj.nChannels
+                obj.ChannelDisplay_(i).DisplayMap = obj.getDisplayMap( ...
+                    obj.ChannelDisplay_(i), obj.ViewState_.ChannelColorMode);
             end
         end
-
-        function updateCDataMapStore(obj)
-            switch obj.ChannelColorMode
+    
+        function map = getDisplayMap(~, displayState, mode)
+            switch mode
                 case 'colors'
-                    for c = 1:obj.nChannels
-                        obj.CDataMapStore{c} = matlabx.colors.ops.colorGradient([0 0 0],matlabx.colors.names.getColor(obj.ChannelColors{c}),256);
-                    end
+                    map = matlabx.colors.ops.colorGradient( ...
+                        [0 0 0], ...
+                        matlabx.colors.names.getColor(char(displayState.ColorName)), ...
+                        256);
                 case 'luts'
-                    obj.CDataMapStore = obj.ChannelColormaps;
+                    map = displayState.Colormap;
             end
         end
-
+    
+        function I = getCompositeImage(obj)
+            if ~obj.ImageData_.CanMerge
+                I = obj.ImageData_.getChannelData(obj.ViewState_.ChannelIdx);
+                return
+            end
+    
+            if ~strcmp(obj.ImageData_.MultiChannelType, 'grayscale')
+                I = obj.ImageData_.getChannelData(obj.ViewState_.ChannelIdx);
+                return
+            end
+    
+            data = cell(1, obj.nChannels);
+            clims = zeros(obj.nChannels, 2);
+    
+            for i = 1:obj.nChannels
+                data{i} = obj.ImageData_.getChannelData(i);
+                clims(i,:) = obj.ChannelDisplay_(i).CLim;
+            end
+    
+            switch obj.ViewState_.ChannelColorMode
+                case 'colors'
+                    colors = zeros(obj.nChannels, 3);
+                    for i = 1:obj.nChannels
+                        colors(i,:) = matlabx.colors.names.getColor( ...
+                            char(obj.ChannelDisplay_(i).ColorName));
+                    end
+                    I = matlabx.image.compose.mergeChannelsRGB_add(data, clims, colors);
+    
+                case 'luts'
+                    maps = {obj.ChannelDisplay_.DisplayMap};
+                    I = matlabx.image.compose.mergeChannelsRGB_LUT(data, clims, maps);
+            end
+        end
+    
     end
 
+    %% Channel switching / Channel view state
     methods
-
-         % --- channel switching ---
+    
+        % --- channel switching ---
         function nextChannel(obj)
-            obj.ChannelIdx = matlabx.utils.math.wrapStep(obj.ChannelIdx,1,1,obj.nChannels);
+            obj.ChannelIdx = matlabx.utils.math.wrapStep(obj.ChannelIdx, 1, 1, obj.nChannels);
         end
-
+    
         function previousChannel(obj)
-            obj.ChannelIdx = matlabx.utils.math.wrapStep(obj.ChannelIdx,-1,1,obj.nChannels);
-        end       
-
+            obj.ChannelIdx = matlabx.utils.math.wrapStep(obj.ChannelIdx, -1, 1, obj.nChannels);
+        end
+    
         % --- ChannelIdx ---
         function v = get.ChannelIdx(obj)
-            v = obj.ChannelIdx_;
+            v = obj.ViewState_.ChannelIdx;
         end
-
-        function set.ChannelIdx(obj,val)
-            % update private backing, clip ChannelIdx to [1 nChannels]
-            obj.ChannelIdx_ = clip(val,1,obj.nChannels);
-            % sync to active channel
-            obj.syncCDataToActiveChannel();
+    
+        function set.ChannelIdx(obj, val)
+            obj.ViewState_.ChannelIdx = clip(val, 1, obj.nChannels);
+            obj.syncRenderSourceToView();
         end
-
+    
         % --- ChannelColors ---
         function val = get.ChannelColors(obj)
-            val = obj.ChannelColors_;
-
-            if numel(val)==obj.nChannels
+            val = cell(1, obj.nChannels);
+            for i = 1:obj.nChannels
+                val{i} = char(obj.ChannelDisplay_(i).ColorName);
+            end
+        end
+    
+        function set.ChannelColors(obj, val)
+            if isempty(val)
                 return
             end
-
-            if numel(val)>obj.nChannels % too many colors
-                val = val(1:obj.nChannels);
-            elseif numel(val)<obj.nChannels % too few colors
-                % get available colors not already in val
-                avail = setdiff(matlabx.ui.widgets.ImageAxes.getColorNames,val);
-                % number of additional colors we need
-                nNeeded = obj.nChannels-numel(val);
-                % add the number we need
-                val = [val,avail(1:nNeeded)];
+    
+            n = min(numel(val), obj.nChannels);
+            for i = 1:n
+                obj.ChannelDisplay_(i).ColorName = string(val{i});
             end
-            % update private backing
-            obj.ChannelColors_ = val;
+    
+            obj.updateAllDisplayMaps();
+            obj.syncRenderSourceToView();
         end
-
-        function set.ChannelColors(obj,val)
-            % update private backing
-            obj.ChannelColors_ = val;
-            % update map store
-            obj.updateCDataMapStore();
-            % sync to active channel
-            obj.syncCDataToActiveChannel();
-        end
-
+    
         % --- ChannelColormaps ---
         function val = get.ChannelColormaps(obj)
-            val = obj.ChannelColormaps_;
-
-            if numel(val)==obj.nChannels
+            val = cell(1, obj.nChannels);
+            for i = 1:obj.nChannels
+                val{i} = obj.ChannelDisplay_(i).Colormap;
+            end
+        end
+    
+        function set.ChannelColormaps(obj, val)
+            if isempty(val)
                 return
             end
-
-            if numel(val)>obj.nChannels % too many colors
-                val = val(1:obj.nChannels);
-            elseif numel(val)<obj.nChannels % too few colors
-                % number of additional maps we need
-                nNeeded = obj.nChannels-numel(val);
-                % add the number we need
-                val = [val,repmat({gray},1,nNeeded)];
+    
+            n = min(numel(val), obj.nChannels);
+            for i = 1:n
+                obj.ChannelDisplay_(i).Colormap = val{i};
             end
-            % update private backing
-            obj.ChannelColormaps_ = val;
+    
+            obj.updateAllDisplayMaps();
+            obj.syncRenderSourceToView();
         end
-
-        function set.ChannelColormaps(obj,val)
-            % update private backing
-            obj.ChannelColormaps_ = val;
-            % update map store
-            obj.updateCDataMapStore();
-            % sync to active channel
-            obj.syncCDataToActiveChannel();
-        end
-
+    
         % --- Colormap ---
         function v = get.Colormap(obj)
-            v = obj.CDataMapStore{obj.ChannelIdx};
+            v = obj.ChannelDisplay_(obj.ViewState_.ChannelIdx).DisplayMap;
         end
-
-        function set.Colormap(obj,val)
-            % update private backing
-            obj.ChannelColormaps_{obj.ChannelIdx} = double(val);
-            % setting the Colormap switches ChannelColorMode mode to 'luts'
-            obj.ChannelColorMode_ = 'luts';
-            % update map store
-            obj.updateCDataMapStore();
-            % update the colormap on the actual axes object
-            obj.updateAxesColormap();
-        end
-
-        % --- ChannelColorMode ---
-        function v = get.ChannelColorMode(obj)
-            v = obj.ChannelColorMode_;
-        end
-
-        function set.ChannelColorMode(obj,val)
-            % update private backing
-            obj.ChannelColorMode_ = val;
-            % update colormap store
-            obj.updateCDataMapStore();
-            % sync
-            obj.syncCDataToActiveChannel();
-        end
-
-        % --- ShowComposite ---
-        function v = get.ShowComposite(obj)
-            v = obj.ShowComposite_;
-        end
-
-        function set.ShowComposite(obj,val)
-            % update backing
-            obj.ShowComposite_ = val && obj.CanMerge;
-            % sync
-            obj.syncCDataToActiveChannel();
-        end
-
-        % toggle state on/off
-        function toggleComposite(obj)
-            obj.ShowComposite = ~obj.ShowComposite_;
-        end
-
-        % --- CanMerge ---
-        function tf = get.CanMerge(obj)
-            switch obj.MultiChannelType
-                case {'grayscale','rgb'}
-                    % true only if all channels have matching sizes and types
-                    tf = isequal(obj.CDataSizeStore{:}) && isequal(obj.CDataClassStore{:});
-                otherwise
-                    tf = false;
+    
+        function set.Colormap(obj, val)
+            idx = obj.ViewState_.ChannelIdx;
+            obj.ChannelDisplay_(idx).Colormap = double(val);
+    
+            % setting Colormap switches mode to LUTs
+            obj.ViewState_.ChannelColorMode = 'luts';
+    
+            obj.updateAllDisplayMaps();
+    
+            if obj.ViewState_.ShowComposite
+                obj.RenderSource_ = obj.getCompositeImage();
+                obj.refreshView();
+            else
+                obj.updateAxesColormap();
             end
         end
-
+    
+        % --- ChannelColorMode ---
+        function v = get.ChannelColorMode(obj)
+            v = obj.ViewState_.ChannelColorMode;
+        end
+    
+        function set.ChannelColorMode(obj, val)
+            obj.ViewState_.ChannelColorMode = val;
+            obj.updateAllDisplayMaps();
+            obj.syncRenderSourceToView();
+        end
+    
+        % --- ShowComposite ---
+        function v = get.ShowComposite(obj)
+            v = matlab.lang.OnOffSwitchState(obj.ViewState_.ShowComposite);
+        end
+    
+        function set.ShowComposite(obj, val)
+            obj.ViewState_.ShowComposite = logical(val) && obj.CanMerge;
+            obj.syncRenderSourceToView();
+        end
+    
+        function toggleComposite(obj)
+            obj.ShowComposite = ~obj.ViewState_.ShowComposite;
+        end
+    
+        % --- CanMerge ---
+        function tf = get.CanMerge(obj)
+            tf = obj.ImageData_.CanMerge;
+        end
+    
         % --- ChannelCLim ---
-        function setCLim(obj,clim,idx)
+        function setCLim(obj, clim, idx)
             arguments
                 obj (1,1) matlabx.ui.widgets.ImageAxes
                 clim (1,2) double
                 idx (:,1) = []
             end
-
-            % idx empty -> use active channel
+    
             if isempty(idx)
                 idx = obj.ChannelIdx;
             end
+    
+            for k = 1:numel(idx)
+                ii = idx(k);
+    
+                if ii < 1 || ii > obj.nChannels
+                    error('ImageAxes:InvalidChannelIndex', ...
+                        'Index %i does not refer to an existing channel', ii)
+                end
+    
+                ch = obj.ImageData_.getChannel(ii);
+    
+                if strcmp(ch.Type, 'rgb') || islogical(ch.Data)
+                    continue
+                end
+    
+                obj.ChannelDisplay_(ii).CLim = clim;
+            end
+    
+            obj.ViewState_.CLimMode = 'manual';
+    
+            if obj.ViewState_.ShowComposite
+                obj.RenderSource_ = obj.getCompositeImage();
+                obj.refreshView();
+            else
+                obj.updateImageCData();
+                obj.updateColorbar();
+            end
+        end
+    
+    end
 
-            if idx < 1 || idx > obj.nChannels
-                error('ImageAxes:InvalidChannelIndex','Index %i does not refer to an existing channel',idx)
+
+    %% CLim slider dialog management
+    methods
+
+        function openContrastTool(obj)
+
+            if obj.contrastToolOpen
+                return
             end
 
-            % update CLimStore
-            obj.CLimStore{idx} = clim;
-            % setting the CLim switches CLim mode to manual
-            obj.CLimMode_ = 'manual';
-            if obj.ShowComposite
-                obj.CData_ = obj.getComposite(); % update CData backing with composite
+            idx = obj.ViewState_.ChannelIdx;
+            channel = obj.ImageData_.getChannel(idx);
+            channelDisplay = obj.ChannelDisplay_(idx);
+
+            switch channel.Type
+                case 'grayscale'
+                    switch channel.Class
+                        case {'double','single'}
+                            dispFmt = '%0.2f'; roundVals = "off";
+                        case {'uint8','uint16'}
+                            dispFmt = '%i'; roundVals = "on";
+                        otherwise
+                            return
+                    end
+                otherwise
+                    return
             end
-            % update the CData on the actual image object (do not emit CDataChanged)
-            obj.updateImageCData();
+
+            obj.contrastTool = matlabx.app.SliderDialog(...
+                "Title","Adjust display limits",...
+                "Name",channel.ChannelName,...
+                "Limits",channel.DefaultCLim,...
+                "Value",channelDisplay.CLim,...
+                "RoundDigits",0,...
+                "RoundValues",roundVals,...
+                "ValueDisplayFormat",dispFmt,...
+                "ValueChangingFcn",@(o,~) obj.onContrastToolValueChanging(o),...
+                "ValueChangedFcn",@(o,~) obj.onContrastToolValueChanged(o),...
+                "ClosedFcn",@(~,~) obj.onContrastToolClosed());
+
+            obj.contrastToolOpen = true;
+
         end
 
+        function onContrastToolClosed(obj)
+            obj.contrastToolOpen = false;
+        end
+
+        function onContrastToolValueChanged(obj,o)
+            obj.CLim = o.Value;
+        end
+
+        function onContrastToolValueChanging(obj,o)
+            obj.CLim = o.Value;
+        end
 
     end
+
+
+
+
+
 
     %% Hidden entrypoint for debugging
     methods (Hidden)
@@ -1660,6 +1808,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % replace listener property with empty array of event.listener
             obj.L = event.listener.empty;
 
+            % contrast tool
+            if ~isempty(obj.contrastTool), delete(obj.contrastTool(isvalid(obj.contrastTool))); end
 
             % Unregister from hub (safe if figure already gone)
             try
