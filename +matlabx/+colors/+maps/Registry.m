@@ -89,7 +89,7 @@ classdef Registry
         function cats = categories()
             S = matlabx.colors.maps.Registry.getOrInit();
             if isempty(S) || ~isfield(S,'BYCAT') || isempty(S.BYCAT)
-                cats = string.empty(0,1); return
+                cats = matlabx.string.empty(); return
             end
             cats = string(keys(S.BYCAT));
             cats = sort(cats);
@@ -97,14 +97,24 @@ classdef Registry
 
         function list = names(category)
             S = matlabx.colors.maps.Registry.getOrInit();
+            % return names for each category if category not provided
             if nargin==0 || strlength(category)==0
-                list = string.empty(0,1); return
+                cats = cellstr(matlabx.colors.maps.Registry.categories());
+                % return empty string if no cats found
+                if isempty(cats), list = matlabx.string.empty(); return; end
+                % empty struct with cats as fieldnames
+                list = matlabx.struct.fromFieldnames(cats);
+                % add string array of names for each category
+                for i = 1:numel(cats)
+                    list.(cats{i}) = matlabx.colors.maps.Registry.names(cats{i});
+                end
+                return
             end
 
             key = char(category);
 
             if isempty(S) || ~isfield(S,'BYCAT') || ~isKey(S.BYCAT, key)
-                list = string.empty(0,1); return
+                list = matlabx.string.empty(); return
             end
             arr = S.BYCAT(key);                       % cell array of Colormap
             list = string(cellfun(@(o)o.Name, arr, 'UniformOutput', false));
