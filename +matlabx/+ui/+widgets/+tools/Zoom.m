@@ -6,8 +6,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
 %   view box follows cursor when Pan Mode is on (on by default)
 %   shift-click to enable/disable Pan
 %   can also increase/decrease zoom with scroll wheel
-%
-%   command +
+
 
     % --- Zoom functionality ---
     properties
@@ -67,13 +66,16 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
                 'Tooltip',          'Zoom/Pan', ...
                 'Icon',             matlabx.internal.Paths.icons('ZoomIcon.png'), ...
                 'Priority',         1, ...
+                'ToggleHotkey',     matlabx.keyboard.normalize('z','',{'shift','meta'}), ...
                 'IsExclusive',      false, ...
                 'CapturesMove',     true, ...
                 'CapturesDown',     true, ...
                 'CapturesScroll',   true, ...
                 'CapturesKey',      true, ...
                 'DistractsMove',    false, ...
+                'DistractsKey',     true, ...
                 'DistractsDown',    true);
+
             % set up view box patches
             obj.FullBox = patch(host.getOverlayAxes(), ...
                 'XData',NaN, ...
@@ -206,32 +208,14 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
 
         function onKey(obj, E)
             obj.printStatus(sprintf('%s.onKey()\n',obj.Name));
-            match = true;
 
-            % parse event data
-            % try modifier+character first
-            keyStr = strip(strjoin([E.Modifier,{E.Character}],'|'),'|');
-            % fprintf('Zoom: %s\n',keyStr)
-
-            switch keyStr
-                case {'command|=','control|='}  % command/control and +(=)   | increase zoom
+            switch E.Hotkey
+                case "meta+equal"
                     obj.increaseZoom();
-                case {'command|-','control|-'}  % command/control and -      | decrease zoom
+                case "meta+hyphen"
                     obj.decreaseZoom();
-                otherwise
-                    match = false;
-            end
-
-            % no match found -> try modifier+key
-            if ~match
-                keyStr = strip(strjoin([E.Modifier,{E.Key}],'|'),'|');
-                switch keyStr
-                    case {'escape'} % escape | disable tool
-                        obj.disable();
-                    otherwise
-                        % still no match -> return
-                        return
-                end
+                case "escape"
+                    obj.disable();
             end
 
         end
@@ -246,10 +230,21 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
             tf = false;
         end
 
-        % function tf = onDistractMove(obj,evt,tgt)
-        %     obj.printStatus(sprintf('%s.onDistractMove()\n',obj.Name);
-        %     tf = false;
-        % end
+        function tf = onDistractKey(obj,E)
+            if obj.ToggleHotkey == E.Hotkey
+                tf = true;
+            else
+                tf = false;
+                return
+            end
+
+            switch obj.Enabled
+                case false
+                    obj.enable();
+                case true
+                    obj.disable();
+            end
+        end
 
     end
 
