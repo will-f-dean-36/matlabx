@@ -35,6 +35,7 @@ classdef ImageAxesTool < handle
         Name (1,1) string = ""                                  % name of the tool
         Tooltip (1,:) = ''                                      % tooltip for toolbar buttons
         Icon (1,:) char = matlabx.internal.Paths.icons('QuestionMark.png')   % icon for toolbar buttons, question mark by default
+        ToggleHotkey (1,1) string = ""
 
         Style (1,:) char {mustBeMember(Style,{'push','state'})} = 'state'
 
@@ -82,10 +83,8 @@ classdef ImageAxesTool < handle
             p = inputParser;
             p.addParameter('Tooltip', '', @(x)ischar(x));
             p.addParameter('Icon', 'QuestionMark.png', @(x)ischar(x));
-
+            p.addParameter('ToggleHotkey', "", @(x)isstring(x)&&isscalar(x));
             p.addParameter('Style', 'state', @(x)ischar(x));
-
-
             p.addParameter('Priority', 1, @(x)isnumeric(x)&&isscalar(x));
             p.addParameter('IsExclusive', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('CapturesDown', false, @(x)islogical(x)&&isscalar(x));
@@ -98,14 +97,13 @@ classdef ImageAxesTool < handle
             p.addParameter('DistractsUp', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('DistractsScroll', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('DistractsKey', false, @(x)islogical(x)&&isscalar(x));
+
             p.parse(varargin{:});
+
             obj.Tooltip = p.Results.Tooltip;
             obj.Icon = p.Results.Icon;
-
+            obj.ToggleHotkey = p.Results.ToggleHotkey;
             obj.Style = p.Results.Style;
-
-
-
             obj.Priority = p.Results.Priority;
             obj.IsExclusive = p.Results.IsExclusive;
             obj.CapturesDown = p.Results.CapturesDown;
