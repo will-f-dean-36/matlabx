@@ -313,15 +313,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
+    %% UI helpers
     methods (Access=private)
-        function tf = isNonEmptyText(~, x)
-            tf = (ischar(x) || (isstring(x) && isscalar(x))) && strlength(string(x)) > 0;
-        end
-    end
-
-
-    %% Internal update helpers
-    methods (Access=private)
+        %% --- UI refresh helpers ---
 
         function updateOnResize(obj)
             if ~isvalid(obj); return; end
@@ -470,16 +464,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.updateTopLabelText();
         end
 
-    end
-
-    %% Internal display helpers
-    methods (Access=private)
+        %% --- UI text helpers ---
 
         function s = getImageInfoString(obj)
-
             s1 = sprintf(strjoin(repmat({'%i'},1,numel(obj.CDataSize)),'x'),obj.CDataSize);
             s2 = sprintf('%s (%s)',obj.CDataClass,obj.CDataType);
-
             s = [s1,' ',s2];
         end
 
@@ -848,7 +837,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                         displayState(i).CLim = old(i).CLim;
                     end
     
-                    if obj.isNonEmptyText(old(i).ColorName)
+                    if matlabx.ui.widgets.ImageAxes.isNonEmptyText(old(i).ColorName)
                         displayState(i).ColorName = string(old(i).ColorName);
                     end
     
@@ -857,8 +846,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                     end
                 end
     
-                displayState(i).DisplayMap = obj.getDisplayMap( ...
-                    displayState(i), obj.ViewState_.ChannelColorMode);
+                displayState(i).DisplayMap = obj.getDisplayMap(displayState(i), obj.ViewState_.ChannelColorMode);
             end
         end
     
@@ -932,9 +920,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
     
     end
-
-
-
 
     %% Tool-accessible helpers
     methods (Access=?matlabx.ui.widgets.ImageAxesTool, Hidden=true)
@@ -1641,25 +1626,27 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
 
-    %% Utils
+    %% Private static helpers
     methods (Static, Access=private)
 
-        %function y = clip(x,a,b), y = max(a, min(b, x)); end
+        function tf = isNonEmptyText(x)
+            % check if text is non-empty
+            tf = (ischar(x) || (isstring(x) && isscalar(x))) && strlength(string(x)) > 0;
+        end
 
-        % check if the point, XY, is within limits, XLim and YLim
         function tf = isInLimits(XY,XLim,YLim)
+            % check if the point, XY, is within limits, XLim and YLim
             x = XY(1); y = XY(2);
             tf = x >= XLim(1) && x <= XLim(2) && y >= YLim(1) && y <= YLim(2);
         end
 
-        % return a placeholder image for startup
         function I = placeholderImage()
-            % all black truecolor array
-            I = zeros([256,256,3]);
+            % return a placeholder image for startup
+            I = zeros([256,256,3]); % all black truecolor array
         end
 
-        % get colorbar ticks and labels based on CData class
         function [ticks,labels] = getColorbarTickLabels(valClass,clim,N)
+            % get colorbar ticks and labels based on CData class and display range
             arguments
                 valClass (1,:) char {mustBeMember(valClass,{'logical','double','single','uint16','uint8'})}
                 clim (1,2) double
@@ -1684,18 +1671,16 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
+    %% Public static helpers
     methods (Static)
 
-        % return names of all classes in matlabx.ui.widgets.tools
         function names = getToolClassNames()
-            % get list of tool class names in matlabx.ui.widgets.tools using matlab.metadata.Namespace
-
-            % cell array of char vectors
+            % get cell array of char vectors of tool class names in matlabx.ui.widgets.tools
             names = {matlab.metadata.Namespace.fromName("matlabx.ui.widgets.tools").ClassList.Name}';
         end
 
-        % return names of all tool classes (just the last part)
         function names = getToolNames()
+            % return names of all tool classes (just the last part)
 
             classNames = matlabx.ui.widgets.ImageAxes.getToolClassNames();
             if numel(classNames)==0
@@ -1713,8 +1698,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         end
 
-        % return names of allowed channel colors
         function names = getColorNames()
+            % return names of allowed channel colors
             names = {'cyan','magenta','yellow','red','green','blue'};
         end
 
