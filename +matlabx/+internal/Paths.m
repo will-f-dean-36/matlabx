@@ -1,5 +1,5 @@
 classdef Paths
-%% Helper class for locating file paths
+%PATHS Helper class for locating file paths
 
     methods(Static)
 

@@ -1,5 +1,5 @@
 classdef UICalibration < handle
-%UICALIBRATION  Small per-machine UI calibration cache for App Designer / uifigure UIs.
+%UICALIBRATION  Small per-machine UI calibration cache for uifigure UIs
 %
 % Typical use:
 %   UIcal = matlabx.ui.calibration.UICalibration();
@@ -181,9 +181,6 @@ classdef UICalibration < handle
 
                 drawnow; % ensure InnerPosition is valid
                 pause(2) % pause to draw
-
-                % disp(mat2str(p.OuterPosition))
-                % disp(mat2str(p.InnerPosition))
 
                 % get offset caused by title bar
                 y(i) = p.InnerPosition(3) - p.InnerPosition(4);
