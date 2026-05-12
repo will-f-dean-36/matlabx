@@ -9,6 +9,9 @@ classdef Paths
             for i = 1:3, r = fileparts(r); end
         end
 
+
+        % --- assets ---
+
         function p = assets(varargin)
             p = fullfile(matlabx.internal.Paths.root(), 'assets', varargin{:});
         end
@@ -20,6 +23,17 @@ classdef Paths
         function p = colormaps(varargin)
             p = matlabx.internal.Paths.assets('colormaps', varargin{:});
         end
+
+
+        % --- external ---
+
+        function p = external(varargin)
+            p = fullfile(matlabx.internal.Paths.root(), 'external', varargin{:});
+        end
+
+
+
+        % --- config, settings, user prefs ---
 
         function p = prefRoot(varargin)
             p = fullfile(prefdir, 'matlabx', varargin{:});
