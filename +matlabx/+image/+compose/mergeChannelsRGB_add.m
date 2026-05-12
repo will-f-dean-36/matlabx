@@ -13,6 +13,7 @@ function RGB = mergeChannelsRGB_add(Icell, clim, colors)
     sz = size(Icell{1});
     RGB = zeros([sz 3], 'double');
 
+
     for k = 1:N
         Ik = double(Icell{k});
         lo = clim(k,1); hi = clim(k,2);

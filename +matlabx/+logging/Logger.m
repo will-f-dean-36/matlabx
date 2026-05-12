@@ -60,7 +60,9 @@ classdef Logger < handle
         FilePath (1,:) char = ''
         FileFID (1,1) double = -1
 
-        PendingLines (1,1) string = ""   % batched lines waiting to flush
+        % PendingLines (1,1) string = ""   % batched lines waiting to flush
+        PendingLines (:,1) string = ""   % batched lines waiting to flush
+
         PendingCount (1,1) double = 0
         LastFlushTic (1,1) uint64 = uint64(0)
     end
