@@ -1,7 +1,7 @@
-function rgb = getColor(name)
-%GETCOLOR  Converts a color name to an RGB triplet
+function rgb = toRGB(name)
+%TORGB  Converts a color name to an RGB triplet
 %
-%   rgb = GETCOLOR(name) returns the 1x3 RGB vector (values in [0,1])
+%   rgb = TORGB(name) returns the 1x3 RGB vector (values in [0,1])
 %   corresponding to the specified color name. The lookup is case-
 %   insensitive.
 %
@@ -15,9 +15,9 @@ function rgb = getColor(name)
 %     rgb  : 1x3 RGB triplet in [0,1]
 %
 %   Example
-%     rgb = getColor('magenta');   % returns [1 0 1]
+%     rgb = toRGB('magenta');   % returns [1 0 1]
 %
-%   See also COLORGRADIENT
+%   See also COLORGRADIENT, FROMRGB
 
     name = lower(string(name));
 
@@ -39,7 +39,7 @@ function rgb = getColor(name)
         case "black"
             rgb = [0 0 0];
         otherwise
-            error('getColor:UnknownColor', ...
-                  'Unknown color "%s". Supported colors: red, green, blue, cyan, magenta, yellow, white, black.', name);
+            error('matlabx:colors:names:toRGB:UnknownColorName', ...
+                  'Unknown color name "%s". Supported colors: red, green, blue, cyan, magenta, yellow, white, black.', name);
     end
 end
