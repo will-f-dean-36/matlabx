@@ -23,6 +23,11 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
         % ID of the item being hovered on, empty string if none
         HoverID (1,:) string = string.empty(1,0)
     end
+
+    properties(Access=private)
+        % dictionary to access items by name
+        ItemsDict dictionary = dictionary(string.empty(1,0), matlabx.ui.widgets.uiaccordionitem.empty(1,0))
+    end
     
     %% Derived properties
     properties(Dependent,Access=private)
@@ -209,7 +214,8 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
                 Options.ContentFontSize (1,1) double = 12
                 Options.MatchPaneFontSizes (1,1) logical = true
                 Options.FontName (1,:) char = 'Helvetica'
-                Options.Title (1,:) char = 'Title'
+                %Options.Title (1,:) char = 'Title'
+                Options.Title (1,:) string = strings(1,0)
                 Options.TitleBackgroundColor (1,3) double = [0.95 0.95 0.95]
                 Options.HoverTitleBackgroundColor (1,3) double = [1 1 1]
                 Options.TitlePadding (1,1) double = 1
@@ -219,6 +225,18 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
                 Options.BorderWidth (1,1) double = 1
                 Options.ExpandedBorderWidth (1,1) double = 1
             end
+
+            % duplicate Title -> error
+            if obj.hasItem(Options.Title)
+                error('matlabx:ui:uiacordion:InvalidTitle','An item already exists with the title: %s',Options.Title)
+            end
+
+            % Title empty -> create unique
+            if isempty(Options.Title)
+                Options.Title = obj.getUniqueTitle();
+            end
+
+
             names = fieldnames(Options).';
             values = cellfun(@(name) Options.(name),names,"UniformOutput",false);
             arguments = cat(1,names,values);
@@ -227,28 +245,75 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
 
             obj.Items(end+1) = newItem;
             obj.ItemIDs(end+1) = newItem.ID;
+            % add to dictionary
+            obj.ItemsDict(newItem.Title) = newItem;
         end
     
-        function deleteItem(obj,idx)
-            if idx > obj.nItems || idx < 1
-                error('uiaccordion:invalidIndex',...
-                    'idx must be a positive integer <= number of accordion items');
+        function deleteItem(obj,titleOrIdx)
+            % if titleOrIdx > obj.nItems || titleOrIdx < 1
+            %     error('uiaccordion:invalidIndex',...
+            %         'idx must be a positive integer <= number of accordion items');
+            % else
+            %     delete(obj.Items(titleOrIdx));
+            %     obj.ItemIDs(titleOrIdx) = [];
+            %     obj.update();
+            % end
+
+            if ischar(titleOrIdx) || isstring(titleOrIdx)
+                titleOrIdx = string(titleOrIdx);
+                itemToDelete = obj.getItem(titleOrIdx);
+                if isempty(itemToDelete)
+                    return
+                end
+
+                idx = obj.idxOfID(itemToDelete.ID);
             else
-                delete(obj.Items(idx));
-                obj.ItemIDs(idx) = [];
-                obj.update();
+                if titleOrIdx > obj.nItems || titleOrIdx < 1
+                    error('uiaccordion:invalidIndex',...
+                        'idx must be a positive integer <= number of accordion items');
+                end
+
+                idx = titleOrIdx;
+                itemToDelete = obj.Items(idx);
+            end
+
+            % remove from dict
+            obj.removeItemFromDict(itemToDelete.Title);
+            % delete it
+            delete(obj.Items(idx))
+            % remove its UUID
+            obj.ItemIDs(titleOrIdx) = [];
+            % update
+            obj.update();
+        end
+
+    end
+
+    %% Item management
+
+    methods
+
+        function tf = hasItem(obj,name)
+            tf = isKey(obj.ItemsDict,name);
+        end
+
+
+        function item = getItem(obj,name)
+            if obj.hasItem(name)
+                item = obj.ItemsDict(name);
+            else
+                item = [];
             end
         end
 
     end
 
-
     %% Private helpers
 
     methods(Access=private)
 
-        % find idx of Item using its UUID
         function idx = idxOfID(obj, ID)
+            % find idx of Item using its UUID
             idx = find(obj.ItemIDs == string(ID), 1, 'first');
         end
 
@@ -259,6 +324,23 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
                 ID = [];
             end
         end
+
+        function str = getUniqueTitle(obj)
+            str = "Item 1";
+            ctr = 2;
+            while obj.hasItem(str)
+                str = sprintf("Item %i",ctr);
+                ctr = ctr+1;
+            end
+        end
+
+        function removeItemFromDict(obj,name)
+            % remove the dict entry for the item specified by name
+            if obj.hasItem(name)
+                remove(obj.ItemsDict,name)
+            end
+        end
+
 
     end
 
@@ -271,8 +353,9 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
                 if ~isempty(obj.Hub) && isvalid(obj.Hub) && ~isnan(obj.RouterId)
                     obj.Hub.unregister(obj.RouterId);
                 end
-            catch
+            catch ME
                 warning('Failed to unregister from FigureEventHub...')
+                disp(ME.getReport);
             end
 
             % delete the individual accordion items

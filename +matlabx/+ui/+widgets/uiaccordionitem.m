@@ -2,7 +2,8 @@ classdef uiaccordionitem < matlab.ui.componentcontainer.ComponentContainer
 
 properties
     % text displayed in the title
-    Title (1,:) char = 'Title'
+    % Title (1,:) char = 'Title'
+    Title (1,1) string
 
     % expand/collapse indicator icons
     expandedIconLight (1,:) char = matlabx.internal.Paths.icons('CollapseWhiteIcon.png')
