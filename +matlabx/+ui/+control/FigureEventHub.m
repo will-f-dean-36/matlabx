@@ -158,7 +158,11 @@ classdef FigureEventHub < handle
 
             % release hover if necessary, then fire onLeave()
             if ~isnan(obj.HoverID) && obj.HoverID == id
-                obj.safeCall(obj.Registry(idx).obj, 'onLeave', [], hittest(obj.Fig));
+                % obj.safeCall(obj.Registry(idx).obj, 'onLeave', [], hittest(obj.Fig));
+
+                tgt = hittest(obj.Fig);
+                E = matlabx.ui.control.HubEvent(obj.Fig, tgt, '', []);
+                obj.safeCall(obj.Registry(idx).obj, 'onLeave', E);
                 obj.HoverID = NaN;
             end
 
