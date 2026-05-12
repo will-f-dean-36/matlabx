@@ -32,17 +32,10 @@ function [points,mask] = findPuncta(I,opts)
 
 
     % --- make puncta seed mask --- 
-
-    % preallocate mask
-    mask = false(sz);
-    % convert points to linear px idxs
-    idx = sub2ind(sz, round(points(:,2)), round(points(:,1)));
-    % add to mask
-    mask(idx) = true;
+    mask = matlabx.image.mask.fromPoints(points,sz);
 
 
     % --- show plots ---
-
     if opts.ShowPlots
         ax = matlabx.app.quickshow(I,turbo);
         hAx = ax.getAxes();
