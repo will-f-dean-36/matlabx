@@ -141,7 +141,6 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
             end
         end
 
-
         function tf = onDistractMove(obj,E)
             tf = false;
 
@@ -183,7 +182,6 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                 obj.stopDraggingBox(obj.ActiveBoxIdx);
             end
         end
-
 
     end
 
@@ -536,7 +534,6 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
             end
         end
 
-
         function ids = getSelectedBoxIDs(obj)
             ids = obj.SelectedBoxIds;
         end
@@ -549,7 +546,6 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
         function setActiveBoxID(obj,id)
             obj.setActive(id);
         end
-
 
         function setBoxLabelByID(obj, id, label)
             idx = obj.idxOfId(id);
@@ -609,6 +605,5 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
         end
 
     end
-
 
 end
