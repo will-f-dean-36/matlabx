@@ -699,27 +699,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 val (1,1) matlabx.image.Image5D
             end
 
-            % if ~val.IsMemoryBacked
-            % 
-            %     fprintf('Setting image data\n-------------------\n')
-            %     fprintf('Input data load status: %d\n',val.IsLoaded)
-            % 
-            %     obj.ImageData_ = val;
-            % 
-            %     fprintf('Axes data load status: %d\n\n',obj.ImageData_.IsLoaded)
-            % 
-            %     obj.syncViewStateToImageData();
-            %     obj.syncRenderSourceToView();
-            % else
-            %     obj.ImageData_ = val;
-            %     obj.syncViewStateToImageData();
-            %     obj.syncRenderSourceToView();
-            % end
-
             obj.ImageData_ = val;
             obj.syncViewStateToImageData();
             obj.syncRenderSourceToView();
-
         end
     
         % --- CData ---

@@ -157,6 +157,8 @@ classdef DrawRectangle < matlabx.ui.widgets.ImageAxesTool
 
             % if hovering on existing ROI, return
             if obj.Host.Mode.HoverRectangle
+                % clicks on existing ROI should not open host context menu
+                E.StopPropagation = true;
                 return
             end
 
