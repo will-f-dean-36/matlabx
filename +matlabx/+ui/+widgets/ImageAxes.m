@@ -1022,6 +1022,33 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
+
+        % --- setColormap ---
+        function setColormap(obj, cmap, idx)
+            arguments
+                obj (1,1) matlabx.ui.widgets.ImageAxes
+                cmap (256,3) double
+                idx (:,1) = []
+            end
+
+            if isempty(idx)
+                idx = obj.ComponentIdx;
+            end
+
+            if idx < 1 || idx > obj.NumComponents
+                error('ImageAxes:InvalidComponentIndex', ...
+                    'Index %i does not refer to an existing component', ii)
+            end
+
+            obj.ComponentDisplay_(idx).Colormap = double(cmap);
+            obj.ComponentColorMode = "luts";
+
+            obj.updateAllDisplayMaps();
+            obj.syncRenderSourceToView();
+
+        end
+
+
     end
 
     %% Private helpers: ImageData/DisplayState/ViewState
@@ -1924,13 +1951,22 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
 
-            metadata = obj.ImageData_.OriginalMetadata;
+            % metadata = obj.ImageData_.OriginalMetadata;
+            % metadataLines = cellstr(matlabx.struct.prettyPrint(metadata));
+            % 
+            % obj.metadataWindow = matlabx.app.TextWindow( ...
+            %     "Title","Metadata", ...
+            %     "Text",metadataLines, ...
+            %     "ClosedFcn",@(~,~) obj.onMetadataWindowClosed());
+
+            metadata = obj.ImageData_.AllMetadata;
             metadataLines = cellstr(matlabx.struct.prettyPrint(metadata));
 
             obj.metadataWindow = matlabx.app.TextWindow( ...
                 "Title","Metadata", ...
                 "Text",metadataLines, ...
                 "ClosedFcn",@(~,~) obj.onMetadataWindowClosed());
+
         end
 
         function onMetadataWindowClosed(obj)
@@ -2099,6 +2135,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             % contrast tool
             if ~isempty(obj.contrastTool), delete(obj.contrastTool(isvalid(obj.contrastTool))); end
+
+            % metadata window
+            if ~isempty(obj.metadataWindow), delete(obj.metadataWindow(isvalid(obj.metadataWindow))); end
+
 
             % Unregister from hub (safe if figure already gone)
             try
