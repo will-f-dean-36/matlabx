@@ -32,6 +32,8 @@ classdef Image5D < handle
         OMEMetadata
         CoreMetadata
         GraphicsFileMetadata
+
+        AllMetadata
     end
 
     %% --- PUBLIC API ---
@@ -248,6 +250,19 @@ classdef Image5D < handle
         function md = get.GraphicsFileMetadata(obj)
             md = obj.Source_.getGraphicsFileMetadata();
         end
+
+        function md = get.AllMetadata(obj)
+            md = struct(...
+                'Original',[],...
+                'OME',[],...
+                'Core',[],...
+                'GraphicsFile',[]);
+            md.Original = obj.OriginalMetadata;
+            md.OME = obj.OMEMetadata;
+            md.Core = obj.CoreMetadata;
+            md.GraphicsFile = obj.GraphicsFileMetadata;
+        end
+
 
     end
 
