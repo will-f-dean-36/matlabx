@@ -386,7 +386,6 @@ classdef Viewer5D < handle
 
         % --- WindowShape ---
         function set.WindowShape(obj,val)
-            disp('setting windowshape')
             obj.WindowShape_ = val;
             obj.refreshWindowSize();
             obj.refreshMenubar();
