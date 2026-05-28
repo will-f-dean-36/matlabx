@@ -73,6 +73,9 @@ classdef ParamsDialog < handle
         function buildUI(self)
             n = numel(self.Specs);
 
+            % flag to track whether the form includes any dropdowns/colorpicker/etc.
+            hasDropDown = false;
+
             figW = 420;
             rowH = 20;
             pad = 10;
@@ -109,8 +112,19 @@ classdef ParamsDialog < handle
                 ctrl.Layout.Column = 2;
 
                 self.Controls.(S.Name) = ctrl;
+
+                % take note if we have any dropdowns
+                if ~hasDropDown && isa(ctrl,'matlab.ui.control.DropDown') || isa(ctrl,'matlab.ui.control.ColorPicker')
+                    hasDropDown = true;
+                end
             end
 
+            % if there is at least one dropdown, make sure the figure is tall enough
+            if hasDropDown
+                self.Figure.InnerPosition(4) = max(figH,400);
+            end
+
+            % setup grid for OK and Cancel buttons
             btnGrid = uigridlayout(self.Grid, [1 2]);
             btnGrid.Layout.Row = n + 1;
             btnGrid.Layout.Column = [1 2];
@@ -120,10 +134,12 @@ classdef ParamsDialog < handle
             btnGrid.RowHeight = {'1x'};
             btnGrid.ColumnWidth = {'1x','1x'};
 
+            % OK button
             uibutton(btnGrid, ...
                 'Text', 'OK', ...
                 'ButtonPushedFcn', @(src,evt) self.onOK());
 
+            % Cancel button
             uibutton(btnGrid, ...
                 'Text', 'Cancel', ...
                 'ButtonPushedFcn', @(src,evt) self.onCancel());
@@ -148,6 +164,10 @@ classdef ParamsDialog < handle
                     ctrl = uidropdown(self.Grid, ...
                         'Items', cellstr(items), ...
                         'Value', char(string(S.Default)));
+
+                case "color"
+                    ctrl = uicolorpicker(self.Grid, ...
+                        'Value', S.Default);
 
                 otherwise
                     error('ParamsDialog:UnsupportedType', ...
@@ -201,6 +221,9 @@ classdef ParamsDialog < handle
                 case "logical"
                     value = logical(ctrl.Value);
 
+                case "color"
+                    value = ctrl.Value;
+
                 otherwise
                     error('ParamsDialog:UnsupportedType', ...
                         'Unsupported parameter type "%s".', S.Type);
@@ -253,7 +276,7 @@ classdef ParamsDialog < handle
                     'Parameter name "%s" is not a valid MATLAB variable name.', char(name));
             end
 
-            validTypes = ["char","string","double","logical","choice"];
+            validTypes = ["char","string","double","logical","choice","color"];
             if ~any(type == validTypes)
                 error('ParamsDialog:InvalidType', ...
                     'Spec %d type must be one of: %s.', ...
@@ -348,6 +371,8 @@ classdef ParamsDialog < handle
                     value = '';
                 case "logical"
                     value = false;
+                case "color"
+                    value = [1 1 1];
                 otherwise
                     value = [];
             end
@@ -362,6 +387,8 @@ classdef ParamsDialog < handle
                 txt = '';
             elseif isnumeric(value) && isscalar(value)
                 txt = num2str(value);
+            elseif isnumeric(value) && ~isscalar(value)
+                txt = mat2str(value);
             else
                 error('ParamsDialog:InvalidDefault', ...
                     'Default value could not be converted to display text.');
