@@ -106,7 +106,8 @@ classdef CommandRouter < matlab.ui.componentcontainer.ComponentContainer
             end
 
             if isKey(obj.HotkeyFcnDict, key)
-                remove(obj.HotkeyFcnDict, key);
+                % remove(obj.HotkeyFcnDict, key);
+                obj.HotkeyFcnDict = obj.HotkeyFcnDict.remove(key);
             end
         end
 
