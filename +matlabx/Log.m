@@ -43,6 +43,13 @@ classdef Log
             matlabx.Log.store_([]);
         end
 
+        function deleteLogger()
+        %DELETE Delete the active logger.
+            log = matlabx.Log.peek_();
+            if ~isempty(log) && isvalid(log), delete(log); end
+            matlabx.Log.clear();
+        end
+
         function tf = exists()
         %EXISTS True if a valid logger is currently stored.
             log = matlabx.Log.peek_();
