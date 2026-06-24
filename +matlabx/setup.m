@@ -11,7 +11,4 @@ cal.calibrate();
 % store UI calibration results in MachineState file
 matlabx.config.MachineState.set('UICalibration', cal.toStruct());
 
-
-
-
 end
