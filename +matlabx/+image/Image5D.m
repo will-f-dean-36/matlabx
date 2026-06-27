@@ -346,10 +346,10 @@ classdef Image5D < handle
     %% Public API: Other actions
     methods
 
-        function view(obj)
+        function h = view(obj)
             %matlabx.app.quickshow(obj);
 
-            matlabx.app.Viewer5D(obj);
+            h = matlabx.app.Viewer5D(obj);
         end
 
 
