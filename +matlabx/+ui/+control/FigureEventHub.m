@@ -1,7 +1,12 @@
-% matlabx.ui.control.FigureEventHub - Per-figure event hub that routes window-level events
-% to registered handlers with priority and optional capture.
-
-%% Notes/Definitions
+classdef FigureEventHub < handle
+%matlabx.ui.control.FigureEventHub  Per-figure event hub that routes window-level events
+%
+% Per-figure event hub that routes figure/window-level events to registered
+% handlers with priority and optional capture. Also supports chained
+% figure-level listeners without requiring direct mutation of figure
+% callback properties after hub installation.
+%
+% Notes/Definitions
 %
 % Registrant: object registered with the hub (e.g., widgets.ImageAxes)
 %   Each registrant registers itself with the hub at startuo and must implement 
@@ -29,14 +34,6 @@
 %   Corresponds to: WindowButtonMotionFcn | WindowButtonDownFcn | WindowButtonUpFcn | WindowScrollWheelFcn
 %
 % evt: the MATLAB event struct passed from the figure callback (e.g., WindowButtonDownFcn arg, etc.)
-
-
-classdef FigureEventHub < handle
-% matlabx.ui.control.FigureEventHub
-% Per-figure event hub that routes figure/window-level events to registered
-% handlers with priority and optional capture. Also supports chained
-% figure-level listeners without requiring direct mutation of figure
-% callback properties after hub installation.
 
     properties (Access=private)
         Fig matlab.ui.Figure
