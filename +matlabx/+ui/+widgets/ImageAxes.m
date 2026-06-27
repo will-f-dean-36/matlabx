@@ -2077,6 +2077,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             names = {'cyan','magenta','yellow','red','green','blue'};
         end
 
+        function names = getDefaultTools()
+            names = {'Zoom','Colorbar'};
+        end
 
         function ax = demo(name)
             arguments
