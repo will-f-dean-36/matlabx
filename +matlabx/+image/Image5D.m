@@ -159,6 +159,23 @@ classdef Image5D < handle
             obj = matlabx.image.Image5D(src);
         end
 
+
+        function obj = demo(Y, X, C, Z, T, imgClass)
+            arguments
+                Y        (1,1) double {mustBeInteger, mustBePositive} = 256
+                X        (1,1) double {mustBeInteger, mustBePositive} = 256
+                C        (1,1) double {mustBeInteger, mustBePositive} = 3
+                Z        (1,1) double {mustBeInteger, mustBePositive} = 10
+                T        (1,1) double {mustBeInteger, mustBePositive} = 10
+                imgClass (1,:) char {mustBeMember(imgClass, ...
+                    {'uint8','uint16','single','double'})} = 'uint8'
+            end
+
+            data = matlabx.image.demo.generate5D(Y, X, C, Z, T, imgClass);
+
+            obj = matlabx.image.Image5D.fromComponents(data);
+        end
+
     end
 
     % Derived getters
