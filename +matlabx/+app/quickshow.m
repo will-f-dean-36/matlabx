@@ -7,8 +7,10 @@ function [ax,fig] = quickshow(I,opts)
             = matlabx.ui.widgets.ImageAxes.getDefaultTools()
         opts.WindowStyle (1,:) char {mustBeMember(opts.WindowStyle,{'normal','alwaysontop'})} = 'alwaysontop'
         opts.Visible (1,1) matlab.lang.OnOffSwitchState = "on"
-        opts.Size (1,1) double = NaN
-        opts.Units (1,:) char = ''
+        opts.Size (1,1) double = 500
+        opts.Units (1,:) char = 'pixels'
+        opts.Location (1,:) char {mustBeMember(opts.Location,...
+            {'center','north','south','east','west','northeast','northwest','southeast','southwest'})} = 'center'
     end
 
     if ~isfield(opts,'Colormap') || isempty(opts.Colormap)
@@ -49,7 +51,7 @@ function [ax,fig] = quickshow(I,opts)
             "ImageData",    I,...
             "Units",        "normalized",...
             "Position",     [0 0 1 1],...
-            "Name",         "Viewer");
+            "Name",         opts.Title);
     else
         ax = matlabx.ui.widgets.ImageAxes(fig,...
             "ToolBelt",     opts.Tools,...
@@ -57,7 +59,7 @@ function [ax,fig] = quickshow(I,opts)
             "Units",        "normalized",...
             "Position",     [0 0 1 1],...
             "Colormap",     opts.Colormap,...
-            "Name",         "Viewer");
+            "Name",         opts.Title);
     end
 
     % cal = matlabx.ui.calibration.getCalibration();
@@ -65,7 +67,7 @@ function [ax,fig] = quickshow(I,opts)
     fig.Position(4) = fig.Position(3) + panelTopChromePx;
 
 
-    movegui(fig,"center")
+    movegui(fig,opts.Location)
 
     fig.Visible = opts.Visible;
 
