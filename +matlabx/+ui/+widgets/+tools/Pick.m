@@ -130,19 +130,16 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
     %% Passive event hooks (only when Installed==true && IsDistractor==true)
     methods
 
-        function tf = onDistractDown(obj,E)
+        function onDistractDown(obj,E)
             obj.printStatus(sprintf('%s.onDistractDown()\n',obj.Name));
 
             % ROIBox clicks handled by patch (drag/delete)
             if isprop(E.Target,'ID') && obj.hasBox(E.Target.ID)
-                tf = true;
-            else
-                tf = false;
+                E.stop();
             end
         end
 
-        function tf = onDistractMove(obj,E)
-            tf = false;
+        function onDistractMove(obj,E)
 
             % if we are primed for drag (button down on box with no cursor movement)
             if obj.Host.Mode.PrimedForDrag
@@ -169,11 +166,10 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
 
         end
 
-        function tf = onDistractUp(obj,~)
-            tf = false;
+        function onDistractUp(obj,~)
 
             if obj.Host.Mode.PrimedForDrag
-                % un-prime
+                % no longer primed for drag
                 obj.Host.setMode('PrimedForDrag',false);
                 return
             end

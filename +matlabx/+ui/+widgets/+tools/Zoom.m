@@ -72,7 +72,6 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
                 'CapturesDown',     true, ...
                 'CapturesScroll',   true, ...
                 'CapturesKey',      true, ...
-                'DistractsMove',    false, ...
                 'DistractsKey',     true, ...
                 'DistractsDown',    true);
 
@@ -230,11 +229,10 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
             tf = false;
         end
 
-        function tf = onDistractKey(obj,E)
+        function onDistractKey(obj,E)
             if obj.ToggleHotkey == E.Hotkey
-                tf = true;
+                E.stop();
             else
-                tf = false;
                 return
             end
 
