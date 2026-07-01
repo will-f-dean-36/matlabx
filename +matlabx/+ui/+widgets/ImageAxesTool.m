@@ -1,33 +1,46 @@
 classdef ImageAxesTool < handle
-% widgets.ImageAxesTool - base class for pluggable tools hosted by widgets.ImageAxes
+%IMAGEAXESTOOL  Base class for pluggable tools hosted by matlabx.ui.widgets.ImageAxes
 %
-% Overview
+%   Overview
 %
-%   Subclasses of ImageAxesTool can be used to create custom toolbar-controlled tools 
-%   in an instance of widgets.ImageAxes (the Host). When a tool is registered with the Host,
-%   it is added to the Host's ToolRegistry and a custom toolbar 'state' button will be created. 
-%   Clicking the button will toggle the Enabled state of the tool. When Enabled or Disabled, 
-%   tools set a 'Mode' in the Host. For example, when the 'Zoom' tool is Enabled, it will 
-%   set Host.Mode.Zoom=true. Optionally, tools can also be defined to capture window-level 
-%   mouse events (i.e. 'Down', 'Move', 'Up', and 'Scroll') from the Host. Tools that can capture
-%   at least one of these events are called 'Interceptors' (i.e. IsInterceptor=true). The Host
-%   will route each type of event to the correct tool based on a number of rules.
+%       Subclasses of ImageAxesTool can be used to create custom toolbar-controlled tools 
+%       in an instance of matlabx.ui.widgets.ImageAxes (the Host). When a Tool is registered with the Host,
+%       it is added to the Host's ToolRegistry and a custom toolbar button will be created.
+%
+%       The behavior of the toolbar button clicks depends on the Style property of the associated Tool:
+%
+%           'push'  - Clicking will call the onPush() method of the associated Tool
+%           'state' - Clicking will toggle the Enabled state of the associated Tool by calling onEnabled() or onDisabled()
+%
+%   Event routing for 'state' Tools
+%
+%       Tools that set Style='state' can capture figure-level events (i.e. 'Down', 'Move', 'Up', 'Scroll', and 'Key') 
+%       from the Host. Tools that can capture at least one of these events are called 'Interceptors' (i.e. IsInterceptor=true). 
+%       The Host will route each Kind of event to the onInterceptX() method of the correct Tool based on a number of rules,
+%       where X is the Kind of event.
 %
 %   In general, the event-routing flow is as follows:
-%       - An event is routed to the Host via FigureEventHub
-%       - The Host finds all Enabled Interceptors that can capture that type of event
-%       - The event is routed to the tool with the highest Priority
+%
+%       - All figure-level events are routed through an instance of matlabx.ui.control.FigureEventHub (the Hub)
+%       - Each event is normalized by the Hub into an instance of matlabx.ui.control.HubEvent
+%       - If an event is captured by the Host, the Host finds all Enabled Interceptors that can capture that Kind of event
+%       - The event is routed to the Interceptor with the highest Priority
 %
 %   Thus, each event is routed only to the highest Priority Interceptor that claims it and 
-%   is Enabled. There is also a way for tools to temporarily claim events before they are 
-%   forwarded to the Interceptor, even if they are Disabled. These tools are called 
-%   'Distractors' (i.e. IsDistractor=true). Before routing an event to the highest priority 
-%   Interceptor, the Host will first route the event to EACH Distractor for the current event
-%   type, in order of Priority, by calling the tool's onDistractX() method, where X is the type
-%   of event. This is especially useful for when tools need to carry out functions even after 
-%   being disabled. For example, if a tool draws interactable overlays (e.g. a draggable ROI)
+%   is Enabled. However, tools may also temporarily claim events before they are forwarded to the Interceptor, 
+%   even if they are Disabled. These tools are called 'Distractors' (i.e. IsDistractor=true). 
+%   Before routing an event to the highest priority Interceptor, the Host will first route the event to EACH 
+%   Distractor for the current event Kind, in order of Priority, by calling the tool's onDistractX() method, where X is the type
+%   of event. This is useful for when tools need to carry out functions while being disabled. 
+%   For example, if a tool draws interactable overlays (e.g. a draggable ROI)
 %   in the axes that persist even when Enabled=false, it could still manage their behavior 
 %   in the background. 
+% 
+% 
+%   Tools may also control downstream propagation of events by setting E.stop() which will block Interceptors 
+%   (but not Distractors) from receiving the event. This will also block certain internal callbacks used by the Host.
+%   For example, while right-clicking the image in a matlabx.ui.widgets.ImageAxes normally opens a context menu,
+%   if a Tool has already called E.stop() in its onInterceptDown() or onDistractDown() method, the context menu will not open.
 
 
     properties (SetAccess=protected)
