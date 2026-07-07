@@ -2,7 +2,7 @@ function matrix_out = checkerboard(sz,Spacing)
 %CHECKERBOARD makes evenly spaced 'checkerboard' style matrix
 %
 %   INPUTS:
-%       sz      | (1,1) double | positive integer       | width/height of the output (square)
+%       sz      | (1,2) double | positive integer       | width/height of the output (square)
 %       Spacing | (1,1) double | positive, even integer | spacing between neighboring True pixels
 %
 
@@ -36,9 +36,17 @@ function matrix_out = checkerboard(sz,Spacing)
                 end
 
                 counter = 2;
-    
+
         end
-    
+
+    end
+
+    function tf = iseven(x)
+        %ISEVEN  Return true for even integers
+        %
+        %   tf = isEven(x) returns a logical array the same size as x.
+
+        tf = mod(x,2) == 0;
     end
 
 end
