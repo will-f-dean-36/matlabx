@@ -6,6 +6,8 @@ addpath(matlabx.internal.Paths.root());
 
 % add external libraries to MATLAB search path
 addpath(genpath(matlabx.internal.Paths.external()));
+
+% save path
 savepath();
 
 end
