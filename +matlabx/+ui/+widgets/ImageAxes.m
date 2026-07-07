@@ -127,6 +127,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         BottomLabel (1,1) matlab.graphics.primitive.Text
         Colorbar matlab.graphics.illustration.ColorBar
         sizingGrid matlab.ui.container.GridLayout
+        ViewBoxFull (1,1) matlab.graphics.primitive.Patch
+        ViewBoxZoom (1,1) matlab.graphics.primitive.Patch
+
 
         % listeners
         L event.listener
@@ -336,11 +339,30 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 'HorizontalAlignment','left',...
                 'VerticalAlignment','bottom');
 
+            % set up ViewBox patches
+            obj.ViewBoxFull = patch(obj.staticAxes, ...
+                'XData',NaN, ...
+                'YData',NaN, ...
+                'EdgeColor',obj.ViewBoxEdgeColor, ...
+                'FaceColor',obj.ViewBoxFaceColor, ...
+                'FaceAlpha',obj.ViewBoxFaceAlpha, ...
+                'HitTest','on', ...
+                'PickableParts','all', ...
+                'LineWidth', obj.ViewBoxLineWidth, ...
+                'Tag','ViewBoxFull');
+            obj.ViewBoxZoom = patch(obj.staticAxes, ...
+                'XData',NaN, ...
+                'YData',NaN, ...
+                'EdgeColor',obj.ViewBoxEdgeColor, ...
+                'FaceColor',obj.ViewBoxFaceColor, ...
+                'FaceAlpha',obj.ViewBoxFaceAlpha, ...
+                'HitTest','on', ...
+                'PickableParts','all', ...
+                'LineWidth', obj.ViewBoxLineWidth, ...
+                'Tag','ViewBoxZoom');           
+
             % set up ContextMenu
             obj.setupContextMenu();
-
-            % % set default colormap
-            % obj.Colormap = gray;
 
             % initialize display state from ImageData
             obj.syncViewStateToImageData();
@@ -398,10 +420,548 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     %% Zoom functionality
 
-    
+    properties (Access=private)
+        Zoom_ = struct( ...
+            'Idx', 1, ...
+            'Levels', [1 1/2 1/3 1/4 1/5 1/10 1/15 1/20], ...
+            'PanLims', [0.25 0.75], ...
+            'LastCursorXY', [], ...
+            'Enabled', false)
+        Pan_ = struct( ...
+            'Lims', [0.25 0.75], ...
+            'Enabled', true, ...
+            'OffsetXY', [0,0], ...
+            'LastCursorXY', [])
+        ViewBoxBase_ = struct( ...
+            'Top', [], ...
+            'Left', [], ...
+            'XBase', [], ...
+            'YBase', [], ...
+            'XFull', [], ...
+            'YFull', [], ...
+            'XZoomBase', [], ...
+            'YZoomBase', [])
+    end
 
+    properties (Dependent)
+        ZoomEnabled
+        ZoomLevel
+        ZoomFactor
 
+        PanEnabled
+        PanLims
+    end
 
+    % ViewBox appearance
+    properties
+        ViewBoxSize = 0.1
+        ViewBoxEdgeColor = [0 0 0]
+        ViewBoxFaceColor = [1 1 1]
+        ViewBoxFaceAlpha = 0.25
+        ViewBoxLineWidth = 1
+
+        ViewBoxTop = 0.05
+        ViewBoxLeft = 0.01
+    end
+
+    % Private Zoom/Pan helpers
+    methods
+        function moveViewToCursor(obj)
+            %MOVEVIEWTOCURSOR  Pan the view according to static-axes cursor position
+
+            XY = obj.cursorPositionStatic;
+
+            if isempty(XY)
+                return
+            end
+
+            obj.setZoomLims(XY);
+        end
+
+        function zoomViewToCursor(obj)
+            %ZOOMVIEWTOCURSOR  Change zoom while preserving the pixel under the cursor
+
+            XY = obj.cursorPosition;
+
+            if isempty(XY)
+                return
+            end
+
+            % These are still the limits from the previous zoom level because the
+            % axes limits have not yet been updated.
+            oldXLim = obj.mainAxes.XLim;
+            oldYLim = obj.mainAxes.YLim;
+
+            obj.setZoomLims2(XY,oldXLim,oldYLim);
+        end
+
+        function [XLim,YLim] = getZoomLims(obj,XY)
+            %GETZOOMLIMS  Calculate cursor-following pan limits
+            %
+            %   [XLim,YLim] = getZoomLims(obj,XY) maps XY from the full-sized static
+            %   axes into the available pan range. A stored pan offset reconciles this
+            %   absolute mapping with any previous cursor-anchored zoom operation.
+            %
+            %   XY must be expressed in the coordinate system of the full-sized static
+            %   axes.
+
+            arguments
+                obj
+                XY (1,2) double
+            end
+
+            % Image dimensions
+            sz = obj.CDataSize;
+            H = sz(1);
+            W = sz(2);
+
+            % Current zoomed-window dimensions
+            viewWidth  = obj.ZoomLevel * W;
+            viewHeight = obj.ZoomLevel * H;
+
+            % Full image limits
+            defXLim = [0.5, W + 0.5];
+            defYLim = [0.5, H + 0.5];
+
+            % Calculate the uncorrected lower limits from the static cursor
+            lower = obj.getCursorMappedLowerLimit(XY);
+
+            % Reconcile the cursor mapping with the current zoom-anchored view
+            offset = obj.getPanOffset();
+            lower = lower + offset;
+
+            % Constrain the view to the full image
+            lower(1) = min(max(lower(1),defXLim(1)), ...
+                defXLim(2) - viewWidth);
+
+            lower(2) = min(max(lower(2),defYLim(1)), ...
+                defYLim(2) - viewHeight);
+
+            % Construct limits
+            XLim = lower(1) + [0,viewWidth];
+            YLim = lower(2) + [0,viewHeight];
+        end
+
+        function [XLim,YLim] = getZoomLims2(obj,XY,oldXLim,oldYLim)
+            %GETZOOMLIMS2  Calculate cursor-anchored zoom limits
+            %
+            %   [XLim,YLim] = getZoomLims2(obj,XY,oldXLim,oldYLim) calculates new
+            %   limits such that the image coordinate XY remains at approximately the
+            %   same screen position after the zoom level changes.
+            %
+            %   XY must be expressed in image/data coordinates.
+
+            arguments
+                obj
+                XY (1,2) double
+                oldXLim (1,2) double
+                oldYLim (1,2) double
+            end
+
+            % Image dimensions
+            sz = obj.CDataSize;
+            H = sz(1);
+            W = sz(2);
+
+            % Full image limits
+            defXLim = [0.5, W + 0.5];
+            defYLim = [0.5, H + 0.5];
+
+            % New visible dimensions
+            newWidth  = obj.ZoomLevel * W;
+            newHeight = obj.ZoomLevel * H;
+
+            % Cursor position within the current visible window
+            xFrac = (XY(1) - oldXLim(1)) / diff(oldXLim);
+            yFrac = (XY(2) - oldYLim(1)) / diff(oldYLim);
+
+            % Guard against a cursor coordinate slightly outside the axes
+            xFrac = min(max(xFrac,0),1);
+            yFrac = min(max(yFrac,0),1);
+
+            % Preserve the cursor's fractional position within the view
+            xLower = XY(1) - xFrac * newWidth;
+            yLower = XY(2) - yFrac * newHeight;
+
+            % Constrain the view to the full image
+            xLower = min(max(xLower,defXLim(1)), ...
+                defXLim(2) - newWidth);
+
+            yLower = min(max(yLower,defYLim(1)), ...
+                defYLim(2) - newHeight);
+
+            % Construct limits
+            XLim = xLower + [0,newWidth];
+            YLim = yLower + [0,newHeight];
+        end
+
+        function lower = getCursorMappedLowerLimit(obj,XY)
+            %GETCURSORMAPPEDLOWERLIMIT  Map static cursor position into pan range
+            %
+            %   This is the uncorrected version of the original absolute cursor-follow
+            %   calculation. It does not include the stored pan offset.
+
+            % Image dimensions
+            sz = obj.CDataSize;
+            H = sz(1);
+            W = sz(2);
+
+            % Current zoomed-window dimensions
+            viewWidth  = obj.ZoomLevel * W;
+            viewHeight = obj.ZoomLevel * H;
+
+            % Available travel of the zoomed view
+            travel = [W - viewWidth, H - viewHeight];
+
+            % Pan limits in normalized static-axes coordinates
+            panLims = obj.PanLims;
+            a = panLims(1);
+            b = panLims(2);
+
+            if b <= a
+                error('PanLims must contain two increasing values.')
+            end
+
+            % Normalize static-axes cursor coordinates to the full image
+            XYNorm = (XY - 0.5) ./ [W,H];
+
+            % Apply the pan dead-zone/range
+            XYNorm = min(max(XYNorm,a),b);
+
+            % Remap [a,b] to [0,1]
+            panFrac = (XYNorm - a) ./ (b - a);
+
+            % Lower limits before application of the reconciliation offset
+            lower = [0.5,0.5] + panFrac .* travel;
+        end
+
+        function offset = getPanOffset(obj)
+            %GETPANOFFSET  Return the stored pan reconciliation offset
+
+            if ~isfield(obj.Pan_,'OffsetXY') || ...
+                    isempty(obj.Pan_.OffsetXY) || ...
+                    numel(obj.Pan_.OffsetXY) ~= 2
+
+                obj.Pan_.OffsetXY = [0,0];
+            end
+
+            offset = obj.Pan_.OffsetXY;
+        end
+
+        function calibratePanOffset(obj,XYStatic)
+            %CALIBRATEPANOFFSET  Align cursor-follow mapping with current axes limits
+            %
+            %   XYStatic is the cursor position in the full-sized static axes. The
+            %   resulting offset ensures that calling getZoomLims with this same cursor
+            %   position reproduces the current axes position rather than snapping to
+            %   the original absolute mapping.
+
+            if isempty(XYStatic)
+                return
+            end
+
+            mappedLower = obj.getCursorMappedLowerLimit(XYStatic);
+            currentLower = [obj.mainAxes.XLim(1), obj.mainAxes.YLim(1)];
+
+            obj.Pan_.OffsetXY = currentLower - mappedLower;
+            obj.Pan_.LastCursorXY = XYStatic;
+        end
+
+        function setZoomLims(obj,XY)
+            %SETZOOMLIMS  Apply cursor-following pan limits
+            %
+            %   XY must be expressed in full-sized static-axes coordinates.
+
+            if nargin < 2 || isempty(XY)
+                XY = obj.cursorPositionStatic;
+            end
+
+            if isempty(XY)
+                return
+            end
+
+            [XZoomLim,YZoomLim] = obj.getZoomLims(XY);
+            obj.applyZoomLims(XZoomLim,YZoomLim);
+
+            % This field now always contains static-axes coordinates
+            obj.Pan_.LastCursorXY = XY;
+        end
+
+        function setZoomLims2(obj,XY,oldXLim,oldYLim)
+            %SETZOOMLIMS2  Apply cursor-anchored zoom limits
+            %
+            %   XY must be expressed in image/data coordinates.
+
+            if nargin < 2 || isempty(XY)
+                XY = obj.cursorPosition;
+            end
+
+            if isempty(XY)
+                return
+            end
+
+            if nargin < 3 || isempty(oldXLim)
+                oldXLim = obj.mainAxes.XLim;
+            end
+
+            if nargin < 4 || isempty(oldYLim)
+                oldYLim = obj.mainAxes.YLim;
+            end
+
+            [XZoomLim,YZoomLim] = ...
+                obj.getZoomLims2(XY,oldXLim,oldYLim);
+
+            obj.applyZoomLims(XZoomLim,YZoomLim);
+
+            % This field now always contains image/data coordinates
+            obj.Zoom_.LastCursorXY = XY;
+
+            % Reconcile the static cursor-follow mapping with the new view. This is
+            % the step that prevents the next mouse movement from causing a jump.
+            obj.calibratePanOffset(obj.cursorPositionStatic);
+        end
+
+        function applyZoomLims(obj,XLim,YLim)
+            %APPLYZOOMLIMS  Apply axes limits and synchronize the zoom view box
+
+            set(obj.mainAxes,...
+                'XLim',XLim,...
+                'YLim',YLim);
+
+            % Update inner view box
+            XZoomBase = obj.ViewBoxBase_.XZoomBase;
+            YZoomBase = obj.ViewBoxBase_.YZoomBase;
+
+            set(obj.ViewBoxZoom,...
+                "XData",XZoomBase + (XLim(1) - 0.5)*obj.ViewBoxSize,...
+                "YData",YZoomBase + (YLim(1) - 0.5)*obj.ViewBoxSize);
+        end
+
+        function updateViewBoxBaseCoordinates(obj)
+            %UPDATEVIEWBOXBASECOORDINATES  Update full and zoomed view-box geometry
+
+            sz = obj.CDataSize;
+            H = sz(1);
+            W = sz(2);
+
+            S = struct();
+
+            S.Top  = (obj.ViewBoxTop  * H) + 0.5;
+            S.Left = (obj.ViewBoxLeft * W) + 0.5;
+
+            S.XBase = [0,0,W,W] .* obj.ViewBoxSize;
+            S.YBase = [0,H,H,0] .* obj.ViewBoxSize;
+
+            S.XFull = S.XBase + S.Left;
+            S.YFull = S.YBase + S.Top;
+
+            zoomLevel = obj.ZoomLevel;
+
+            S.XZoomBase = S.XBase .* zoomLevel + S.Left;
+            S.YZoomBase = S.YBase .* zoomLevel + S.Top;
+
+            % Update coordinates struct
+            obj.ViewBoxBase_ = S;
+
+            % Always update full-size box when coordinates change
+            set(obj.ViewBoxFull,...
+                "XData",S.XFull,...
+                "YData",S.YFull);
+        end
+
+    end
+
+    % Public Zoom/Pan API
+    methods
+
+        function z = get.ZoomEnabled(obj)
+            z = obj.Zoom_.Enabled;
+        end
+
+        function set.ZoomEnabled(obj,tf)
+            if tf
+                obj.enableZoom();
+            else
+                obj.disableZoom();
+            end
+        end
+
+        function p = get.PanEnabled(obj)
+            p = obj.Pan_.Enabled;
+        end
+
+        function set.PanEnabled(obj,tf)
+            if tf
+                obj.enablePan();
+            else
+                obj.disablePan();
+            end
+        end
+
+        function p = get.PanLims(obj)
+            p = obj.Pan_.Lims;
+        end
+
+        function set.PanLims(obj,lims)
+            obj.Pan_.Lims = lims;
+
+            % PanLims changes the absolute cursor mapping. Recalibrate the offset
+            % so changing PanLims does not immediately move the current view.
+            if obj.ZoomEnabled
+                obj.calibratePanOffset(obj.cursorPositionStatic);
+            end
+        end
+
+        function z = get.ZoomLevel(obj)
+            z = obj.Zoom_.Levels(obj.Zoom_.Idx);
+        end
+
+        function f = get.ZoomFactor(obj)
+            f = 1 / obj.ZoomLevel;
+        end
+
+        function enableZoom(obj)
+            %ENABLEZOOM  Enable zoom functionality
+
+            if obj.ZoomEnabled
+                return
+            end
+
+            % Update view-box base coordinates for the current zoom level
+            obj.updateViewBoxBaseCoordinates();
+
+            % Show view boxes
+            set([obj.ViewBoxFull,obj.ViewBoxZoom],...
+                "Visible","on");
+
+            oldXLim = obj.mainAxes.XLim;
+            oldYLim = obj.mainAxes.YLim;
+
+            % Prefer the current image coordinate under the cursor
+            XY = obj.cursorPosition;
+
+            % Fall back to the most recent image-space zoom anchor
+            if isempty(XY) && isfield(obj.Zoom_,'LastCursorXY')
+                XY = obj.Zoom_.LastCursorXY;
+            end
+
+            % Final fallback: center of the image
+            if isempty(XY)
+                sz = obj.CDataSize;
+                XY = [(sz(2) + 1)/2, (sz(1) + 1)/2];
+            end
+
+            obj.setZoomLims2(XY,oldXLim,oldYLim);
+
+            obj.Zoom_.Enabled = true;
+        end
+
+        function disableZoom(obj)
+            %DISABLEZOOM  Disable zoom functionality
+
+            if ~obj.ZoomEnabled
+                return
+            end
+
+            % Clear and hide patches
+            if isvalid(obj.ViewBoxFull)
+                set(obj.ViewBoxFull,...
+                    "XData",NaN,...
+                    "YData",NaN,...
+                    "Visible","off");
+            end
+
+            if isvalid(obj.ViewBoxZoom)
+                set(obj.ViewBoxZoom,...
+                    "XData",NaN,...
+                    "YData",NaN,...
+                    "Visible","off");
+            end
+
+            % Restore limits
+            obj.restoreDefaultLimits();
+
+            % The offset belongs to the current zoomed view and is no longer valid
+            obj.Pan_.OffsetXY = [0,0];
+            obj.Pan_.LastCursorXY = [];
+
+            obj.Zoom_.Enabled = false;
+        end
+
+        function toggleZoomEnabled(obj)
+            %TOGGLEZOOMENABLED  Flip state of ZoomEnabled
+
+            obj.ZoomEnabled = ~obj.Zoom_.Enabled;
+        end
+
+        function increaseZoom(obj)
+            %INCREASEZOOM  Step forward to the next ZoomLevel
+
+            oldIdx = obj.Zoom_.Idx;
+
+            obj.Zoom_.Idx = min(...
+                obj.Zoom_.Idx + 1,...
+                numel(obj.Zoom_.Levels));
+
+            % Do nothing if already at the final zoom level
+            if obj.Zoom_.Idx == oldIdx
+                return
+            end
+
+            obj.updateViewBoxBaseCoordinates();
+            obj.zoomViewToCursor();
+        end
+
+        function decreaseZoom(obj)
+            %DECREASEZOOM  Step backward to the previous ZoomLevel
+
+            oldIdx = obj.Zoom_.Idx;
+
+            obj.Zoom_.Idx = max(obj.Zoom_.Idx - 1,1);
+
+            % Do nothing if already at the first zoom level
+            if obj.Zoom_.Idx == oldIdx
+                return
+            end
+
+            obj.updateViewBoxBaseCoordinates();
+            obj.zoomViewToCursor();
+        end
+
+        function enablePan(obj)
+            %ENABLEPAN  Enable pan functionality
+
+            if obj.PanEnabled
+                return
+            end
+
+            obj.Pan_.Enabled = true;
+
+            % Establish the current cursor/view relationship without moving the
+            % view when pan is first enabled.
+            if obj.ZoomEnabled
+                obj.calibratePanOffset(obj.cursorPositionStatic);
+            end
+        end
+
+        function disablePan(obj)
+            %DISABLEPAN  Disable pan functionality
+
+            if ~obj.PanEnabled
+                return
+            end
+
+            obj.Pan_.Enabled = false;
+            obj.Pan_.LastCursorXY = [];
+        end
+
+        function togglePanEnabled(obj)
+            %TOGGLEPANENABLED  Flip state of PanEnabled
+
+            obj.PanEnabled = ~obj.Pan_.Enabled;
+        end
+
+    end
 
 
 
@@ -1234,22 +1794,102 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
     
         function syncRenderSourceToView(obj)
+        %SYNCRENDERSOURCETOVIEW  Synchronize rendered data while preserving view
+        
             fprintf("syncRenderSourceToView() %s\n",obj.Name);
+        
             oldData = obj.RenderSource_;
-    
+        
             if obj.ViewState_.ShowComposite
                 newData = obj.getCompositeImage();
             else
-                newData = obj.ImageData_.getPlane(obj.ViewState_.C,obj.ViewState_.Z,obj.ViewState_.T);
+                newData = obj.ImageData_.getPlane(...
+                    obj.ViewState_.C,...
+                    obj.ViewState_.Z,...
+                    obj.ViewState_.T);
             end
-    
+        
+            oldSz = size(oldData,[1,2]);
+            newSz = size(newData,[1,2]);
+        
+            sizeChanged = ~isequal(oldSz,newSz);
+        
+            % Preserve the current view in normalized image coordinates before
+            % changing the render source. Pixel-centered image limits are assumed:
+            %
+            %   XLim = [0.5, W + 0.5]
+            %   YLim = [0.5, H + 0.5]
+            preserveView = sizeChanged && ...
+                           all(oldSz > 0) && ...
+                           obj.ZoomEnabled;
+        
+            if preserveView
+                oldXLim = obj.mainAxes.XLim;
+                oldYLim = obj.mainAxes.YLim;
+        
+                normalizedXLim = (oldXLim - 0.5) ./ oldSz(2);
+                normalizedYLim = (oldYLim - 0.5) ./ oldSz(1);
+            end
+        
+            % Scale the stored image-space zoom anchor independently of the view
+            % limits. Zoom_.LastCursorXY must always remain in image coordinates.
+            lastZoomAnchor = obj.Zoom_.LastCursorXY;
+        
+            if sizeChanged && ~isempty(lastZoomAnchor) && all(oldSz > 0)
+                anchorNorm = (lastZoomAnchor - 0.5) ./ [oldSz(2),oldSz(1)];
+        
+                obj.Zoom_.LastCursorXY = ...
+                    0.5 + anchorNorm .* [newSz(2),newSz(1)];
+            end
+        
+            % Update rendered data and perform the normal refresh
             obj.RenderSource_ = newData;
             obj.refreshView();
-    
-            evtData = matlabx.ui.widgets.events.CDataChangedEventData(oldData, newData);
-            notify(obj, 'CDataChanged', evtData);
+        
+            if preserveView
+                % Reconstruct the same relative view for the new image dimensions
+                newXLim = 0.5 + normalizedXLim .* newSz(2);
+                newYLim = 0.5 + normalizedYLim .* newSz(1);
+        
+                % Guard against small floating-point excursions
+                defXLim = [0.5, newSz(2) + 0.5];
+                defYLim = [0.5, newSz(1) + 0.5];
+        
+                viewWidth  = min(diff(newXLim),diff(defXLim));
+                viewHeight = min(diff(newYLim),diff(defYLim));
+        
+                xLower = min(max(newXLim(1),defXLim(1)), ...
+                             defXLim(2) - viewWidth);
+        
+                yLower = min(max(newYLim(1),defYLim(1)), ...
+                             defYLim(2) - viewHeight);
+        
+                newXLim = xLower + [0,viewWidth];
+                newYLim = yLower + [0,viewHeight];
+        
+                % refreshView may have updated image-dependent geometry, so apply
+                % the restored limits only after it completes.
+                obj.updateViewBoxBaseCoordinates();
+                obj.applyZoomLims(newXLim,newYLim);
+        
+                % Reconcile cursor-follow panning with the restored view so the
+                % next cursor movement does not cause a jump.
+                obj.calibratePanOffset(obj.cursorPositionStatic);
+            elseif sizeChanged
+                % No active zoomed view to preserve. Keep the stored anchor valid,
+                % defaulting to the center when no previous anchor exists.
+                if isempty(obj.Zoom_.LastCursorXY)
+                    obj.Zoom_.LastCursorXY = ...
+                        [(newSz(2) + 1)/2, (newSz(1) + 1)/2];
+                end
+            end
+        
+            evtData = matlabx.ui.widgets.events.CDataChangedEventData(...
+                oldData,newData);
+        
+            notify(obj,'CDataChanged',evtData);
         end
-    
+
         function updateAllDisplayMaps(obj)
             for i = 1:obj.NumComponents
                 obj.ComponentDisplay_(i).DisplayMap = obj.getDisplayMap( ...
@@ -1458,6 +2098,13 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             if ~isempty(btn)
                 % set image info label to display button tooltip, return
                 obj.BottomLabel.String = sprintf(' %s',btn.Tooltip); return
+            end
+
+
+            % set axes limits and view box before routing to tools
+            if obj.ZoomEnabled && obj.PanEnabled
+                % obj.moveViewToCursor();
+                obj.moveViewToCursor();
             end
 
             obj.routeEventToTools(E);
@@ -2099,15 +2746,12 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
-
-
     %% Hidden entrypoint for debugging
     methods (Hidden)
         function DEBUG_(obj)
             debug
         end
     end
-
 
     %% Private static helpers
     methods (Static, Access=private)
@@ -2256,6 +2900,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 'ComponentColormaps','ComponentCLims'});
         end
 
+        function ax = demoImage5D()
+            I = matlabx.image.Image5D.demo();
+            ax = matlabx.app.quickshow(I,"Title","Example 5D Image");
+        end
+
 
     end
 
@@ -2269,12 +2918,15 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % replace listener property with empty array of event.listener
             obj.L = event.listener.empty;
 
-            % contrast tool
+            % contrastTool
             if ~isempty(obj.contrastTool), delete(obj.contrastTool(isvalid(obj.contrastTool))); end
 
-            % metadata window
+            % metadataWindow
             if ~isempty(obj.metadataWindow), delete(obj.metadataWindow(isvalid(obj.metadataWindow))); end
 
+            % ViewBox
+            delete(obj.ViewBoxFull(isvalid(obj.ViewBoxFull)));
+            delete(obj.ViewBoxZoom(isvalid(obj.ViewBoxZoom)));
 
             % Unregister from hub (safe if figure already gone)
             try
