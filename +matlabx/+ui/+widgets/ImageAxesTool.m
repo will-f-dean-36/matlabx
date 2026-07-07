@@ -130,8 +130,8 @@ classdef ImageAxesTool < handle
             obj.DistractsScroll = p.Results.DistractsScroll;
             obj.DistractsKey = p.Results.DistractsKey;
 
-            % add listener for Host CDataChanged event
-            obj.L(1) = addlistener(obj.Host,'CDataChanged',@(~,evt) obj.onHostCDataChanged(evt));
+            % add listener for Host RenderSourceChanged event
+            obj.L(1) = addlistener(obj.Host,'RenderSourceChanged',@(~,evt) obj.onHostRenderSourceChanged(evt));
 
             obj.printStatus(sprintf('"%s" tool loaded\n',obj.Name));
         end
@@ -245,7 +245,7 @@ classdef ImageAxesTool < handle
 
         % Passive hooks (broadcast to enabled tools if the host wants)
         function onHostAxesChanged(~,~),   end   % e.g., XLim/YLim/CLim changed
-        function onHostCDataChanged(~,~),  end   % image replaced
+        function onHostRenderSourceChanged(~,~),  end   % rendered source plane/composite changed
 
     end
 
