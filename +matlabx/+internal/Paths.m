@@ -31,6 +31,11 @@ classdef Paths
             p = fullfile(matlabx.internal.Paths.root(), 'external', varargin{:});
         end
 
+        % --- shortcuts ---
+
+        function p = shortcuts(varargin)
+            p = fullfile(matlabx.internal.Paths.root(), 'shortcuts', varargin{:});
+        end
 
 
         % --- config, settings, user prefs ---
