@@ -46,6 +46,38 @@ classdef Settings < handle
     end
 
     methods (Static)
+        function obj = get()
+        %GET Return cached user settings, loading them on first access.
+            obj = matlabx.config.Settings.cache_();
+
+            if isempty(obj) || ~isvalid(obj)
+                obj = matlabx.config.Settings.load();
+                matlabx.config.Settings.cache_(obj);
+            end
+        end
+
+        function clear()
+        %CLEAR Clear cached settings. Next get() reloads from disk.
+            matlabx.config.Settings.cache_([]);
+        end
+
+        function obj = reload()
+        %RELOAD Force settings reload from disk.
+            obj = matlabx.config.Settings.load();
+            matlabx.config.Settings.cache_(obj);
+        end
+
+        function saveActive(file)
+        %SAVEACTIVE Save cached settings, if present, otherwise load defaults first.
+            obj = matlabx.config.Settings.get();
+
+            if nargin < 1
+                obj.save();
+            else
+                obj.save(file);
+            end
+        end
+
         function obj = load(file)
             if nargin < 1
                 file = matlabx.internal.Paths.settingsFile();
@@ -81,6 +113,19 @@ classdef Settings < handle
             end
             obj = matlabx.config.Settings();
             obj.save(file);
+            matlabx.config.Settings.cache_(obj);
+        end
+    end
+
+    methods (Static, Access=private)
+        function obj = cache_(newObj)
+            persistent cachedSettings
+
+            if nargin > 0
+                cachedSettings = newObj;
+            end
+
+            obj = cachedSettings;
         end
     end
 end
