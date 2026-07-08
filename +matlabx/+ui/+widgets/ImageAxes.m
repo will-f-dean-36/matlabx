@@ -2347,7 +2347,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     %% Internal behaviors
     methods (Access=private)
 
-        % executes on mouse move after Distractors/Interceptors
+        % executes on mouse move after PassiveInterceptors/Interceptors
         function onMove_(obj)
             obj.updateBottomLabelText();
             obj.updatePointer();
@@ -2415,7 +2415,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function routeEventToTools(obj,E)
 
-            obj.routeToDistractors(E);
+            obj.routeToPassiveInterceptors(E);
             if E.StopPropagation, return; end
 
             % get highest priority Interceptor for event kind
@@ -2427,16 +2427,16 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
-        function routeToDistractors(obj,E)
-            % cell array of Distractors for this eventType, sorted by Priority
-            distractors = obj.getPriorityDistractors(E.Kind);
+        function routeToPassiveInterceptors(obj,E)
+            % cell array of PassiveInterceptors for this eventType, sorted by Priority
+            passiveInterceptors = obj.getPriorityPassiveInterceptors(E.Kind);
 
-            % no Distractors for this eventType, return early
-            if isempty(distractors), return; end
+            % no PassiveInterceptors for this eventType, return early
+            if isempty(passiveInterceptors), return; end
 
-            % pass event to each Distractor
-            for i = 1:numel(distractors)
-                distractors{i}.("onDistract"+E.Kind)(E);
+            % pass event to each PassiveInterceptor
+            for i = 1:numel(passiveInterceptors)
+                passiveInterceptors{i}.("onPassive"+E.Kind)(E);
             end
 
         end
@@ -2707,7 +2707,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % no Installed tools, exit early
             if isempty(toolsCell), tool = []; return; end
             % get logical idx of Installed, Enabled tools that can Intercept the given eventType
-            idx = cellfun(@(t) t.Enabled & t.("Captures"+eventType) ,toolsCell,'UniformOutput',true);
+            idx = cellfun(@(t) t.Enabled & t.("Intercepts"+eventType) ,toolsCell,'UniformOutput',true);
             % no matching tools, exit early
             if ~any(idx), tool = []; return; end
             % sort the tools by priority (descending order)
@@ -2716,14 +2716,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             tool = tools{1};
         end
 
-        % get cell array of Distractors for the specified eventType, sorted by descending Priority
-        function toolsCell = getPriorityDistractors(obj,eventType)
+        % get cell array of PassiveInterceptors for the specified eventType, sorted by descending Priority
+        function toolsCell = getPriorityPassiveInterceptors(obj,eventType)
             % cell array of Installed tools
             toolsCell = obj.ToolRegistry.values;
             % no Installed tools, exit early
             if isempty(toolsCell), return; end
-            % get logical idx of Installed tools that can Distract the given eventType
-            idx = cellfun(@(t) t.("Distracts"+eventType),toolsCell,'UniformOutput',true);
+            % get logical idx of Installed tools that passively intercept the given eventType
+            idx = cellfun(@(t) t.("PassivelyIntercepts"+eventType),toolsCell,'UniformOutput',true);
             % no matching tools, exit early
             if ~any(idx), toolsCell = {}; return; end
             % sort the tools by priority (descending order)

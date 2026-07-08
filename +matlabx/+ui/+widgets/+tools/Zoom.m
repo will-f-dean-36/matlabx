@@ -1,13 +1,26 @@
 classdef Zoom < matlabx.ui.widgets.ImageAxesTool
-% matlabx.ui.widgets.tools.Zoom
-% when Enabled: 
-%   left-click      increase zoom 
-%   right-click     decrease zoom
-%   view box follows cursor when Pan Mode is on (on by default)
-%   shift-click to enable/disable Pan
-%   can also increase/decrease zoom with scroll wheel
+%ZOOM Zoom/pan navigation tool for matlabx.ui.widgets.ImageAxes.
+%
+%   When enabled:
+%       left-click      increase zoom
+%       right-click     decrease zoom
+%       shift-click     toggle cursor-follow panning
+%       scroll wheel    increase/decrease zoom
+%
+%   Zoom is intentionally non-exclusive so it can coexist with interaction
+%   tools such as Pick or DrawRectangle. Its toggle hotkey is handled as a
+%   passive key interception so the tool can be enabled while inactive.
 
-    %% Constructor / onEnabled / onDisabled / onInstall / onUninstall
+    properties
+        ScrollEventsPerZoomStep (1,1) double {mustBeInteger, mustBePositive} = 5
+    end
+
+    properties (Access=private)
+        ScrollEventCount (1,1) double {mustBeNonnegative, mustBeInteger} = 0
+        LastScrollDirection (1,1) double {mustBeMember(LastScrollDirection,[-1,0,1])} = 0
+    end
+
+    %% Lifecycle
     methods
 
         function obj = Zoom(host)
@@ -17,21 +30,25 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
                 'Priority',         1, ...
                 'ToggleHotkey',     matlabx.keyboard.normalize('z','',{'shift','meta'}), ...
                 'IsExclusive',      false, ...
-                'CapturesMove',     false, ...
-                'CapturesDown',     true, ...
-                'CapturesScroll',   true, ...
-                'CapturesKey',      true, ...
-                'DistractsKey',     true);
+                'InterceptsMove',   false, ...
+                'InterceptsDown',   true, ...
+                'InterceptsScroll', true, ...
+                'InterceptsKey',    true, ...
+                'PassivelyInterceptsKey', true);
         end
 
         function onEnabled(obj)
-        %ONENABLED  Enable Zoom when toolbar button enabled
+        %ONENABLED  Enable Zoom when toolbar button is enabled.
+            obj.ScrollEventCount = 0;
+            obj.LastScrollDirection = 0;
             obj.Host.setMode('Zoom', true);
             obj.Host.enableZoom();
         end
 
         function onDisabled(obj)
-        %ONDISABLED  Disable Zoom when toolbar button disabled    
+        %ONDISABLED  Disable Zoom when toolbar button is disabled.
+            obj.ScrollEventCount = 0;
+            obj.LastScrollDirection = 0;
             if isvalid(obj.Host)
                 obj.Host.setMode('Zoom', false);
                 obj.Host.disableZoom();
@@ -39,16 +56,13 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
         end
 
         function onInstall(obj)
-        %ONINSTALL  Called AFTER installed from Host, use for any extra required startup actions
+        %ONINSTALL  Register Zoom mode with the host.
             obj.Host.addMode('Zoom');
-            %obj.Host.addMode('Pan');
-            %obj.Host.setMode('Pan', true); % Pan Mode is On by default
         end
 
         function onUninstall(obj)
-        %ONUNINSTALL  Called AFTER uninstalled from Host, use for any extra required cleanup actions
+        %ONUNINSTALL  Remove Zoom mode from the host.
             obj.Host.removeMode('Zoom');
-            %obj.Host.removeMode('Pan');
         end
 
     end
@@ -58,7 +72,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
 
         function onDown(obj, E)
 
-            obj.printStatus(sprintf('%s.onDown()\n',obj.Name));
+            obj.printStatus(sprintf('%s.onDown()', obj.Name));
 
             H = obj.Host;
             if isempty(H.cursorPositionStatic)
@@ -71,40 +85,47 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
                 case 'alt'
                     H.decreaseZoom();
                 case 'extend'
-                    %obj.Host.setMode('Pan', ~obj.Host.Mode.Pan);
                     obj.Host.togglePanEnabled();
             end
 
         end
 
         function onScroll(obj, E)
-            % keep track of calls to control how many calls = one zoom increment
-            persistent callCount
-
-            obj.printStatus(sprintf('%s.onScroll()\n',obj.Name));
+            obj.printStatus(sprintf('%s.onScroll()', obj.Name));
 
             H = obj.Host;
             if isempty(H.cursorPositionStatic)
                 return
             end
 
-            callCount = callCount+1;
-            if callCount < 5
+            scrollDirection = sign(E.VerticalScrollCount);
+
+            if scrollDirection == 0
                 return
             end
 
-            callCount = 0;
+            if scrollDirection ~= obj.LastScrollDirection
+                obj.ScrollEventCount = 0;
+                obj.LastScrollDirection = scrollDirection;
+            end
+
+            obj.ScrollEventCount = obj.ScrollEventCount + 1;
+            if obj.ScrollEventCount < obj.ScrollEventsPerZoomStep
+                return
+            end
+
+            obj.ScrollEventCount = 0;
 
             % Adjust zoom level based on scroll direction
-            if E.VerticalScrollCount < 0
+            if scrollDirection < 0
                 H.increaseZoom();
-            elseif E.VerticalScrollCount > 0
+            elseif scrollDirection > 0
                 H.decreaseZoom();
             end
         end
 
         function onKey(obj, E)
-            obj.printStatus(sprintf('%s.onKey()\n',obj.Name));
+            obj.printStatus(sprintf('%s.onKey()', obj.Name));
 
             switch E.Hotkey
                 case "meta+equal"
@@ -119,10 +140,10 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
 
     end
 
-    %% Passive event hooks (only when Installed==true && IsDistractor==true)
+    %% Passive event hooks (only when Installed==true && IsPassiveInterceptor==true)
     methods
 
-        function onDistractKey(obj,E)
+        function onPassiveKey(obj,E)
             if obj.ToggleHotkey == E.Hotkey
                 E.stop();
             else
@@ -139,7 +160,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
 
     end
 
-    %% Host update helpers
+    %% Host display helpers
     methods
 
         function pointer = getPreferredPointer(obj)
@@ -151,7 +172,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
         end
 
         function str = getLabelString(obj)
-            % return char vector with info on zoom level
+            % Return char vector with info on zoom level.
             switch obj.Host.Mode.Zoom
                 case true
                     str = 'Zoom: on';
@@ -161,9 +182,6 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
         end
 
     end
-
-
-
     %% Teardown
     methods (Access = protected)
 

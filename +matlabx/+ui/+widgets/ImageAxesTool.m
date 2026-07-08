@@ -1,46 +1,44 @@
 classdef ImageAxesTool < handle
-%IMAGEAXESTOOL  Base class for pluggable tools hosted by matlabx.ui.widgets.ImageAxes
+%IMAGEAXESTOOL Base class for tools hosted by matlabx.ui.widgets.ImageAxes.
 %
-%   Overview
+%   ImageAxesTool subclasses can add toolbar actions, interactive modes,
+%   overlays, and host-event listeners to an ImageAxes instance.
 %
-%       Subclasses of ImageAxesTool can be used to create custom toolbar-controlled tools 
-%       in an instance of matlabx.ui.widgets.ImageAxes (the Host). When a Tool is registered with the Host,
-%       it is added to the Host's ToolRegistry and a custom toolbar button will be created.
+%   Tool styles
+%   -----------
+%   push
+%       Toolbar clicks call onPush().
 %
-%       The behavior of the toolbar button clicks depends on the Style property of the associated Tool:
+%   state
+%       Toolbar clicks toggle Enabled and call onEnabled()/onDisabled().
 %
-%           'push'  - Clicking will call the onPush() method of the associated Tool
-%           'state' - Clicking will toggle the Enabled state of the associated Tool by calling onEnabled() or onDisabled()
+%   Figure-event routing
+%   --------------------
+%   ImageAxes receives normalized figure-level HubEvent objects from
+%   matlabx.ui.control.FigureEventHub. Installed tools can participate in
+%   routing in two ways:
 %
-%   Event routing for 'state' Tools
+%   Interceptor
+%       An Enabled tool with InterceptsDown/Move/Up/Scroll/Key=true for an
+%       event kind. The Host routes the event to the highest-priority
+%       matching interceptor by calling onDown(), onMove(), etc.
 %
-%       Tools that set Style='state' can capture figure-level events (i.e. 'Down', 'Move', 'Up', 'Scroll', and 'Key') 
-%       from the Host. Tools that can capture at least one of these events are called 'Interceptors' (i.e. IsInterceptor=true). 
-%       The Host will route each Kind of event to the onInterceptX() method of the correct Tool based on a number of rules,
-%       where X is the Kind of event.
+%   PassiveInterceptor
+%       An Installed tool with PassivelyInterceptsDown/Move/Up/Scroll/Key=true
+%       for an event kind. The Host routes the event to every matching passive
+%       interceptor, in priority order, before the active interceptor by calling
+%       onPassiveDown(), onPassiveMove(), etc. Passive
+%       interceptors are useful for persistent overlays or hotkeys that must be
+%       maintained even while the tool is disabled.
 %
-%   In general, the event-routing flow is as follows:
+%   A tool can call E.stop() to prevent the active interceptor and downstream
+%   Host behavior from receiving the event.
 %
-%       - All figure-level events are routed through an instance of matlabx.ui.control.FigureEventHub (the Hub)
-%       - Each event is normalized by the Hub into an instance of matlabx.ui.control.HubEvent
-%       - If an event is captured by the Host, the Host finds all Enabled Interceptors that can capture that Kind of event
-%       - The event is routed to the Interceptor with the highest Priority
-%
-%   Thus, each event is routed only to the highest Priority Interceptor that claims it and 
-%   is Enabled. However, tools may also temporarily claim events before they are forwarded to the Interceptor, 
-%   even if they are Disabled. These tools are called 'Distractors' (i.e. IsDistractor=true). 
-%   Before routing an event to the highest priority Interceptor, the Host will first route the event to EACH 
-%   Distractor for the current event Kind, in order of Priority, by calling the tool's onDistractX() method, where X is the type
-%   of event. This is useful for when tools need to carry out functions while being disabled. 
-%   For example, if a tool draws interactable overlays (e.g. a draggable ROI)
-%   in the axes that persist even when Enabled=false, it could still manage their behavior 
-%   in the background. 
-% 
-% 
-%   Tools may also control downstream propagation of events by setting E.stop() which will block Interceptors 
-%   (but not Distractors) from receiving the event. This will also block certain internal callbacks used by the Host.
-%   For example, while right-clicking the image in a matlabx.ui.widgets.ImageAxes normally opens a context menu,
-%   if a Tool has already called E.stop() in its onInterceptDown() or onDistractDown() method, the context menu will not open.
+%   Host notifications
+%   ------------------
+%   Host notifications are opt-in. For example, pass
+%   ListenToRenderSourceChanged=true and override onHostRenderSourceChanged()
+%   to react when the selected source plane/composite changes.
 
 
     properties (SetAccess=protected)
@@ -52,27 +50,29 @@ classdef ImageAxesTool < handle
 
         Style (1,:) char {mustBeMember(Style,{'push','state'})} = 'state'
 
-        Priority (1,1) double = 1               % priority for event routiang to tools, highest priority claims event
+        Priority (1,1) double = 1               % priority for event routing to tools, highest priority claims event
         IsExclusive (1,1) logical = false       % enabling tool will disable tools with Enabled=true && IsExclusive=true
 
-        CapturesDown (1,1) logical = false      % this tool can capture 'Down' events when Enabled=true
-        CapturesMove (1,1) logical = false      % this tool can capture 'Move' events when Enabled=true
-        CapturesUp (1,1) logical = false        % this tool can capture 'Up' events when Enabled=true
-        CapturesScroll (1,1) logical = false    % this tool can capture 'Scroll' events when Enabled=true
-        CapturesKey (1,1) logical = false       % this tool can capture 'Key' events when Enabled=true
+        InterceptsDown (1,1) logical = false      % this tool actively receives 'Down' events when Enabled=true
+        InterceptsMove (1,1) logical = false      % this tool actively receives 'Move' events when Enabled=true
+        InterceptsUp (1,1) logical = false        % this tool actively receives 'Up' events when Enabled=true
+        InterceptsScroll (1,1) logical = false    % this tool actively receives 'Scroll' events when Enabled=true
+        InterceptsKey (1,1) logical = false       % this tool actively receives 'Key' events when Enabled=true
 
-        DistractsDown (1,1) logical = false     % this tool will temporarily capture 'Down' events
-        DistractsMove (1,1) logical = false     % this tool will temporarily capture 'Move' events
-        DistractsUp (1,1) logical = false       % this tool will temporarily capture 'Up' events
-        DistractsScroll (1,1) logical = false   % this tool will temporarily capture 'Scroll' events
-        DistractsKey (1,1) logical = false      % this tool will temporarily capture 'Key' events
+        PassivelyInterceptsDown (1,1) logical = false     % this tool passively receives 'Down' events
+        PassivelyInterceptsMove (1,1) logical = false     % this tool passively receives 'Move' events
+        PassivelyInterceptsUp (1,1) logical = false       % this tool passively receives 'Up' events
+        PassivelyInterceptsScroll (1,1) logical = false   % this tool passively receives 'Scroll' events
+        PassivelyInterceptsKey (1,1) logical = false      % this tool passively receives 'Key' events
+
+        ListenToRenderSourceChanged (1,1) logical = false % listen to Host RenderSourceChanged events
 
         L event.listener                        % listens to host events
     end
 
     properties (Dependent)
-        IsInterceptor (1,1) logical     % this tool can capture at least one type of event when Enabled=true
-        IsDistractor (1,1) logical      % this tool will temporarily capture at least one type of event
+        IsInterceptor (1,1) logical     % this tool actively receives at least one type of event when Enabled=true
+        IsPassiveInterceptor (1,1) logical      % this tool passively receives at least one type of event
     end
 
     properties (SetAccess=protected)
@@ -91,7 +91,7 @@ classdef ImageAxesTool < handle
             obj.Name = string(name);
 
             % print status update
-            obj.printStatus(sprintf('Loading "%s" tool...\n',obj.Name));
+            obj.printStatus(sprintf('Loading "%s" tool...', obj.Name));
 
             p = inputParser;
             p.addParameter('Tooltip', '', @(x)ischar(x));
@@ -100,16 +100,17 @@ classdef ImageAxesTool < handle
             p.addParameter('Style', 'state', @(x)ischar(x));
             p.addParameter('Priority', 1, @(x)isnumeric(x)&&isscalar(x));
             p.addParameter('IsExclusive', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('CapturesDown', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('CapturesMove', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('CapturesUp', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('CapturesScroll', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('CapturesKey', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('DistractsDown', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('DistractsMove', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('DistractsUp', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('DistractsScroll', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('DistractsKey', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('InterceptsDown', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('InterceptsMove', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('InterceptsUp', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('InterceptsScroll', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('InterceptsKey', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('PassivelyInterceptsDown', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('PassivelyInterceptsMove', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('PassivelyInterceptsUp', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('PassivelyInterceptsScroll', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('PassivelyInterceptsKey', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('ListenToRenderSourceChanged', false, @(x)islogical(x)&&isscalar(x));
 
             p.parse(varargin{:});
 
@@ -119,21 +120,21 @@ classdef ImageAxesTool < handle
             obj.Style = p.Results.Style;
             obj.Priority = p.Results.Priority;
             obj.IsExclusive = p.Results.IsExclusive;
-            obj.CapturesDown = p.Results.CapturesDown;
-            obj.CapturesMove = p.Results.CapturesMove;
-            obj.CapturesUp = p.Results.CapturesUp;
-            obj.CapturesScroll = p.Results.CapturesScroll;
-            obj.CapturesKey = p.Results.CapturesKey;
-            obj.DistractsDown = p.Results.DistractsDown;
-            obj.DistractsMove = p.Results.DistractsMove;
-            obj.DistractsUp = p.Results.DistractsUp;
-            obj.DistractsScroll = p.Results.DistractsScroll;
-            obj.DistractsKey = p.Results.DistractsKey;
+            obj.InterceptsDown = p.Results.InterceptsDown;
+            obj.InterceptsMove = p.Results.InterceptsMove;
+            obj.InterceptsUp = p.Results.InterceptsUp;
+            obj.InterceptsScroll = p.Results.InterceptsScroll;
+            obj.InterceptsKey = p.Results.InterceptsKey;
+            obj.PassivelyInterceptsDown = p.Results.PassivelyInterceptsDown;
+            obj.PassivelyInterceptsMove = p.Results.PassivelyInterceptsMove;
+            obj.PassivelyInterceptsUp = p.Results.PassivelyInterceptsUp;
+            obj.PassivelyInterceptsScroll = p.Results.PassivelyInterceptsScroll;
+            obj.PassivelyInterceptsKey = p.Results.PassivelyInterceptsKey;
+            obj.ListenToRenderSourceChanged = p.Results.ListenToRenderSourceChanged;
 
-            % add listener for Host RenderSourceChanged event
-            obj.L(1) = addlistener(obj.Host,'RenderSourceChanged',@(~,evt) obj.onHostRenderSourceChanged(evt));
+            obj.configureHostEventListeners();
 
-            obj.printStatus(sprintf('"%s" tool loaded\n',obj.Name));
+            obj.printStatus(sprintf('"%s" tool loaded', obj.Name));
         end
 
         % Lifecycle toggles (host calls these)
@@ -182,7 +183,7 @@ classdef ImageAxesTool < handle
 
         function install(obj)
             % indicate status in command window
-            obj.printStatus(sprintf('Installing "%s" tool...\n',obj.Name));
+            obj.printStatus(sprintf('Installing "%s" tool...', obj.Name));
 
             % register with the Host
             obj.Host.registerTool(obj);
@@ -193,13 +194,13 @@ classdef ImageAxesTool < handle
             obj.onInstall();
 
             % indicate status in command window
-            obj.printStatus(sprintf('"%s" tool installed\n',obj.Name));
+            obj.printStatus(sprintf('"%s" tool installed', obj.Name));
         end
 
 
         function uninstall(obj)
             % indicate status in command window
-            obj.printStatus(sprintf('Uninstalling "%s" tool...\n',obj.Name));
+            obj.printStatus(sprintf('Uninstalling "%s" tool...', obj.Name));
 
             % make sure tool is disabled before uninstalling
             obj.disable();
@@ -212,7 +213,7 @@ classdef ImageAxesTool < handle
             obj.onUninstall();
 
             % indicate status in command window
-            obj.printStatus(sprintf('"%s" tool uninstalled\n',obj.Name));
+            obj.printStatus(sprintf('"%s" tool uninstalled', obj.Name));
         end
 
         % Hooks for subclasses (no-ops by default)
@@ -223,19 +224,19 @@ classdef ImageAxesTool < handle
         function onUninstall(~),  end
         function onDelete(~),     end
 
-        % Pointer routing (only Interceptors get these)
+        % Pointer routing (only active Interceptors get these)
         function onDown(~,~,~),     end
         function onMove(~,~,~),     end
         function onUp(~,~,~),       end
         function onScroll(~,~,~),   end
         function onKey(~,~,~),      end
 
-        % Pointer routing (only Distractors get these)
-        function onDistractDown(~,~,~),   end
-        function onDistractMove(~,~,~),   end
-        function onDistractUp(~,~,~),     end
-        function onDistractScroll(~,~,~), end
-        function onDistractKey(~,~,~),    end
+        % Pointer routing (only PassiveInterceptors get these)
+        function onPassiveDown(~,~,~),   end
+        function onPassiveMove(~,~,~),   end
+        function onPassiveUp(~,~,~),     end
+        function onPassiveScroll(~,~,~), end
+        function onPassiveKey(~,~,~),    end
 
         % Adjust pointer shape (override in subclass to set pointer - if empty, Host will set)
         function pointer = getPreferredPointer(~), pointer = ''; end
@@ -243,7 +244,7 @@ classdef ImageAxesTool < handle
         % Add to info label (override in subclass to include text in image info label)
         function str = getLabelString(~), str = ''; end
 
-        % Passive hooks (broadcast to enabled tools if the host wants)
+        % Optional host notification hooks
         function onHostAxesChanged(~,~),   end   % e.g., XLim/YLim/CLim changed
         function onHostRenderSourceChanged(~,~),  end   % rendered source plane/composite changed
 
@@ -253,11 +254,11 @@ classdef ImageAxesTool < handle
     methods
 
         function value = get.IsInterceptor(obj)
-            value = obj.CapturesDown || obj.CapturesMove || obj.CapturesUp || obj.CapturesScroll || obj.CapturesKey;
+            value = obj.InterceptsDown || obj.InterceptsMove || obj.InterceptsUp || obj.InterceptsScroll || obj.InterceptsKey;
         end
 
-        function value = get.IsDistractor(obj)
-            value = obj.DistractsDown || obj.DistractsMove || obj.DistractsUp || obj.DistractsScroll || obj.DistractsKey;
+        function value = get.IsPassiveInterceptor(obj)
+            value = obj.PassivelyInterceptsDown || obj.PassivelyInterceptsMove || obj.PassivelyInterceptsUp || obj.PassivelyInterceptsScroll || obj.PassivelyInterceptsKey;
         end
 
     end
@@ -267,11 +268,23 @@ classdef ImageAxesTool < handle
 
     methods(Access=protected)
 
+        function configureHostEventListeners(obj)
+            obj.L = event.listener.empty;
+
+            if obj.ListenToRenderSourceChanged
+                obj.L(end+1) = addlistener( ...
+                    obj.Host, ...
+                    'RenderSourceChanged', ...
+                    @(~,evt) obj.onHostRenderSourceChanged(evt));
+            end
+        end
+
         function printStatus(obj,status)
-            % PrintStatusUpdates is true
-            if obj.PrintStatusUpdates
-                % print the (pre-formatted) text in status to the command window
-                fprintf(['widgets.ImageAxes(%s): ',status],obj.Host.Name);
+            if obj.PrintStatusUpdates || matlabx.Settings.Logging("ShowDebugOutput")
+                matlabx.Log.DEBUG( ...
+                    strip(string(status)), ...
+                    "Source", class(obj), ...
+                    "Tag", obj.Host.Name);
             end
         end
 
@@ -284,7 +297,7 @@ classdef ImageAxesTool < handle
 
         % subclass delete() will be called before this runs
         function delete(obj)
-            obj.printStatus(sprintf('Unloading "%s" tool...\n',obj.Name));
+            obj.printStatus(sprintf('Unloading "%s" tool...', obj.Name));
 
             % perform tool-specific teardown if needed (i.e. if subclass implements teardown())
             obj.teardown();
@@ -300,7 +313,7 @@ classdef ImageAxesTool < handle
                 obj.uninstall();
             end
 
-            obj.printStatus(sprintf('"%s" tool unloaded\n',obj.Name));
+            obj.printStatus(sprintf('"%s" tool unloaded', obj.Name));
         end
 
     end

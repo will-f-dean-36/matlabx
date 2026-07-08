@@ -54,10 +54,10 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                 'Icon',matlabx.internal.Paths.icons('AddRectangleIcon.png'),...
                 'Priority',10,...
                 'IsExclusive',true,...
-                'CapturesDown',true,...
-                'DistractsDown',true,...
-                'DistractsMove',true,...
-                'DistractsUp',true);
+                'InterceptsDown',true,...
+                'PassivelyInterceptsDown',true,...
+                'PassivelyInterceptsMove',true,...
+                'PassivelyInterceptsUp',true);
 
             % ROIBox array (empty to start)
             obj.BoxROI = matlabx.ui.widgets.overlays.ROIBox.empty();
@@ -127,11 +127,11 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
 
     end
 
-    %% Passive event hooks (only when Installed==true && IsDistractor==true)
+    %% Passive event hooks (only when Installed==true && IsPassiveInterceptor==true)
     methods
 
-        function onDistractDown(obj,E)
-            obj.printStatus(sprintf('%s.onDistractDown()\n',obj.Name));
+        function onPassiveDown(obj,E)
+            obj.printStatus(sprintf('%s.onPassiveDown()', obj.Name));
 
             % ROIBox clicks handled by patch (drag/delete)
             if isprop(E.Target,'ID') && obj.hasBox(E.Target.ID)
@@ -139,7 +139,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
             end
         end
 
-        function onDistractMove(obj,E)
+        function onPassiveMove(obj,E)
 
             % if we are primed for drag (button down on box with no cursor movement)
             if obj.Host.Mode.PrimedForDrag
@@ -166,7 +166,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
 
         end
 
-        function onDistractUp(obj,~)
+        function onPassiveUp(obj,~)
 
             if obj.Host.Mode.PrimedForDrag
                 % no longer primed for drag
