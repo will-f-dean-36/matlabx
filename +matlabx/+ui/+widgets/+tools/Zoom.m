@@ -1,10 +1,10 @@
 classdef Zoom < matlabx.ui.widgets.ImageAxesTool
-%ZOOM Zoom/pan navigation tool for matlabx.ui.widgets.ImageAxes.
+%ZOOM Zoom/cursor-follow navigation tool for matlabx.ui.widgets.ImageAxes.
 %
 %   When enabled:
 %       left-click      increase zoom
 %       right-click     decrease zoom
-%       shift-click     toggle cursor-follow panning
+%       shift-click     toggle cursor-follow navigation
 %       scroll wheel    increase/decrease zoom
 %
 %   Zoom is intentionally non-exclusive so it can coexist with interaction
@@ -25,7 +25,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
 
         function obj = Zoom(host)
             obj@matlabx.ui.widgets.ImageAxesTool(host,"Zoom", ...
-                'Tooltip',          'Zoom/Pan', ...
+                'Tooltip',          'Zoom/Follow Cursor', ...
                 'Icon',             matlabx.internal.Paths.icons('ZoomIcon.png'), ...
                 'Priority',         1, ...
                 'ToggleHotkey',     matlabx.keyboard.normalize('z','',{'shift','meta'}), ...
@@ -85,7 +85,7 @@ classdef Zoom < matlabx.ui.widgets.ImageAxesTool
                 case 'alt'
                     H.decreaseZoom();
                 case 'extend'
-                    obj.Host.togglePanEnabled();
+                    obj.Host.toggleFollowCursorEnabled();
             end
 
         end

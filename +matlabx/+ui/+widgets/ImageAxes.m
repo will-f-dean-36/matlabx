@@ -403,7 +403,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             obj.sizingGrid.BackgroundColor = obj.BackgroundColor;
 
-            %obj.updateOnResize();
+            obj.updateOnResize();
 
         end
 
@@ -432,20 +432,56 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
 
 
-    %% Zoom functionality
+    %% Zoom / cursor-follow navigation
+    %
+    % ImageAxes represents the visible zoomed region as ordinary image axes
+    % limits on mainAxes:
+    %
+    %   XLim = [xLower, xLower + viewWidth]
+    %   YLim = [yLower, yLower + viewHeight]
+    %
+    % A ZoomLevel is the fraction of the full image currently visible. Thus
+    % ZoomLevel==1 displays the full image, while ZoomLevel==0.5 is a 2x zoom
+    % showing half the image width and height.
+    %
+    % Cursor-follow navigation uses staticAxes, whose limits stay fixed to the
+    % full image. The cursor position in staticAxes is normalized and mapped to
+    % the available travel of the zoomed view box. FollowCursorLims define the
+    % active normalized control interval. Positions outside that interval act as
+    % dead zones and pin the view to the corresponding image edge.
+    %
+    % To avoid a jump when FollowCursor is re-enabled at a new cursor location,
+    % the current cursor/view relationship is stored as a per-axis anchor. The
+    % mapping then interpolates smoothly from that anchor to the reachable edges.
+    % Once an axis reaches a follow bound, that axis releases its anchor and
+    % returns to the ordinary absolute cursor-follow mapping.
 
     properties (Access=private)
+        % Zoom_ stores the discrete zoom state. Levels are visible-image
+        % fractions, not magnification factors. LastCursorXY is in mainAxes image
+        % coordinates and is used as a fallback anchor when enabling zoom with no
+        % active cursor over the image.
         Zoom_ = struct( ...
             'Idx', 1, ...
             'Levels', [1 1/2 1/3 1/4 1/5 1/10 1/15 1/20], ...
-            'PanLims', [0.25 0.75], ...
             'LastCursorXY', [], ...
             'Enabled', false)
-        Pan_ = struct( ...
-            'Lims', [0.25 0.75], ...
+
+        % FollowCursor_ stores cursor-follow state. Lims are normalized staticAxes
+        % control bounds. AnchorNorm/AnchorLower are per-axis no-jump anchors;
+        % NaN/empty means the axis uses absolute mapping. LastCursorXY is in
+        % staticAxes full-image coordinates.
+        FollowCursor_ = struct( ...
+            'Lims', [0.10 0.90], ...
             'Enabled', true, ...
-            'OffsetXY', [0,0], ...
+            'AnchorNorm', [], ...
+            'AnchorLower', [], ...
             'LastCursorXY', [])
+
+        % ViewBoxBase_ stores miniature overview geometry on staticAxes. XFull/YFull
+        % draw the full-image box. XZoomBase/YZoomBase draw a zero-offset zoom box
+        % sized for the current ZoomLevel; applyZoomLims shifts that base according
+        % to the actual view lower limits.
         ViewBoxBase_ = struct( ...
             'Top', [], ...
             'Left', [], ...
@@ -462,8 +498,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         ZoomLevel
         ZoomFactor
 
-        PanEnabled
-        PanLims
+        FollowCursorEnabled
+        FollowCursorLims
     end
 
     % ViewBox appearance
@@ -478,10 +514,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         ViewBoxLeft = 0.01
     end
 
-    % Private Zoom/Pan helpers
+    % Private zoom / cursor-follow helpers
     methods
-        function moveViewToCursor(obj)
-            %MOVEVIEWTOCURSOR  Pan the view according to static-axes cursor position
+        function followCursor(obj)
+            %FOLLOWCURSOR  Move the zoom view according to static-axes cursor position.
 
             XY = obj.cursorPositionStatic;
 
@@ -489,7 +525,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
 
-            obj.setZoomLims(XY);
+            obj.applyFollowCursorLims(XY);
         end
 
         function zoomViewToCursor(obj)
@@ -506,15 +542,17 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             oldXLim = obj.mainAxes.XLim;
             oldYLim = obj.mainAxes.YLim;
 
-            obj.setZoomLims2(XY,oldXLim,oldYLim);
+            obj.applyCursorAnchoredZoomLims(XY,oldXLim,oldYLim);
         end
 
-        function [XLim,YLim] = getZoomLims(obj,XY)
-            %GETZOOMLIMS  Calculate cursor-following pan limits
+        function [XLim,YLim] = getFollowCursorLims(obj,XY)
+            %GETFOLLOWCURSORLIMS  Calculate cursor-following zoom limits
             %
-            %   [XLim,YLim] = getZoomLims(obj,XY) maps XY from the full-sized static
-            %   axes into the available pan range. A stored pan offset reconciles this
-            %   absolute mapping with any previous cursor-anchored zoom operation.
+            %   [XLim,YLim] = getFollowCursorLims(obj,XY) maps XY from the
+            %   full-sized static axes into the available cursor-follow range.
+            %   FollowCursorLims define the active normalized cursor interval; values
+            %   outside this interval form dead zones that pin the view to the image
+            %   edges.
             %
             %   XY must be expressed in the coordinate system of the full-sized static
             %   axes.
@@ -537,12 +575,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             defXLim = [0.5, W + 0.5];
             defYLim = [0.5, H + 0.5];
 
-            % Calculate the uncorrected lower limits from the static cursor
-            lower = obj.getCursorMappedLowerLimit(XY);
-
-            % Reconcile the cursor mapping with the current zoom-anchored view
-            offset = obj.getPanOffset();
-            lower = lower + offset;
+            % Calculate the lower limits from the static cursor.
+            lower = obj.getFollowCursorLowerLimit(XY);
 
             % Constrain the view to the full image
             lower(1) = min(max(lower(1),defXLim(1)), ...
@@ -556,12 +590,18 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             YLim = lower(2) + [0,viewHeight];
         end
 
-        function [XLim,YLim] = getZoomLims2(obj,XY,oldXLim,oldYLim)
-            %GETZOOMLIMS2  Calculate cursor-anchored zoom limits
+        function [XLim,YLim] = getCursorAnchoredZoomLims(obj,XY,oldXLim,oldYLim)
+            %GETCURSORANCHOREDZOOMLIMS  Calculate cursor-anchored zoom limits
             %
-            %   [XLim,YLim] = getZoomLims2(obj,XY,oldXLim,oldYLim) calculates new
-            %   limits such that the image coordinate XY remains at approximately the
-            %   same screen position after the zoom level changes.
+            %   [XLim,YLim] = getCursorAnchoredZoomLims(obj,XY,oldXLim,oldYLim)
+            %   returns axes limits for the current ZoomLevel such that image
+            %   coordinate XY remains under the same relative cursor position as it
+            %   occupied in oldXLim/oldYLim. This is the click/scroll zoom behavior:
+            %
+            %       - clicking at the current view center keeps the view centered
+            %       - clicking off-center shifts the view so the clicked pixel stays
+            %         under the cursor as much as image bounds allow
+            %       - bounds clamping necessarily breaks the invariant near edges
             %
             %   XY must be expressed in image/data coordinates.
 
@@ -609,11 +649,23 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             YLim = yLower + [0,newHeight];
         end
 
-        function lower = getCursorMappedLowerLimit(obj,XY)
-            %GETCURSORMAPPEDLOWERLIMIT  Map static cursor position into pan range
+        function lower = getFollowCursorLowerLimit(obj,XY)
+            %GETFOLLOWCURSORLOWERLIMIT  Map static cursor position to view lower limit
             %
-            %   This is the uncorrected version of the original absolute cursor-follow
-            %   calculation. It does not include the stored pan offset.
+            %   lower = getFollowCursorLowerLimit(obj,XY) returns the lower-left
+            %   image coordinate of the zoomed view box implied by the current
+            %   static-axes cursor coordinate XY.
+            %
+            %   Without an active anchor, this is the absolute mapping:
+            %
+            %       FollowCursorLims(1) -> image top/left edge
+            %       FollowCursorLims(2) -> image bottom/right edge
+            %
+            %   With an active per-axis anchor, the function instead preserves the
+            %   cursor/view relationship that existed when FollowCursor was enabled
+            %   or recalibrated. Each axis interpolates from that anchor toward its
+            %   reachable edges, then releases the anchor after it reaches a follow
+            %   bound. Released axes use absolute mapping again.
 
             % Image dimensions
             sz = obj.RenderSourceSize;
@@ -627,64 +679,158 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % Available travel of the zoomed view
             travel = [W - viewWidth, H - viewHeight];
 
-            % Pan limits in normalized static-axes coordinates
-            panLims = obj.PanLims;
-            a = panLims(1);
-            b = panLims(2);
+            % Follow-cursor limits in normalized static-axes coordinates.
+            % Values outside this interval form the cursor-follow dead zones.
+            [XYNorm, followCursorLims] = obj.getFollowCursorNormalizedPosition(XY);
+            a = followCursorLims(1);
+            b = followCursorLims(2);
 
             if b <= a
-                error('PanLims must contain two increasing values.')
+                error('FollowCursorLims must contain two increasing values.')
             end
 
-            % Normalize static-axes cursor coordinates to the full image
+            lowerMin = [0.5,0.5];
+            lowerMax = lowerMin + travel;
+
+            [anchorNorm, anchorLower] = obj.getFollowCursorAnchor();
+
+            % Anchored mapping: preserve the current cursor/view relationship when
+            % follow-cursor is enabled, then interpolate smoothly from that anchor
+            % to the reachable image edges. Each axis releases its anchor after it
+            % reaches a follow bound, returning that axis to absolute mapping with no
+            % position jump.
+            XYNorm = min(max(XYNorm,0),1);
+
+            lower = zeros(1,2);
+            releasedAnchor = false(1,2);
+
+            for k = 1:2
+                if ~isfinite(anchorNorm(k)) || ~isfinite(anchorLower(k))
+                    n = min(max(XYNorm(k),a),b);
+                    followFrac = (n - a) / (b - a);
+                    lower(k) = lowerMin(k) + followFrac * travel(k);
+                    continue
+                end
+
+                leftNorm = a;
+                rightNorm = b;
+
+                if anchorNorm(k) < a
+                    leftNorm = 0;
+                elseif anchorNorm(k) > b
+                    rightNorm = 1;
+                end
+
+                n = min(max(XYNorm(k),leftNorm),rightNorm);
+                anchor = min(max(anchorNorm(k),leftNorm),rightNorm);
+                anchorLower(k) = min(max(anchorLower(k),lowerMin(k)),lowerMax(k));
+
+                if n <= anchor
+                    denom = anchor - leftNorm;
+                    if denom <= eps
+                        lower(k) = anchorLower(k);
+                    else
+                        t = (n - leftNorm) / denom;
+                        lower(k) = lowerMin(k) + t * (anchorLower(k) - lowerMin(k));
+                    end
+                else
+                    denom = rightNorm - anchor;
+                    if denom <= eps
+                        lower(k) = anchorLower(k);
+                    else
+                        t = (n - anchor) / denom;
+                        lower(k) = anchorLower(k) + t * (lowerMax(k) - anchorLower(k));
+                    end
+                end
+
+                if n <= leftNorm + eps || n >= rightNorm - eps
+                    releasedAnchor(k) = true;
+                end
+            end
+
+            if any(releasedAnchor)
+                anchorNorm(releasedAnchor) = NaN;
+                anchorLower(releasedAnchor) = NaN;
+                obj.FollowCursor_.AnchorNorm = anchorNorm;
+                obj.FollowCursor_.AnchorLower = anchorLower;
+            end
+        end
+
+        function [XYNorm, followCursorLims] = getFollowCursorNormalizedPosition(obj,XY)
+            %GETFOLLOWCURSORNORMALIZEDPOSITION  Normalize static cursor for follow mode.
+
+            sz = obj.RenderSourceSize;
+            H = sz(1);
+            W = sz(2);
+
             XYNorm = (XY - 0.5) ./ [W,H];
-
-            % Apply the pan dead-zone/range
-            XYNorm = min(max(XYNorm,a),b);
-
-            % Remap [a,b] to [0,1]
-            panFrac = (XYNorm - a) ./ (b - a);
-
-            % Lower limits before application of the reconciliation offset
-            lower = [0.5,0.5] + panFrac .* travel;
+            followCursorLims = obj.FollowCursorLims;
         end
 
-        function offset = getPanOffset(obj)
-            %GETPANOFFSET  Return the stored pan reconciliation offset
-
-            if ~isfield(obj.Pan_,'OffsetXY') || ...
-                    isempty(obj.Pan_.OffsetXY) || ...
-                    numel(obj.Pan_.OffsetXY) ~= 2
-
-                obj.Pan_.OffsetXY = [0,0];
-            end
-
-            offset = obj.Pan_.OffsetXY;
-        end
-
-        function calibratePanOffset(obj,XYStatic)
-            %CALIBRATEPANOFFSET  Align cursor-follow mapping with current axes limits
+        function calibrateFollowCursorAnchor(obj,XYStatic)
+            %CALIBRATEFOLLOWCURSORANCHOR  Anchor follow-cursor at current view
             %
-            %   XYStatic is the cursor position in the full-sized static axes. The
-            %   resulting offset ensures that calling getZoomLims with this same cursor
-            %   position reproduces the current axes position rather than snapping to
-            %   the original absolute mapping.
+            %   calibrateFollowCursorAnchor(obj,XYStatic) records a no-jump anchor
+            %   that maps the current static-axes cursor location to the current
+            %   mainAxes lower limits. This lets FollowCursor be disabled, the mouse
+            %   moved elsewhere, and FollowCursor re-enabled without immediately
+            %   snapping the view box to the absolute cursor-follow mapping.
+            %
+            %   The anchor is per-axis and may later release independently in
+            %   getFollowCursorLowerLimit after reaching the corresponding follow
+            %   bound.
 
             if isempty(XYStatic)
+                obj.clearFollowCursorAnchor();
                 return
             end
 
-            mappedLower = obj.getCursorMappedLowerLimit(XYStatic);
+            [XYNorm, ~] = obj.getFollowCursorNormalizedPosition(XYStatic);
             currentLower = [obj.mainAxes.XLim(1), obj.mainAxes.YLim(1)];
 
-            obj.Pan_.OffsetXY = currentLower - mappedLower;
-            obj.Pan_.LastCursorXY = XYStatic;
+            obj.FollowCursor_.AnchorNorm = XYNorm;
+            obj.FollowCursor_.AnchorLower = currentLower;
+            obj.FollowCursor_.LastCursorXY = XYStatic;
         end
 
-        function setZoomLims(obj,XY)
-            %SETZOOMLIMS  Apply cursor-following pan limits
+        function [anchorNorm, anchorLower] = getFollowCursorAnchor(obj)
+            %GETFOLLOWCURSORANCHOR  Return per-axis cursor-follow anchors.
             %
-            %   XY must be expressed in full-sized static-axes coordinates.
+            %   anchorNorm is the normalized static-axes cursor position at which
+            %   the anchor was created. anchorLower is the corresponding mainAxes
+            %   lower limit. NaN means the axis has no active anchor and should use
+            %   absolute cursor-follow mapping.
+
+            anchorNorm = obj.FollowCursor_.AnchorNorm;
+            anchorLower = obj.FollowCursor_.AnchorLower;
+
+            if ~isnumeric(anchorNorm) || numel(anchorNorm) ~= 2
+                anchorNorm = [NaN,NaN];
+            end
+
+            if ~isnumeric(anchorLower) || numel(anchorLower) ~= 2
+                anchorLower = [NaN,NaN];
+            end
+        end
+
+        function clearFollowCursorAnchor(obj)
+            %CLEARFOLLOWCURSORANCHOR  Clear the no-jump cursor-follow anchor.
+
+            obj.FollowCursor_.AnchorNorm = [NaN,NaN];
+            obj.FollowCursor_.AnchorLower = [NaN,NaN];
+            obj.FollowCursor_.LastCursorXY = [];
+        end
+
+        function applyFollowCursorLims(obj,XY)
+            %APPLYFOLLOWCURSORLIMS  Apply cursor-following zoom limits
+            %
+            %   applyFollowCursorLims(obj,XY) computes the zoomed view-box limits
+            %   implied by static-axes cursor coordinate XY, applies them to mainAxes,
+            %   updates the miniature view box, and logs the mapping when debug output
+            %   is enabled.
+            %
+            %   XY must be expressed in full-sized static-axes coordinates, not in
+            %   the current zoomed mainAxes coordinate system.
 
             if nargin < 2 || isempty(XY)
                 XY = obj.cursorPositionStatic;
@@ -694,17 +840,23 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
 
-            [XZoomLim,YZoomLim] = obj.getZoomLims(XY);
+            [XZoomLim,YZoomLim] = obj.getFollowCursorLims(XY);
             obj.applyZoomLims(XZoomLim,YZoomLim);
 
             % This field now always contains static-axes coordinates
-            obj.Pan_.LastCursorXY = XY;
+            obj.FollowCursor_.LastCursorXY = XY;
         end
 
-        function setZoomLims2(obj,XY,oldXLim,oldYLim)
-            %SETZOOMLIMS2  Apply cursor-anchored zoom limits
+        function applyCursorAnchoredZoomLims(obj,XY,oldXLim,oldYLim)
+            %APPLYCURSORANCHOREDZOOMLIMS  Apply a zoom step around image coordinate XY
             %
-            %   XY must be expressed in image/data coordinates.
+            %   applyCursorAnchoredZoomLims(obj,XY,oldXLim,oldYLim) applies the
+            %   current ZoomLevel using oldXLim/oldYLim as the pre-zoom visible view.
+            %   It preserves XY at the same relative position inside the view where
+            %   possible, then recalibrates the follow-cursor anchor so the next
+            %   cursor-follow move does not jump.
+            %
+            %   XY must be expressed in image/data coordinates from mainAxes.
 
             if nargin < 2 || isempty(XY)
                 XY = obj.cursorPosition;
@@ -723,20 +875,30 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
 
             [XZoomLim,YZoomLim] = ...
-                obj.getZoomLims2(XY,oldXLim,oldYLim);
+                obj.getCursorAnchoredZoomLims(XY,oldXLim,oldYLim);
 
             obj.applyZoomLims(XZoomLim,YZoomLim);
 
             % This field now always contains image/data coordinates
             obj.Zoom_.LastCursorXY = XY;
 
-            % Reconcile the static cursor-follow mapping with the new view. This is
-            % the step that prevents the next mouse movement from causing a jump.
-            obj.calibratePanOffset(obj.cursorPositionStatic);
+            if obj.ZoomEnabled && obj.FollowCursorEnabled
+                obj.calibrateFollowCursorAnchor(obj.cursorPositionStatic);
+            end
         end
 
         function applyZoomLims(obj,XLim,YLim)
-            %APPLYZOOMLIMS  Apply axes limits and synchronize the zoom view box
+            %APPLYZOOMLIMS  Apply axes limits and synchronize the zoom view box.
+            %
+            %   applyZoomLims(obj,XLim,YLim) is the final common sink for both
+            %   cursor-anchored zoom and cursor-follow motion. It updates mainAxes
+            %   limits, then shifts the miniature ViewBoxZoom patch so the overview
+            %   reflects the same lower-left image coordinate.
+            %
+            %   XLim/YLim are pixel-centered image limits, where the full image is:
+            %
+            %       XLim = [0.5, W + 0.5]
+            %       YLim = [0.5, H + 0.5]
 
             set(obj.mainAxes,...
                 'XLim',XLim,...
@@ -752,7 +914,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function updateViewBoxBaseCoordinates(obj)
-            %UPDATEVIEWBOXBASECOORDINATES  Update full and zoomed view-box geometry
+            %UPDATEVIEWBOXBASECOORDINATES  Update miniature overview geometry.
+            %
+            %   Recomputes the staticAxes patch coordinates used for the full-image
+            %   overview box and the current-size zoom box. The zoom box stored here
+            %   is intentionally zero-offset relative to the image; applyZoomLims
+            %   translates it based on XLim(1)/YLim(1).
+            %
+            %   This must be called when the rendered image size or ZoomLevel changes.
 
             sz = obj.RenderSourceSize;
             H = sz(1);
@@ -785,14 +954,22 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
-    % Public Zoom/Pan API
+    % Public zoom / cursor-follow API
     methods
 
         function z = get.ZoomEnabled(obj)
+            %ZOOMENABLED  True when mainAxes displays a zoomed view box.
+            %
+            %   Setting ZoomEnabled=true shows the miniature view boxes and applies
+            %   the current ZoomLevel around the cursor when possible. Setting it
+            %   false hides view boxes and restores full-image limits.
+
             z = obj.Zoom_.Enabled;
         end
 
         function set.ZoomEnabled(obj,tf)
+            %ZOOMENABLED  Enable or disable zoom navigation.
+
             if tf
                 obj.enableZoom();
             else
@@ -800,42 +977,85 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
-        function p = get.PanEnabled(obj)
-            p = obj.Pan_.Enabled;
+        function p = get.FollowCursorEnabled(obj)
+            %FOLLOWCURSORENABLED  True when the zoomed view follows cursor motion.
+            %
+            %   FollowCursor only affects motion while ZoomEnabled is true. When
+            %   re-enabled, the current cursor/view relationship is anchored so the
+            %   view does not jump to the absolute cursor-follow position.
+
+            p = obj.FollowCursor_.Enabled;
         end
 
-        function set.PanEnabled(obj,tf)
+        function set.FollowCursorEnabled(obj,tf)
+            %FOLLOWCURSORENABLED  Enable or disable cursor-follow navigation.
+
             if tf
-                obj.enablePan();
+                obj.enableFollowCursor();
             else
-                obj.disablePan();
+                obj.disableFollowCursor();
             end
         end
 
-        function p = get.PanLims(obj)
-            p = obj.Pan_.Lims;
+        function p = get.FollowCursorLims(obj)
+            %FOLLOWCURSORLIMS  Normalized cursor-follow active interval.
+            %
+            %   FollowCursorLims is a two-element vector [a b] in normalized
+            %   staticAxes coordinates. For each axis:
+            %
+            %       cursor norm <= a  -> view box pinned to top/left edge
+            %       cursor norm >= b  -> view box pinned to bottom/right edge
+            %       a < norm < b      -> view box interpolates through image travel
+            %
+            %   Wider intervals such as [0.10 0.90] produce a gentler control feel
+            %   and make anchor release less noticeable. Narrower intervals make the
+            %   view reach image edges with less cursor travel.
+
+            p = obj.FollowCursor_.Lims;
         end
 
-        function set.PanLims(obj,lims)
-            obj.Pan_.Lims = lims;
+        function set.FollowCursorLims(obj,lims)
+            %FOLLOWCURSORLIMS  Set cursor-follow active interval.
+            %
+            %   If zoom and cursor-follow are currently active, changing the limits
+            %   recalibrates the anchor at the current cursor position so the view
+            %   does not jump immediately after the setting changes.
 
-            % PanLims changes the absolute cursor mapping. Recalibrate the offset
-            % so changing PanLims does not immediately move the current view.
-            if obj.ZoomEnabled
-                obj.calibratePanOffset(obj.cursorPositionStatic);
+            obj.FollowCursor_.Lims = lims;
+
+            if obj.ZoomEnabled && obj.FollowCursorEnabled
+                obj.calibrateFollowCursorAnchor(obj.cursorPositionStatic);
             end
         end
 
         function z = get.ZoomLevel(obj)
+            %ZOOMLEVEL  Fraction of the full image visible in the zoomed view.
+            %
+            %   ZoomLevel==1 means the full image is visible. ZoomLevel==0.5 means
+            %   the view box is half the image width and height, corresponding to a
+            %   2x visual zoom.
+
             z = obj.Zoom_.Levels(obj.Zoom_.Idx);
         end
 
         function f = get.ZoomFactor(obj)
+            %ZOOMFACTOR  Visual magnification factor, equal to 1/ZoomLevel.
+
             f = 1 / obj.ZoomLevel;
         end
 
         function enableZoom(obj)
-            %ENABLEZOOM  Enable zoom functionality
+            %ENABLEZOOM  Enable zoom navigation.
+            %
+            %   Shows the full-image and zoomed-view miniature boxes, then applies
+            %   the current ZoomLevel around the best available anchor:
+            %
+            %       1. current image-space cursor position in mainAxes
+            %       2. most recent image-space zoom anchor
+            %       3. image center
+            %
+            %   If FollowCursor is already enabled, a follow-cursor anchor is
+            %   calibrated afterward so the next mouse move does not jump.
 
             if obj.ZoomEnabled
                 return
@@ -865,13 +1085,17 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 XY = [(sz(2) + 1)/2, (sz(1) + 1)/2];
             end
 
-            obj.setZoomLims2(XY,oldXLim,oldYLim);
+            obj.applyCursorAnchoredZoomLims(XY,oldXLim,oldYLim);
 
             obj.Zoom_.Enabled = true;
+
+            if obj.FollowCursorEnabled
+                obj.calibrateFollowCursorAnchor(obj.cursorPositionStatic);
+            end
         end
 
         function disableZoom(obj)
-            %DISABLEZOOM  Disable zoom functionality
+            %DISABLEZOOM  Disable zoom navigation and restore full-image view.
 
             if ~obj.ZoomEnabled
                 return
@@ -895,21 +1119,23 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % Restore limits
             obj.restoreDefaultLimits();
 
-            % The offset belongs to the current zoomed view and is no longer valid
-            obj.Pan_.OffsetXY = [0,0];
-            obj.Pan_.LastCursorXY = [];
+            obj.clearFollowCursorAnchor();
 
             obj.Zoom_.Enabled = false;
         end
 
         function toggleZoomEnabled(obj)
-            %TOGGLEZOOMENABLED  Flip state of ZoomEnabled
+            %TOGGLEZOOMENABLED  Flip state of ZoomEnabled.
 
             obj.ZoomEnabled = ~obj.Zoom_.Enabled;
         end
 
         function increaseZoom(obj)
-            %INCREASEZOOM  Step forward to the next ZoomLevel
+            %INCREASEZOOM  Step forward to the next ZoomLevel.
+            %
+            %   The new view is anchored around the current image-space cursor
+            %   position so the pixel under the cursor remains under the cursor as
+            %   much as image bounds allow.
 
             oldIdx = obj.Zoom_.Idx;
 
@@ -927,7 +1153,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function decreaseZoom(obj)
-            %DECREASEZOOM  Step backward to the previous ZoomLevel
+            %DECREASEZOOM  Step backward to the previous ZoomLevel.
+            %
+            %   The new view is anchored around the current image-space cursor
+            %   position so the pixel under the cursor remains under the cursor as
+            %   much as image bounds allow.
 
             oldIdx = obj.Zoom_.Idx;
 
@@ -942,37 +1172,43 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.zoomViewToCursor();
         end
 
-        function enablePan(obj)
-            %ENABLEPAN  Enable pan functionality
+        function enableFollowCursor(obj)
+            %ENABLEFOLLOWCURSOR  Enable cursor-follow navigation.
+            %
+            %   If zoom is active, this records the current cursor/view relationship
+            %   as a no-jump anchor. Subsequent mouse motion follows smoothly from
+            %   that anchor toward the reachable image edges.
 
-            if obj.PanEnabled
+            if obj.FollowCursorEnabled
                 return
             end
 
-            obj.Pan_.Enabled = true;
+            obj.FollowCursor_.Enabled = true;
 
-            % Establish the current cursor/view relationship without moving the
-            % view when pan is first enabled.
             if obj.ZoomEnabled
-                obj.calibratePanOffset(obj.cursorPositionStatic);
+                obj.calibrateFollowCursorAnchor(obj.cursorPositionStatic);
             end
         end
 
-        function disablePan(obj)
-            %DISABLEPAN  Disable pan functionality
+        function disableFollowCursor(obj)
+            %DISABLEFOLLOWCURSOR  Disable cursor-follow navigation.
+            %
+            %   The current zoomed view remains where it is. The cursor-follow anchor
+            %   is cleared so the next enable creates a fresh no-jump anchor at the
+            %   then-current cursor/view relationship.
 
-            if ~obj.PanEnabled
+            if ~obj.FollowCursorEnabled
                 return
             end
 
-            obj.Pan_.Enabled = false;
-            obj.Pan_.LastCursorXY = [];
+            obj.FollowCursor_.Enabled = false;
+            obj.clearFollowCursorAnchor();
         end
 
-        function togglePanEnabled(obj)
-            %TOGGLEPANENABLED  Flip state of PanEnabled
+        function toggleFollowCursorEnabled(obj)
+            %TOGGLEFOLLOWCURSORENABLED  Flip state of FollowCursorEnabled.
 
-            obj.PanEnabled = ~obj.Pan_.Enabled;
+            obj.FollowCursorEnabled = ~obj.FollowCursor_.Enabled;
         end
 
     end
@@ -2040,9 +2276,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 obj.updateViewBoxBaseCoordinates();
                 obj.applyZoomLims(newXLim,newYLim);
         
-                % Reconcile cursor-follow panning with the restored view so the
-                % next cursor movement does not cause a jump.
-                obj.calibratePanOffset(obj.cursorPositionStatic);
             elseif sizeChanged
                 % No active zoomed view to preserve. Keep the stored anchor valid,
                 % defaulting to the center when no previous anchor exists.
@@ -2286,9 +2519,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
 
             % set axes limits and view box before routing to tools
-            if obj.ZoomEnabled && obj.PanEnabled
-                % obj.moveViewToCursor();
-                obj.moveViewToCursor();
+            if obj.ZoomEnabled && obj.FollowCursorEnabled
+                obj.followCursor();
             end
 
             obj.routeEventToTools(E);
