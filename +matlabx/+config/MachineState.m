@@ -51,5 +51,42 @@ classdef MachineState
             S.(fieldName) = value;
             matlabx.config.MachineState.save(S);
         end
+
+        function txt = print(fieldName)
+        %PRINT Print current machine-local state, optionally limited to one field.
+        %
+        %   matlabx.config.MachineState.print() prints all saved state.
+        %   matlabx.config.MachineState.print("UICalibration") prints one field.
+        %   txt = matlabx.config.MachineState.print(...) returns formatted text.
+
+            S = matlabx.config.MachineState.load();
+
+            if nargin > 0
+                fieldName = string(fieldName);
+                if ~isscalar(fieldName)
+                    error('matlabx:config:MachineState:InvalidField', ...
+                        'Machine-state field must be a text scalar.');
+                end
+
+                fieldName = char(fieldName);
+                if ~isfield(S, fieldName)
+                    error('matlabx:config:MachineState:UnknownField', ...
+                        'Unknown machine-state field "%s".', fieldName);
+                end
+
+                value = S.(fieldName);
+                if isstruct(value) && isscalar(value)
+                    S = value;
+                else
+                    S = struct(fieldName, value);
+                end
+            end
+
+            if nargout == 0
+                matlabx.struct.prettyPrint(S);
+            else
+                txt = matlabx.struct.prettyPrint(S);
+            end
+        end
     end
 end

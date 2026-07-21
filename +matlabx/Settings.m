@@ -11,6 +11,10 @@ classdef Settings
 %   Discover settings:
 %       matlabx.Settings.categories()
 %       matlabx.Settings.names("Logging")
+%
+%   Print settings:
+%       matlabx.Settings.print()
+%       matlabx.Settings.print("Logging")
 
     methods (Static)
 
@@ -90,9 +94,42 @@ classdef Settings
             end
         end
 
+        function txt = print(category)
+        %PRINT Print current settings, optionally limited to one category.
+        %
+        %   matlabx.Settings.print() prints all setting categories.
+        %   matlabx.Settings.print("Logging") prints only Logging settings.
+        %   txt = matlabx.Settings.print(...) returns the formatted text.
+
+            if nargin < 1
+                S = matlabx.Settings.toStruct_();
+            else
+                category = matlabx.Settings.validateCategory_(category);
+                obj = matlabx.Settings.object();
+                S = obj.(category).toStruct();
+            end
+
+            if nargout == 0
+                matlabx.struct.prettyPrint(S);
+            else
+                txt = matlabx.struct.prettyPrint(S);
+            end
+        end
+
     end
 
     methods (Static, Access=private)
+
+        function S = toStruct_()
+            obj = matlabx.Settings.object();
+            categories = matlabx.Settings.categories();
+
+            S = struct();
+            for k = 1:numel(categories)
+                category = char(categories(k));
+                S.(category) = obj.(category).toStruct();
+            end
+        end
 
         function value = getCategoryValue_(category, name)
             category = matlabx.Settings.validateCategory_(category);
