@@ -353,7 +353,9 @@ classdef UICalibration < handle
             S.Environment = struct( ...
                 'Computer', computer, ...
                 'MATLABVersion', version, ...
-                'PixelsPerInch', obj.PixelsPerInch);
+                'PixelsPerInch', obj.PixelsPerInch, ...
+                'ScreenSize', get(groot, 'ScreenSize'), ...
+                'MonitorPositions', get(groot, 'MonitorPositions'));
 
             % core scaling
             S.PixelsPerInch = obj.PixelsPerInch;
@@ -444,6 +446,21 @@ classdef UICalibration < handle
                 return
             end
 
+            if isfield(env, 'ScreenSize') ...
+                    && ~sameNumericArray_(env.ScreenSize, get(groot, 'ScreenSize'))
+                return
+            end
+
+            if isfield(env, 'MonitorPositions') ...
+                    && ~sameNumericArray_(env.MonitorPositions, get(groot, 'MonitorPositions'))
+                return
+            end
+
+            if S.uifigureCalibrated ...
+                    && ~hasSaneUifigureGeometry_(S)
+                return
+            end
+
             tf = true;
         end
     end
@@ -509,4 +526,76 @@ classdef UICalibration < handle
     end
 
 
+end
+
+function tf = sameNumericArray_(A, B)
+tf = isequal(size(A), size(B)) && all(abs(double(A(:)) - double(B(:))) <= 1);
+end
+
+function tf = hasSaneUifigureGeometry_(S)
+tf = false;
+
+required = { ...
+    'uifigureMaximizedOuterPositionLeftPx'
+    'uifigureMaximizedOuterPositionBottomPx'
+    'uifigureMaximizedOuterPositionWidthPx'
+    'uifigureMaximizedOuterPositionHeightPx'
+    'uifigureMaximizedPositionWidthPx'
+    'uifigureMaximizedPositionHeightPx'
+    'uifigureMaximizedInnerPositionWidthPx'
+    'uifigureMaximizedInnerPositionHeightPx'};
+
+if ~all(isfield(S, required)), return; end
+
+outerPos = [ ...
+    S.uifigureMaximizedOuterPositionLeftPx ...
+    S.uifigureMaximizedOuterPositionBottomPx ...
+    S.uifigureMaximizedOuterPositionWidthPx ...
+    S.uifigureMaximizedOuterPositionHeightPx];
+
+posSize = [ ...
+    S.uifigureMaximizedPositionWidthPx ...
+    S.uifigureMaximizedPositionHeightPx];
+
+innerSize = [ ...
+    S.uifigureMaximizedInnerPositionWidthPx ...
+    S.uifigureMaximizedInnerPositionHeightPx];
+
+vals = [outerPos posSize innerSize];
+if any(~isfinite(vals)) || any(vals(3:end) <= 0), return; end
+
+monitors = get(groot, 'MonitorPositions');
+if isempty(monitors) || size(monitors, 2) ~= 4, return; end
+
+tolerancePx = 32;
+monitorWidth = monitors(:,3);
+monitorHeight = monitors(:,4);
+
+if outerPos(3) > max(monitorWidth) + tolerancePx, return; end
+if outerPos(4) > max(monitorHeight) + tolerancePx, return; end
+
+outerLeft = outerPos(1);
+outerBottom = outerPos(2);
+outerRight = outerLeft + outerPos(3);
+outerTop = outerBottom + outerPos(4);
+
+monitorLeft = monitors(:,1);
+monitorBottom = monitors(:,2);
+monitorRight = monitorLeft + monitorWidth;
+monitorTop = monitorBottom + monitorHeight;
+
+fitsMonitor = ...
+    outerLeft >= monitorLeft - tolerancePx & ...
+    outerBottom >= monitorBottom - tolerancePx & ...
+    outerRight <= monitorRight + tolerancePx & ...
+    outerTop <= monitorTop + tolerancePx;
+
+if ~any(fitsMonitor), return; end
+
+if posSize(1) > outerPos(3) + tolerancePx, return; end
+if posSize(2) > outerPos(4) + tolerancePx, return; end
+if innerSize(1) > outerPos(3) + tolerancePx, return; end
+if innerSize(2) > outerPos(4) + tolerancePx, return; end
+
+tf = true;
 end

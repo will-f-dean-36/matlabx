@@ -64,7 +64,7 @@ classdef SliderThumb < handle
             obj.YPosition   = Options.YPosition;
 
             obj.FaceColor   = Options.FaceColor;
-            obj.EdgeColor   = Options.FaceColor;
+            obj.EdgeColor   = Options.EdgeColor;
             obj.EdgeWidth   = Options.EdgeWidth;
             obj.Size1       = Options.Size1;
             obj.Size2       = Options.Size2;
@@ -133,6 +133,9 @@ classdef SliderThumb < handle
         end
 
         function set.YPosition(obj,val)
+            if val==obj.thumb.YData
+                return
+            end
             obj.thumb.YData = val;
         end
 

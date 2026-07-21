@@ -3,6 +3,7 @@ classdef Settings
 %
 %   Get a setting:
 %       value = matlabx.Settings.Logging("ShowDebugOutput")
+%       settings = matlabx.Settings.get()
 %
 %   Set a setting on the cached settings object:
 %       matlabx.Settings.Logging("ShowDebugOutput", true)
@@ -45,8 +46,8 @@ classdef Settings
             end
         end
 
-        function obj = object()
-        %OBJECT Return the cached matlabx.config.Settings object.
+        function obj = get()
+        %GET Return the cached matlabx.config.Settings object.
             obj = matlabx.config.Settings.get();
         end
 
@@ -72,14 +73,14 @@ classdef Settings
 
         function names = categories()
         %CATEGORIES Return available top-level setting categories.
-            obj = matlabx.Settings.object();
+            obj = matlabx.Settings.get();
             names = string(properties(obj)).';
         end
 
         function names = names(category)
         %NAMES Return setting names for a category.
             category = matlabx.Settings.validateCategory_(category);
-            obj = matlabx.Settings.object();
+            obj = matlabx.Settings.get();
             names = string(properties(obj.(category))).';
         end
 
@@ -105,7 +106,7 @@ classdef Settings
                 S = matlabx.Settings.toStruct_();
             else
                 category = matlabx.Settings.validateCategory_(category);
-                obj = matlabx.Settings.object();
+                obj = matlabx.Settings.get();
                 S = obj.(category).toStruct();
             end
 
@@ -121,7 +122,7 @@ classdef Settings
     methods (Static, Access=private)
 
         function S = toStruct_()
-            obj = matlabx.Settings.object();
+            obj = matlabx.Settings.get();
             categories = matlabx.Settings.categories();
 
             S = struct();
@@ -135,7 +136,7 @@ classdef Settings
             category = matlabx.Settings.validateCategory_(category);
             name = matlabx.Settings.validateName_(category, name);
 
-            obj = matlabx.Settings.object();
+            obj = matlabx.Settings.get();
             value = obj.(category).(name);
         end
 
@@ -143,7 +144,7 @@ classdef Settings
             category = matlabx.Settings.validateCategory_(category);
             name = matlabx.Settings.validateName_(category, name);
 
-            obj = matlabx.Settings.object();
+            obj = matlabx.Settings.get();
             obj.(category).(name) = value;
         end
 
@@ -156,7 +157,7 @@ classdef Settings
             end
 
             category = char(category);
-            obj = matlabx.Settings.object();
+            obj = matlabx.Settings.get();
 
             if ~isprop(obj, category)
                 error('matlabx:Settings:UnknownCategory', ...
@@ -173,7 +174,7 @@ classdef Settings
             end
 
             name = char(name);
-            obj = matlabx.Settings.object();
+            obj = matlabx.Settings.get();
 
             if ~isprop(obj.(category), name)
                 error('matlabx:Settings:UnknownName', ...

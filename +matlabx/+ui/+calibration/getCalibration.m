@@ -8,10 +8,15 @@ function cal = getCalibration(opts)
     
     persistent cachedCal
     
-    if ~opts.ForceRecalibrate && ~isempty(cachedCal)
+    if ~opts.ForceRecalibrate ...
+            && ~isempty(cachedCal) ...
+            && isvalid(cachedCal) ...
+            && matlabx.ui.calibration.UICalibration.isStructValid(cachedCal.toStruct())
         cal = cachedCal;
         return
     end
+
+    cachedCal = [];
     
     cached = matlabx.config.MachineState.get('UICalibration', []);
     

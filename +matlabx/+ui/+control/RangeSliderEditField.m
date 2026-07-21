@@ -520,9 +520,21 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
         function moveActiveThumbToCursor(obj)
             if isnan(obj.activeThumbIdx), return; end
 
+            thumbIdx = obj.activeThumbIdx;
             thumbLims = obj.sliderValueEditField(obj.activeThumbIdx).Limits;
+            newValue = clip(obj.sliderThumbAxes.CurrentPoint(1,1),thumbLims(1),thumbLims(2));
 
-            obj.Value(obj.activeThumbIdx) = clip(obj.sliderThumbAxes.CurrentPoint(1,1),thumbLims(1),thumbLims(2));
+            if obj.RoundValues
+                newValue = round(newValue,obj.RoundDigits);
+            end
+
+            if newValue == obj.sliderThumb(thumbIdx).Value
+                return
+            end
+
+            obj.sliderThumb(thumbIdx).Value = newValue;
+            obj.sliderValueEditField(thumbIdx).Value = newValue;
+            obj.updateRangePatchVx();
 
             % emit ValueChanging event
             obj.onValueChanging();
@@ -549,6 +561,10 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
 
             val(1) = clip(val(1),lims1(1),lims1(2));
             val(2) = clip(val(2),lims2(1),lims2(2));
+
+            if isequal(val, obj.Value)
+                return
+            end
 
             % update thumbs
             obj.sliderThumb(1).Value = val(1);
@@ -580,6 +596,7 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
 
         function set.ValueDisplayFormat(obj,val)
             set(obj.sliderValueEditField,'ValueDisplayFormat',val);
+            obj.ValueDisplayFormat_ = val;
         end
 
         function val = get.Title(obj)
@@ -701,90 +718,12 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
 
     methods (Static)
 
-        function s = demo()
+        function [s,ax] = demo()
 
-            fig = uifigure(...
-                "WindowStyle","alwaysontop",...
-                "InnerPosition",[100,100,510,110],...
-                "Color",[0 0 0]);
-
-            g = uigridlayout(fig,[1,1],...
-                "BackgroundColor",[0 0 0],...
-                "ColumnWidth",{500},...
-                "RowHeight",{'fit'},...
-                "Padding",[5 5 5 5],...
-                "RowSpacing",5);
-
-            s = matlabx.ui.control.RangeSliderEditField(g,...
-                "Title",'Adjust CLim',...
-                "FontColor",[1 1 1],...
-                "Limits",[0 1],...
-                "Value",[0 1],...
-                "RoundValues",true,...
-                "RoundDigits",2,...
-                "ValueDisplayFormat",'%.2f',...
-                "TrackColor",[0 0 0],...
-                "FontSize",12);
-
-            fig.InnerPosition(4) = s.ComponentHeight + 10;
-
-        end
-
-        function [s,ax] = demo2()
-
-            fig = uifigure(...
-                "WindowStyle","alwaysontop",...
-                "InnerPosition",[100,100,510,615],...
-                "Color",[0 0 0],...
-                "AutoResizeChildren","off");
-
-            g = uigridlayout(fig,[2,1],...
-                "BackgroundColor",[0 0 0],...
-                "ColumnWidth",{500},...
-                "RowHeight",{500,'fit'},...
-                "Padding",[5 5 5 5],...
-                "RowSpacing",5);
-
-            I = im2double(imread("rice.png"));
-
-            I = imresize(I,5);
-
-            ax = matlabx.ui.axes.ImageAxes(g,"CData",I);
-
-            s = matlabx.ui.control.RangeSliderEditField(g,...
-                "Title",'Adjust CLim',...
-                "FontColor",[1 1 1],...
-                "Limits",[0 1],...
-                "Value",[min(I(:)) max(I(:))],...
-                "RoundValues","on",...
-                "RoundDigits",2,...
-                "ValueDisplayFormat",'%.2f',...
-                "TrackColor",[0 0 0],...
-                "ValueChangingFcn",@(o,~) setCLimDuringSlide(o),...
-                "ValueChangedFcn",@(o,~) setCLim(o));
-
-
-            function setCLimDuringSlide(src)
-                ax.MaxRenderedResolution = 500;
-                set(ax,'CLim',src.Value)
-            end
-
-            function setCLim(src)
-                set(ax,'CLim',src.Value)
-                ax.MaxRenderedResolution = 'none';
-            end
-
-        end
-
-
-        function [s,ax] = demo3(cdata)
-
-            if nargin==0
-                I = im2double(imread("rice.png"));
-                I2 = rot90(I);
-                I3 = rot90(I2);
-                cdata = {I,I2,I3};
-            end
+            I = matlabx.image.Image5D.demo();
+            N = I.NumComponents;
+            fontSize = 12;
+            viewerSize = 500;
 
             fig = uifigure(...
                 "WindowStyle","alwaysontop",...
@@ -793,34 +732,47 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
                 "Visible","off",...
                 "AutoResizeChildren","off");
 
-            g = uigridlayout(fig,[2,1],...
+            panelTopChrome = matlabx.UICal.panelChromeHeight(fontSize,"FontUnits","pixels");
+
+            rowHeights = [{viewerSize + panelTopChrome}, repmat({'fit'}, 1, N)];
+            g = uigridlayout(fig,[N+1,1],...
                 "BackgroundColor",[0 0 0],...
                 "ColumnWidth",{500},...
-                "RowHeight",{500,'fit','fit','fit'},...
+                "RowHeight",rowHeights,...
                 "Padding",[5 5 5 5],...
                 "RowSpacing",5);
 
             ax = matlabx.ui.axes.ImageAxes(g,...
-                "CData",cdata,...
+                "ImageData",I,...
+                "FontSize",fontSize,...
                 "ToolBelt",{'Zoom','Colorbar'});
 
-            s = gobjects(3,1);
+            s = matlabx.ui.control.RangeSliderEditField.empty(1,0);
 
-            for c = 1:numel(cdata)
+            for c = 1:N
+                comp = I.Components(c);
+                compName = comp.Name;
+                if strlength(compName) == 0
+                    compName = "Component " + c;
+                end
 
-                if isinteger(cdata{c})
-                    displayFmt = '%d';
-                    roundDigits = 0;
-                else
-                    displayFmt = '%.2f';
-                    roundDigits = 2;
+                switch comp.Class
+                    case {'double','single'}
+                        displayFmt = '%.2f';
+                        roundDigits = 2;
+                    case {'uint8','uint16'}
+                        displayFmt = '%d';
+                        roundDigits = 0;
+                    otherwise
+                        displayFmt = '%.2f';
+                        roundDigits = 2;
                 end
 
                 s(c) = matlabx.ui.control.RangeSliderEditField(g,...
-                    "Title",sprintf('Channel %i',c),...
+                    "Title",char(compName),...
                     "FontColor",[1 1 1],...
-                    "Limits",[min(cdata{c}(:)) max(cdata{c}(:))],...
-                    "Value",[min(cdata{c}(:)) max(cdata{c}(:))],...
+                    "Limits",comp.DataRange,...
+                    "Value",comp.DataRange,...
                     "RoundValues","on",...
                     "RoundDigits",roundDigits,...
                     "ValueDisplayFormat",displayFmt,...
@@ -829,11 +781,12 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
                     "ValueChangedFcn",@(o,~) setCLim(o,c));
             end
 
+            fig.InnerPosition(4) = viewerSize + panelTopChrome + N*s(1).ComponentHeight + N*5 + 10;
+
             movegui(fig,'center')
             fig.Visible = "on";
 
             function setCLimDuringSlide(src,channelIdx)
-                disp('sliding')
                 ax.MaxRenderedResolution = 500;
                 ax.setCLim(src.Value,channelIdx);
             end
@@ -841,7 +794,6 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
             function setCLim(src,channelIdx)
                 ax.setCLim(src.Value,channelIdx);
                 ax.MaxRenderedResolution = 'none';
-                disp('done sliding')
             end
 
         end

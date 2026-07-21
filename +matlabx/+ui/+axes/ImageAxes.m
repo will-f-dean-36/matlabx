@@ -233,7 +233,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         function setup(obj)
 
             % perform/retrieve calibration first
-            obj.UICal = matlabx.ui.calibration.getCalibration();
+            obj.UICal = matlabx.UICal.get();
 
             obj.Interruptible = 'off';
             obj.BusyAction = 'cancel';

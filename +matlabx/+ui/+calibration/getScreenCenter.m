@@ -5,7 +5,7 @@ function sc = getScreenCenter(units)
         units (1,:) char {mustBeMember(units,{'pixels','inches','points'})} = 'pixels'
     end
 
-    UIcal = matlabx.ui.calibration.getCalibration();
+    UIcal = matlabx.UICal.get();
     
     left = UIcal.uifigureMaximizedOuterPositionLeftPx;
     bottom = UIcal.uifigureMaximizedOuterPositionBottomPx;

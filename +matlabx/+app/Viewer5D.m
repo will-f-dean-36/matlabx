@@ -151,7 +151,7 @@ classdef Viewer5D < handle
     methods (Access=protected)
 
         function setupUICalibration(obj)
-            obj.UICal = matlabx.ui.calibration.getCalibration();
+            obj.UICal = matlabx.UICal.get();
         end
 
         function buildGUI(obj)

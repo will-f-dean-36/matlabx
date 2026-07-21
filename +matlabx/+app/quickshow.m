@@ -25,15 +25,12 @@ function [ax,fig] = quickshow(I,opts)
             'To set figure Size or Units, you must provide both as input arguments');
     end
 
-    % get ui calibration helper
-    cal = matlabx.ui.calibration.getCalibration();
-
     % convert size to pixels
     switch opts.Units
         case "inches"
-            opts.Size = opts.Size * cal.PixelsPerInch;
+            opts.Size = opts.Size * matlabx.UICal.pixelsPerInch();
         case "points"
-            opts.Size = opts.Size * cal.PixelsPerPoint;
+            opts.Size = opts.Size * matlabx.UICal.pixelsPerPoint();
     end
     
 
@@ -62,8 +59,7 @@ function [ax,fig] = quickshow(I,opts)
             "Name",         opts.Title);
     end
 
-    % cal = matlabx.ui.calibration.getCalibration();
-    panelTopChromePx = cal.uipanelTopChromeHeightPx(ax.FontSize,"FontUnits","pixels");
+    panelTopChromePx = matlabx.UICal.panelChromeHeight(ax.FontSize,"FontUnits","pixels");
     fig.Position(4) = fig.Position(3) + panelTopChromePx;
 
 

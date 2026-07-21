@@ -111,7 +111,23 @@ matlabx.setup.uiCalibration()
 Load the active calibration object with:
 
 ```matlab
-cal = matlabx.ui.calibration.getCalibration();
+cal = matlabx.UICal.get();
+```
+
+For common values and measurements, use the `matlabx.UICal` facade:
+
+```matlab
+ppi = matlabx.UICal.pixelsPerInch();
+px = matlabx.UICal.pt2px(12);
+h = matlabx.UICal.panelChromeHeight(14, "FontUnits", "pixels");
+
+matlabx.UICal.print()
+```
+
+Cached calibration is checked against the current MATLAB version, display scale, and monitor geometry. If the display setup changes, matlabx will recalibrate automatically when needed. You can force it with:
+
+```matlab
+matlabx.UICal.recalibrate()
 ```
 
 Calibration is stored in machine state, not ordinary user settings, because it describes the current computer/display environment.
@@ -154,6 +170,8 @@ matlabx.config.Settings.saveActive();
 For everyday use, the `matlabx.Settings` facade provides one-line get/set helpers:
 
 ```matlab
+settings = matlabx.Settings.get();
+
 showDebug = matlabx.Settings.Logging("ShowDebugOutput");
 matlabx.Settings.Logging("ShowDebugOutput", true);
 
