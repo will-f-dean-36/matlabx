@@ -1,4 +1,4 @@
-classdef uiaccordionitem < matlab.ui.componentcontainer.ComponentContainer
+classdef AccordionItem < matlab.ui.componentcontainer.ComponentContainer
 
 properties
     % text displayed in the title
@@ -368,7 +368,7 @@ methods(Access=private)
 
 end
 
-methods(Access=?matlabx.ui.widgets.uiaccordion)
+methods(Access=?matlabx.ui.container.Accordion)
 
     function delete(~), end
 

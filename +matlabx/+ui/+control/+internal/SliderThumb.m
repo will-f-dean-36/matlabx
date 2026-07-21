@@ -1,4 +1,4 @@
-classdef sliderthumb < handle
+classdef SliderThumb < handle
 %%  SLIDERTHUMB draggable thumb used by uislidereditfield
 
     properties
@@ -32,7 +32,7 @@ classdef sliderthumb < handle
     methods
 
         % destructor
-        function obj = sliderthumb(Parent,Options)
+        function obj = SliderThumb(Parent,Options)
             % validate input args, set defaults
             arguments
                 Parent (1,1) matlab.ui.control.UIAxes

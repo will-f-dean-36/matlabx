@@ -8,7 +8,7 @@ function [ax,fig] = quickshow(I,opts)
         opts.Colormap (256,3) double
         opts.Title (1,:) char = 'Viewer'
         opts.Tools (1,:) cell {mustBeMember(opts.Tools,{'Zoom','Colorbar','ChooseColormap','Pick','DrawRectangle'})} ...
-            = matlabx.ui.widgets.ImageAxes.getDefaultTools()
+            = matlabx.ui.axes.ImageAxes.getDefaultTools()
         opts.WindowStyle (1,:) char {mustBeMember(opts.WindowStyle,{'normal','alwaysontop'})} = 'alwaysontop'
         opts.Visible (1,1) matlab.lang.OnOffSwitchState = "on"
         opts.Size (1,1) double = 500

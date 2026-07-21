@@ -6,7 +6,7 @@ classdef Viewer5D < handle
         Fig matlab.ui.Figure
         Grid matlab.ui.container.GridLayout
         % --- viewer ---
-        Viewer matlabx.ui.widgets.ImageAxes
+        Viewer matlabx.ui.axes.ImageAxes
         % --- menubar UI handles ---
         MenubarUI struct
     end
@@ -18,7 +18,7 @@ classdef Viewer5D < handle
         % UI Calibration
         UICal matlabx.ui.calibration.UICalibration
         % hotkey management
-        CommandRouter matlabx.ui.control.CommandRouter
+        CommandRouter matlabx.ui.interaction.CommandRouter
     end
 
     % internal UI values
@@ -192,7 +192,7 @@ classdef Viewer5D < handle
         end
 
         function setupCommandRouter(obj)
-            obj.CommandRouter = matlabx.ui.control.CommandRouter('Parent',obj.Fig);
+            obj.CommandRouter = matlabx.ui.interaction.CommandRouter('Parent',obj.Fig);
         end
 
         function setupMenubar(obj)
@@ -254,7 +254,7 @@ classdef Viewer5D < handle
 
         function setupViewer(obj)
             % ImageAxes object for the viewer
-            obj.Viewer = matlabx.ui.widgets.ImageAxes(obj.Grid,...
+            obj.Viewer = matlabx.ui.axes.ImageAxes(obj.Grid,...
                 "ToolBelt",     {'Zoom', 'Colorbar', 'ChooseColormap', 'Pick', 'DrawRectangle'},...
                 "ImageData",    obj.Image,...
                 "Name",         "Viewer",...

@@ -1,4 +1,4 @@
-classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
+classdef Accordion < matlab.ui.componentcontainer.ComponentContainer
 % custom class for expandable accordion container with scrollable content
 % Notes:
 %   for most predictable behavior, the accordion should be 
@@ -15,7 +15,7 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
     
     %% Items/Item management
     properties(SetAccess = private)
-        Items (:,1) matlabx.ui.widgets.uiaccordionitem
+        Items (:,1) matlabx.ui.container.AccordionItem
 
         % track item IDs in parallel with Item handles
         ItemIDs (1,:) string = string.empty(1,0)
@@ -26,7 +26,7 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
 
     properties(Access=private)
         % dictionary to access items by name
-        ItemsDict dictionary = dictionary(string.empty(1,0), matlabx.ui.widgets.uiaccordionitem.empty(1,0))
+        ItemsDict dictionary = dictionary(string.empty(1,0), matlabx.ui.container.AccordionItem.empty(1,0))
     end
     
     %% Derived properties
@@ -51,7 +51,7 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
 
     %% Hub registration
     properties (Access=private)
-        Hub matlabx.ui.control.FigureEventHub
+        Hub matlabx.ui.interaction.FigureEventHub
         RouterId double = NaN
     end
 
@@ -78,7 +78,7 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
                 "Padding",obj.ItemPadding,...
                 "Scrollable","on");
             % Hub registration (one hub per figure; this instance registers itself)
-            obj.Hub = matlabx.ui.control.FigureEventHub.ensure(obj.ParentFig);
+            obj.Hub = matlabx.ui.interaction.FigureEventHub.ensure(obj.ParentFig);
             obj.RouterId = obj.Hub.register(obj, ...
                 'Priority', 10, ...
                 'CaptureDuringDrag', false);
@@ -209,7 +209,7 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
 
         function addItem(obj,Options)
             arguments
-                obj (1,1) matlabx.ui.widgets.uiaccordion
+                obj (1,1) matlabx.ui.container.Accordion
                 Options.TitleFontSize (1,1) double = 12
                 Options.ContentFontSize (1,1) double = 12
                 Options.MatchPaneFontSizes (1,1) logical = true
@@ -241,7 +241,7 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
             values = cellfun(@(name) Options.(name),names,"UniformOutput",false);
             arguments = cat(1,names,values);
 
-            newItem = matlabx.ui.widgets.uiaccordionitem(obj.itemGrid,arguments{:});
+            newItem = matlabx.ui.container.AccordionItem(obj.itemGrid,arguments{:});
 
             obj.Items(end+1) = newItem;
             obj.ItemIDs(end+1) = newItem.ID;
@@ -251,7 +251,7 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
     
         function deleteItem(obj,titleOrIdx)
             % if titleOrIdx > obj.nItems || titleOrIdx < 1
-            %     error('uiaccordion:invalidIndex',...
+            %     error('Accordion:InvalidIndex',...
             %         'idx must be a positive integer <= number of accordion items');
             % else
             %     delete(obj.Items(titleOrIdx));
@@ -269,7 +269,7 @@ classdef uiaccordion < matlab.ui.componentcontainer.ComponentContainer
                 idx = obj.idxOfID(itemToDelete.ID);
             else
                 if titleOrIdx > obj.nItems || titleOrIdx < 1
-                    error('uiaccordion:invalidIndex',...
+                    error('Accordion:InvalidIndex',...
                         'idx must be a positive integer <= number of accordion items');
                 end
 

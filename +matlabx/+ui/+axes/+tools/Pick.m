@@ -1,11 +1,11 @@
-classdef Pick < matlabx.ui.widgets.ImageAxesTool
-% matlabx.ui.widgets.tools.Pick - optimistic box creation on click
+classdef Pick < matlabx.ui.axes.AxesTool
+% matlabx.ui.axes.tools.Pick - optimistic box creation on click
 
     %% Draggable box management
 
     %% Private UI/Graphics
     properties (Access = private, Transient, NonCopyable)
-        BoxROI (:,1) matlabx.ui.widgets.overlays.ROIBox
+        BoxROI (:,1) matlabx.ui.axes.overlays.ROIBox
     end
 
     % Callbacks
@@ -49,8 +49,9 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
     %% Lifecycle toggles
     methods
         function obj = Pick(host)
-            obj@matlabx.ui.widgets.ImageAxesTool(host, "Pick",...
+            obj@matlabx.ui.axes.AxesTool(host, "Pick",...
                 'Tooltip','Pick regions',...
+                'AxesType',"image",...
                 'Icon',matlabx.internal.Paths.icons('AddRectangleIcon.png'),...
                 'Priority',10,...
                 'IsExclusive',true,...
@@ -60,7 +61,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
                 'PassivelyInterceptsUp',true);
 
             % ROIBox array (empty to start)
-            obj.BoxROI = matlabx.ui.widgets.overlays.ROIBox.empty();
+            obj.BoxROI = matlabx.ui.axes.overlays.ROIBox.empty();
 
         end
 
@@ -483,7 +484,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
 
             hostAxes = obj.Host.getAxes();
 
-            obj.BoxROI(next) = matlabx.ui.widgets.overlays.ROIBox(hostAxes, ...
+            obj.BoxROI(next) = matlabx.ui.axes.overlays.ROIBox(hostAxes, ...
                 "Center",[cx cy], ...
                 "BoxSize", boxSize, ...
                 "ID", string(id), ...
@@ -505,7 +506,7 @@ classdef Pick < matlabx.ui.widgets.ImageAxesTool
             if ~isempty(obj.BoxROI)
                 bx = obj.BoxROI(isvalid(obj.BoxROI)); if ~isempty(bx), delete(bx); end
             end
-            obj.BoxROI = matlabx.ui.widgets.overlays.ROIBox.empty();
+            obj.BoxROI = matlabx.ui.axes.overlays.ROIBox.empty();
             obj.BoxCenters = zeros(0,2);
             obj.BoxIds = string.empty(1,0);
             obj.ActiveBoxIdx = [];

@@ -1,7 +1,7 @@
-classdef ImageAxesTool < handle
-%IMAGEAXESTOOL Base class for tools hosted by matlabx.ui.widgets.ImageAxes.
+classdef AxesTool < handle
+%AXESTOOL Base class for tools hosted by matlabx.ui.axes.ImageAxes.
 %
-%   ImageAxesTool subclasses can add toolbar actions, interactive modes,
+%   AxesTool subclasses can add toolbar actions, interactive modes,
 %   overlays, and host-event listeners to an ImageAxes instance.
 %
 %   Tool styles
@@ -15,7 +15,7 @@ classdef ImageAxesTool < handle
 %   Figure-event routing
 %   --------------------
 %   ImageAxes receives normalized figure-level HubEvent objects from
-%   matlabx.ui.control.FigureEventHub. Installed tools can participate in
+%   matlabx.ui.interaction.FigureEventHub. Installed tools can participate in
 %   routing in two ways:
 %
 %   Interceptor
@@ -42,8 +42,9 @@ classdef ImageAxesTool < handle
 
 
     properties (SetAccess=protected)
-        Host                                                    % widgets.ImageAxes
+        Host                                                    % axes.ImageAxes
         Name (1,1) string = ""                                  % name of the tool
+        AxesType (1,1) string {mustBeMember(AxesType, ["image", "plot", "both"])} = "both"
         Tooltip (1,:) = ''                                      % tooltip for toolbar buttons
         Icon (1,:) char = matlabx.internal.Paths.icons('QuestionMark.png')   % icon for toolbar buttons, question mark by default
         ToggleHotkey (1,1) string = ""
@@ -86,7 +87,7 @@ classdef ImageAxesTool < handle
     end
 
     methods
-        function obj = ImageAxesTool(host, name, varargin)
+        function obj = AxesTool(host, name, varargin)
             obj.Host = host;
             obj.Name = string(name);
 
@@ -95,6 +96,7 @@ classdef ImageAxesTool < handle
 
             p = inputParser;
             p.addParameter('Tooltip', '', @(x)ischar(x));
+            p.addParameter('AxesType', "both", @(x)(isstring(x)&&isscalar(x)) || ischar(x));
             p.addParameter('Icon', 'QuestionMark.png', @(x)ischar(x));
             p.addParameter('ToggleHotkey', "", @(x)isstring(x)&&isscalar(x));
             p.addParameter('Style', 'state', @(x)ischar(x));
@@ -115,6 +117,7 @@ classdef ImageAxesTool < handle
             p.parse(varargin{:});
 
             obj.Tooltip = p.Results.Tooltip;
+            obj.AxesType = p.Results.AxesType;
             obj.Icon = p.Results.Icon;
             obj.ToggleHotkey = p.Results.ToggleHotkey;
             obj.Style = p.Results.Style;
@@ -293,7 +296,7 @@ classdef ImageAxesTool < handle
 
     %% teardown
 
-    methods (Access = {?matlabx.ui.widgets.ImageAxesTool, ?matlabx.ui.widgets.ImageAxes})
+    methods (Access = {?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxes})
 
         % subclass delete() will be called before this runs
         function delete(obj)

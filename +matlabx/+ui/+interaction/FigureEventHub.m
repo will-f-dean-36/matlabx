@@ -1,5 +1,5 @@
 classdef FigureEventHub < handle
-%matlabx.ui.control.FigureEventHub  Per-figure event hub that routes window-level events
+%matlabx.ui.interaction.FigureEventHub  Per-figure event hub that routes window-level events
 %
 % Per-figure event hub that routes figure/window-level events to registered
 % handlers with priority and optional capture. Also supports chained
@@ -8,7 +8,7 @@ classdef FigureEventHub < handle
 %
 % Notes/Definitions
 %
-% Registrant: object registered with the hub (e.g., widgets.ImageAxes)
+% Registrant: object registered with the hub (e.g., axes.ImageAxes)
 %   Each registrant registers itself with the hub at startuo and must implement 
 %   matches(tgt, kind, evt), which returns true if registrant should claim the event
 %
@@ -66,7 +66,7 @@ classdef FigureEventHub < handle
         function hub = ensure(fig)
             hub = getappdata(fig, 'FigureEventHub');
             if isempty(hub) || ~isvalid(hub)
-                hub = matlabx.ui.control.FigureEventHub(fig);
+                hub = matlabx.ui.interaction.FigureEventHub(fig);
                 setappdata(fig, 'FigureEventHub', hub);
             end
         end
@@ -158,7 +158,7 @@ classdef FigureEventHub < handle
                 % obj.safeCall(obj.Registry(idx).obj, 'onLeave', [], hittest(obj.Fig));
 
                 tgt = hittest(obj.Fig);
-                E = matlabx.ui.control.HubEvent(obj.Fig, tgt, '', []);
+                E = matlabx.ui.interaction.HubEvent(obj.Fig, tgt, '', []);
                 obj.safeCall(obj.Registry(idx).obj, 'onLeave', E);
                 obj.HoverID = NaN;
             end
@@ -252,7 +252,7 @@ classdef FigureEventHub < handle
             obj.pruneInvalidListeners(kind);
 
             tgt = hittest(obj.Fig);
-            E = matlabx.ui.control.HubEvent(obj.Fig, tgt, kind, evt);
+            E = matlabx.ui.interaction.HubEvent(obj.Fig, tgt, kind, evt);
 
             % If captured, route only to current captor until mouse up
             if ~isnan(obj.CaptureID)

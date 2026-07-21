@@ -1,10 +1,10 @@
 classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 %IMAGEAXES Image5D-backed UI image display and interaction component.
 %
-%   matlabx.ui.widgets.ImageAxes displays a selected 2-D plane or RGB
+%   matlabx.ui.axes.ImageAxes displays a selected 2-D plane or RGB
 %   composite from a matlabx.image.Image5D object. It also hosts
-%   ImageAxesTool subclasses and receives figure-level mouse/key events
-%   through matlabx.ui.control.FigureEventHub.
+%   AxesTool subclasses and receives figure-level mouse/key events
+%   through matlabx.ui.interaction.FigureEventHub.
 %
 %   Data terminology
 %   ----------------
@@ -23,7 +23,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     %% Tools
 
-    properties (SetAccess=?matlabx.ui.widgets.ImageAxesTool)
+    properties (SetAccess=?matlabx.ui.axes.AxesTool)
         % struct() of installed tools, fieldnames match tool Name
         Tools struct = struct()
     end
@@ -42,7 +42,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         ToolRegistry    % containers.Map name->tool
     end
 
-    properties (Access=?matlabx.ui.widgets.ImageAxesTool)
+    properties (Access=?matlabx.ui.axes.AxesTool)
         % the currently enabled tool with IsExclusive=true (if it exists)
         ActiveExclusiveTool
         % struct() of ToolbarButtons, fieldnames match tool Name
@@ -118,7 +118,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         ImageData_ (1,1) matlabx.image.Image5D = matlabx.image.Image5D.fromComponents(zeros(256,256,3))
 
         % Selected source plane or computed composite, before display scaling.
-        RenderSource_ (:,:,:) = matlabx.ui.widgets.ImageAxes.placeholderImage
+        RenderSource_ (:,:,:) = matlabx.ui.axes.ImageAxes.placeholderImage
 
         % Per-component contrast/color/LUT display state.
         ComponentDisplay_ (1,:) struct = struct( ...
@@ -153,7 +153,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     % tool-accessible
-    properties (Access=?matlabx.ui.widgets.ImageAxesTool)
+    properties (Access=?matlabx.ui.axes.AxesTool)
         mainAxes matlab.ui.control.UIAxes
     end
 
@@ -192,7 +192,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     %% Derived properties (accessible to tools)
-    properties (Access=?matlabx.ui.widgets.ImageAxesTool, Dependent)
+    properties (Access=?matlabx.ui.axes.AxesTool, Dependent)
         ParentFig
         ImageSize
         ImageWidth
@@ -205,7 +205,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     %% Tool helper variables
-    properties (Access=?matlabx.ui.widgets.ImageAxesTool)
+    properties (Access=?matlabx.ui.axes.AxesTool)
         % control XLim and YLim of axes holding the image (if empty, lims will be set to default)
         XLim = []
         YLim = []
@@ -218,7 +218,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     %% Hub registration
     properties (Access=private)
-        Hub matlabx.ui.control.FigureEventHub
+        Hub matlabx.ui.interaction.FigureEventHub
         RouterId double = NaN
     end
 
@@ -323,7 +323,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.installTools(obj.ToolBelt);
 
             % Hub registration (one hub per figure; this instance registers itself)
-            obj.Hub = matlabx.ui.control.FigureEventHub.ensure(obj.ParentFig);
+            obj.Hub = matlabx.ui.interaction.FigureEventHub.ensure(obj.ParentFig);
             obj.RouterId = obj.Hub.register(obj,'Priority',10,'CaptureDuringDrag',true);
 
             % Image
@@ -1233,13 +1233,13 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function addLink(obj,links,props)
             arguments
-                obj     (1,1) matlabx.ui.widgets.ImageAxes
-                links   (1,:) matlabx.ui.widgets.ImageAxes
-                props   (1,:) cell = matlabx.ui.widgets.ImageAxes.getLinkableProperties()
+                obj     (1,1) matlabx.ui.axes.ImageAxes
+                links   (1,:) matlabx.ui.axes.ImageAxes
+                props   (1,:) cell = matlabx.ui.axes.ImageAxes.getLinkableProperties()
             end
 
             if obj.hasLinks
-                error("matlabx:ui:widgets:ImageAxes:UnableToLink","Axes is already linked");
+                error("matlabx:ui:axes:ImageAxes:UnableToLink","Axes is already linked");
             end
 
             if isempty(links) || isempty(props)
@@ -1486,7 +1486,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             clim = obj.ComponentDisplay_(idx).CLim;
 
             if strcmp(comp.Kind, 'scalar') && ~strcmp(comp.Class,'logical') && ~isempty(clim)
-                [ticks, labels] = matlabx.ui.widgets.ImageAxes.getColorbarTickLabels(comp.Class, clim);
+                [ticks, labels] = matlabx.ui.axes.ImageAxes.getColorbarTickLabels(comp.Class, clim);
             end
 
             obj.Colorbar.Ticks = ticks;
@@ -1654,7 +1654,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         function set.CData(obj, cdata)
             % Convenience wrapper to set ImageData without constructing an Image5D.
             if isempty(cdata)
-                cdata = matlabx.ui.widgets.ImageAxes.placeholderImage();
+                cdata = matlabx.ui.axes.ImageAxes.placeholderImage();
             end
 
             obj.ImageData_ = matlabx.image.Image5D.fromComponents(cdata);
@@ -1952,7 +1952,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         % --- setCLim ---
         function setCLim(obj, clim, idx)
             arguments
-                obj (1,1) matlabx.ui.widgets.ImageAxes
+                obj (1,1) matlabx.ui.axes.ImageAxes
                 clim (1,2) double
                 idx (:,1) = []
             end
@@ -1975,7 +1975,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         % --- setColormap ---
         function setColormap(obj, cmap, idx)
             arguments
-                obj (1,1) matlabx.ui.widgets.ImageAxes
+                obj (1,1) matlabx.ui.axes.ImageAxes
                 cmap (256,3) double
                 idx (:,1) = []
             end
@@ -2002,7 +2002,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         % --- setComponentColor ---
         function setComponentColor(obj, colorName, idx)
             arguments
-                obj (1,1) matlabx.ui.widgets.ImageAxes
+                obj (1,1) matlabx.ui.axes.ImageAxes
                 colorName
                 idx (:,1) = []
             end
@@ -2054,7 +2054,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 'Colormap', [], ...
                 'DisplayMap', []), 1, n);
 
-            defaultColors = matlabx.ui.widgets.ImageAxes.getColorNames();
+            defaultColors = matlabx.ui.axes.ImageAxes.getColorNames();
     
             % initialize component display state using info from ImageData
             for i = 1:n
@@ -2285,7 +2285,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 end
             end
         
-            evtData = matlabx.ui.widgets.events.RenderSourceChangedEventData(...
+            evtData = matlabx.ui.axes.events.RenderSourceChangedEventData(...
                 oldData,newData);
         
             notify(obj,'RenderSourceChanged',evtData);
@@ -2362,7 +2362,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     %% Tool-accessible helpers
-    methods (Access=?matlabx.ui.widgets.ImageAxesTool, Hidden=true)
+    methods (Access=?matlabx.ui.axes.AxesTool, Hidden=true)
         
         function setMode(obj, modeName, modeState)
             % if mode does not exist
@@ -2604,7 +2604,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function tf = isChild(obj,h)
             % true if h is child of this ImageAxes
-            ia = ancestor(h,'matlabx.ui.widgets.ImageAxes');
+            ia = ancestor(h,'matlabx.ui.axes.ImageAxes');
 
             if isempty(ia)
                 tf = false;
@@ -2711,7 +2711,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.ToolRegistry.remove(char(tool.Name));
         end
 
-        % load all tools in matlabx.ui.widgets.tools
+        % load all tools in matlabx.ui.axes.tools
         function loadAllTools(obj)
             % cell array of tool names
             toolNames = obj.getToolNames();
@@ -2746,7 +2746,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
             % add to loaded Tools registry
-            obj.ToolList(char(name)) = matlabx.ui.widgets.tools.(char(name))(obj);
+            obj.ToolList(char(name)) = matlabx.ui.axes.tools.(char(name))(obj);
         end
 
         % unload tool specified by name
@@ -2785,6 +2785,12 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % check if tool is already registered
             if obj.ToolRegistry.isKey(char(thisTool.Name))
                 warning('Failed to install tool. "%s" tool is already installed.',name)
+                return
+            end
+            % check whether this tool supports image axes
+            if ~ismember(thisTool.AxesType, ["image", "both"])
+                warning('Failed to install tool. "%s" tool is for "%s" axes, not image axes.', ...
+                    char(name), char(thisTool.AxesType))
                 return
             end
             % call the tool's install() method, it will register itself and perform startup tasks
@@ -3219,14 +3225,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     methods (Static)
 
         function names = getToolClassNames()
-            % get cell array of char vectors of tool class names in matlabx.ui.widgets.tools
-            names = {matlab.metadata.Namespace.fromName("matlabx.ui.widgets.tools").ClassList.Name}';
+            % get cell array of char vectors of tool class names in matlabx.ui.axes.tools
+            names = {matlab.metadata.Namespace.fromName("matlabx.ui.axes.tools").ClassList.Name}';
         end
 
         function names = getToolNames()
             % return names of all tool classes (just the last part)
 
-            classNames = matlabx.ui.widgets.ImageAxes.getToolClassNames();
+            classNames = matlabx.ui.axes.ImageAxes.getToolClassNames();
             if numel(classNames)==0
                 names = {};
                 return
@@ -3274,7 +3280,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             switch name
                 case 'default'
-                    ax = matlabx.ui.widgets.ImageAxes(fig,...
+                    ax = matlabx.ui.axes.ImageAxes(fig,...
                         "ToolBelt",{'Zoom','Colorbar'},...
                         "Units","normalized",...
                         "Position",[0 0 1 1],...
@@ -3282,7 +3288,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                         "CLim",[0 1],...
                         "Colormap",gray);
                 case 'empty'
-                    ax = matlabx.ui.widgets.ImageAxes(fig,...
+                    ax = matlabx.ui.axes.ImageAxes(fig,...
                         "CData",[],...
                         "ToolBelt",{'Zoom','Colorbar'},...
                         "Units","normalized",...
@@ -3292,7 +3298,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                     I1 = imread("rice.png");
                     I2 = imgaussfilt(I1);
                     cdata = {I1,I2};
-                    ax = matlabx.ui.widgets.ImageAxes(fig,...
+                    ax = matlabx.ui.axes.ImageAxes(fig,...
                         "CData",cdata,...
                         "ToolBelt",{'Zoom','Colorbar'},...
                         "Units","normalized",...

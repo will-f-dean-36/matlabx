@@ -7,7 +7,7 @@ classdef CommandRouter < matlab.ui.componentcontainer.ComponentContainer
     end
 
     properties (Access=private)
-        Hub matlabx.ui.control.FigureEventHub
+        Hub matlabx.ui.interaction.FigureEventHub
         RouterId double = NaN
     end
 
@@ -21,7 +21,7 @@ classdef CommandRouter < matlab.ui.componentcontainer.ComponentContainer
             fig = ancestor(obj, 'Figure');
 
             % Register with FigureEventHub
-            obj.Hub = matlabx.ui.control.FigureEventHub.ensure(fig);
+            obj.Hub = matlabx.ui.interaction.FigureEventHub.ensure(fig);
             obj.RouterId = obj.Hub.register(obj, ...
                 'Priority', 100, ...
                 'CaptureDuringDrag', false);
