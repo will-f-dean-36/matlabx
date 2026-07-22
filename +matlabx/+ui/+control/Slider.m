@@ -1,17 +1,49 @@
 classdef Slider < matlab.ui.componentcontainer.ComponentContainer
+%SLIDER Custom scalar/range slider with optional numeric edit fields.
+%
+%   matlabx.ui.control.Slider is a ComponentContainer-based slider intended
+%   for app-building workflows that need more control than MATLAB's built-in
+%   slider. It supports two construction-time value modes:
+%
+%       ValueMode="scalar"
+%           One thumb. Value is a scalar. If ShowFill is on, the filled
+%           region spans from Limits(1) to Value.
+%
+%       ValueMode="range"
+%           Two thumbs. Value is a two-element vector [low high]. If
+%           ShowFill is on, the filled region spans between the thumbs.
+%
+%   Numeric edit fields can be shown or hidden with ShowEditFields. The
+%   edit fields are kept synchronized with the slider thumbs and use
+%   ValueDisplayFormat for display. RoundValues/RoundDigits can be used to
+%   force integer or fixed-precision slider values.
+%
+%   Examples
+%   --------
+%   s = matlabx.ui.control.Slider(parent, ...
+%       "Limits", [0 255], ...
+%       "Value", [20 180]);
+%
+%   s = matlabx.ui.control.Slider(parent, ...
+%       "ValueMode", "scalar", ...
+%       "ShowEditFields", "off", ...
+%       "Limits", [1 10], ...
+%       "Value", 5);
+%
+%   See also matlabx.ui.control.internal.SliderThumb
 
     %% Public API
 
     properties
-        % value shape and behavior: scalar uses one thumb, range uses two
+        % Value shape and behavior: scalar uses one thumb, range uses two.
         ValueMode (1,1) string {mustBeMember(ValueMode, ["scalar", "range"])} = "range"
-        % whether to show numeric edit fields next to the slider
+        % Whether to show numeric edit fields next to the slider.
         ShowEditFields (1,1) matlab.lang.OnOffSwitchState = "on"
-        % whether to show the filled slider region
+        % Whether to show the filled slider region.
         ShowFill (1,1) matlab.lang.OnOffSwitchState = "on"
-        % flag to determine whether values are rounded
+        % Whether values are rounded before being committed.
         RoundValues (1,1) matlab.lang.OnOffSwitchState = 'off'
-        % number of digits used for rounding 
+        % Number of digits used for rounding.
         %   N > 0: round to N digits to the right of the decimal point.
         %   N = 0: round to the nearest integer.
         %   N < 0: round to N digits to the left of the decimal point.
@@ -48,7 +80,7 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
     % properties we want property-based, minimal updates for
     properties(SetObservable, AbortSet)
-        % % min and max of the slider track
+        % Minimum and maximum of the slider track.
         Limits double = [0,1]
 
         % color of the thumb faces
@@ -90,13 +122,14 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
         activeThumbIdx (1,1) double = NaN
         % index of thumb currently hovered (1 or 2, NaN if none)
         hoverThumbIdx double = NaN
-        % flag to help coalesce updates
+        % flag to help coalesce resize updates
         pendingUpdate (1,1) logical = false
-        % helpers for patch coordinates
+        % fixed templates reused when recomputing patch coordinates
         trackV = [0 0; 1 0; 1 1; 1 1]
         trackF = [1,2,3,4]
 
-        % rangeVX = [1:256,256:-1:1]'
+        % x/y templates for a 256-sample filled region. Only X coordinates
+        % change during dragging, which keeps the visual update path light.
         rangeVX = [linspace(0,1,256),linspace(1,0,256)]'
         rangeVY = [ones(256,1)*-1;ones(256,1)]
         rangeF = 1:512
@@ -125,12 +158,12 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
         sliderThumbAxes (1,1) matlab.ui.control.UIAxes
         % patch object for slider track
         trackPatch (1,1) matlab.graphics.primitive.Patch
-        % patch object for slider range
+        % patch object for the filled region (range fill or scalar lower fill)
         rangePatch (1,1) matlab.graphics.primitive.Patch
-        % the slider thumbs (lower=1, upper=2)
+        % the slider thumbs. Scalar mode uses thumb 1 and hides thumb 2.
         sliderThumb (:,1) matlabx.ui.control.internal.SliderThumb
 
-        % editfields for text control of slider values [low high]
+        % editfields for text control of slider values. Scalar mode uses field 1.
         sliderValueEditField (:,1) matlab.ui.control.NumericEditField
 
         % listeners for property-based updates (ThumbFaceColor, etc.)
@@ -154,7 +187,9 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
         function setup(obj)
 
-            % grid layout manager to enclose all the components
+            % The grid keeps the track and edit fields in separate columns so
+            % ShowEditFields can collapse the numeric controls without
+            % resizing individual child objects.
             obj.containerGrid = uigridlayout(obj,...
                 [1,3],...
                 "ColumnWidth",{'1x',50,50},...
@@ -221,7 +256,8 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
                 'HitTest','on',...
                 'LineWidth',0.5);
 
-            % range patch (full Limits range)
+            % Filled patch. Its initial geometry is arbitrary; updateRangePatch
+            % immediately reshapes it according to ValueMode and ShowFill.
             obj.rangePatch = patch(obj.sliderThumbAxes,...
                 'Faces',[1,2,3,4],...
                 'Vertices',[0,0;1,0;1,1;0,1],...
@@ -233,7 +269,8 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
                 'LineWidth',0.5);
 
 
-            % create lower and upper thumbs
+            % Always create two thumbs. Scalar mode hides thumb 2 later, which
+            % lets runtime mode changes reuse the same graphics objects.
             obj.sliderThumb(1) = matlabx.ui.control.internal.SliderThumb(obj.sliderThumbAxes,...
                 "EdgeColor",obj.ThumbEdgeColor,...
                 "FaceColor",obj.ThumbFaceColor,...
@@ -250,7 +287,8 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
                 "ID",2,...
                 "EdgeWidth",0.5);
 
-            % editfields for numeric control
+            % Always create two edit fields for the same reason as the thumbs.
+            % Scalar mode relabels field 1 as "Value" and hides field 2.
             obj.sliderValueEditField(1) = uieditfield(obj.containerGrid,"numeric",...
                 'Limits',obj.Limits,...
                 'Value',obj.Limits(1),...
@@ -269,7 +307,8 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
             obj.sliderValueEditField(2).Layout.Row    = 2;
             obj.sliderValueEditField(2).Layout.Column = 3;
 
-            % Register with FigureEventHub
+            % Register with FigureEventHub so dragging keeps working even when
+            % the pointer moves quickly across child graphics objects.
             obj.Hub = matlabx.ui.interaction.FigureEventHub.ensure(obj.parentFig);
             obj.RouterId = obj.Hub.register(obj, ...
                 'Priority', 10, ...
@@ -280,10 +319,12 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
             obj.onColorsChanged();
             obj.onDimensionsChanged();
 
-            % set SizeChangedFcn so we can force visual update upon resizing (AutoResizeChildren of parent must be Off)
+            % SizeChangedFcn is intentionally queued: resizing can emit many
+            % events, and the patches only need the last geometry in a burst.
             obj.SizeChangedFcn = @(~,~) obj.queueSizeUpdate();
 
-            % property-based listeners for granular updates
+            % Property listeners keep common styling changes cheap by updating
+            % only the affected graphics state.
             obj.L(end+1) = addlistener(obj,{'TrackColor','TrackEdgeColor'},'PostSet',@(~,~)obj.updateTrackPatchColors());
             obj.L(end+1) = addlistener(obj,{'Colormap','RangeEdgeColor'},'PostSet',@(~,~)obj.updateRangePatchColors());
             obj.L(end+1) = addlistener(obj,{'BackgroundColor','ThumbFaceColor','ThumbEdgeColor'},'PostSet',@(~,~)obj.onColorsChanged());
@@ -327,6 +368,7 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
     methods(Access=private)
 
         function updateOnResize(obj)
+            % Resize only affects vertical geometry; x positions remain valid.
             if ~isvalid(obj); return; end
             
             obj.onDimensionsChanged();
@@ -338,7 +380,8 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
             obj.pendingUpdate = true;
-            % coalesce updates
+            % drawnow limitrate gives MATLAB a chance to settle pending layout
+            % work before the patch dimensions are recomputed.
             drawnow limitrate nocallbacks
             obj.updateOnResize();
             obj.pendingUpdate = false;
@@ -367,7 +410,8 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function updateTrackPatchVx(obj)
-            % x values used to calculate track patch coordinates
+            % Fast path for limit changes: patch Y geometry and color stay the
+            % same, so only rewrite vertex X values.
             sliderLimits = obj.Limits;
             loLim  = sliderLimits(1);
             hiLim = sliderLimits(2);
@@ -382,6 +426,9 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
         function updateRangePatch(obj)
             % full update of Vertices, Faces, and FaceVertexCData
+            if obj.ShowFill == "off"
+                return
+            end
 
             % x values
             [lo, hi] = obj.getFillLimits();
@@ -402,17 +449,45 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
         function updateRangePatchColors(obj)
             obj.rangePatch.EdgeColor = obj.RangeEdgeColor;
+            if obj.ShowFill == "off"
+                return
+            end
+
             obj.rangePatch.FaceVertexCData = vertcat(obj.Colormap,flipud(obj.Colormap));
         end
 
         function updateRangePatchVx(obj)
-            % x values used to calculate track patch coordinates
+            % Fast path for dragging: the fill height and colormap stay fixed,
+            % so only rewrite vertex X values.
+            if obj.ShowFill == "off"
+                return
+            end
+
             [lo, hi] = obj.getFillLimits();
             % update of Vertex X coordinates only
             obj.rangePatch.Vertices(:,1) = obj.rangeVX*(hi-lo)+lo;
         end
 
+        function lims = getThumbLimits(obj, thumbIdx)
+            % Drag bounds are derived from the slider state instead of reading
+            % NumericEditField.Limits during pointer motion. UI component
+            % property access is relatively expensive on this hot path.
+            switch obj.ValueMode
+                case "scalar"
+                    lims = obj.Limits;
+                case "range"
+                    if thumbIdx == 1
+                        lims = [obj.Limits(1) obj.sliderThumb(2).Value];
+                    else
+                        lims = [obj.sliderThumb(1).Value obj.Limits(2)];
+                    end
+            end
+        end
+
         function [lo, hi] = getFillLimits(obj)
+            % The same fill patch is used in both modes. In scalar mode it
+            % behaves like a progress fill from the lower limit to the thumb;
+            % in range mode it spans between the two thumbs.
             switch obj.ValueMode
                 case "scalar"
                     lo = obj.Limits(1);
@@ -424,30 +499,41 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function applyModeAppearance(obj)
+            % Apply construction-time mode choices to the already-created UI.
+            % ComponentContainer may set public properties before setup()
+            % finishes, so this method is intentionally safe to call early.
             if isempty(obj.containerGrid) || isempty(obj.sliderThumb)
                 return
             end
 
             isScalar = obj.ValueMode == "scalar";
-            showEdits = strcmp(char(obj.ShowEditFields), 'on');
+            showEdits = obj.ShowEditFields == "on";
 
-            obj.rangePatch.Visible = char(obj.ShowFill);
+            % ShowFill only controls visibility. The fill bounds themselves
+            % are derived from ValueMode in getFillLimits().
+            obj.rangePatch.Visible = obj.ShowFill;
 
             if isScalar
+                % Scalar mode keeps the lower/value controls and hides the
+                % second thumb and second edit-field column.
                 obj.sliderThumb(2).Visible = 'off';
                 obj.minLabel.Text = "Value";
                 obj.maxLabel.Visible = "off";
                 obj.sliderValueEditField(2).Visible = "off";
             else
+                % Range mode restores the second thumb and uses Min/Max
+                % labels for the two edit fields.
                 obj.sliderThumb(2).Visible = 'on';
                 obj.minLabel.Text = "Min";
-                obj.maxLabel.Visible = onOffChar(showEdits);
-                obj.sliderValueEditField(2).Visible = onOffChar(showEdits);
+                obj.maxLabel.Visible = obj.ShowEditFields;
+                obj.sliderValueEditField(2).Visible = obj.ShowEditFields;
             end
 
-            obj.minLabel.Visible = onOffChar(showEdits);
-            obj.sliderValueEditField(1).Visible = onOffChar(showEdits);
+            obj.minLabel.Visible = obj.ShowEditFields;
+            obj.sliderValueEditField(1).Visible = obj.ShowEditFields;
 
+            % Collapse edit-field columns instead of only hiding controls so
+            % the slider axes can use the available width.
             if ~showEdits
                 obj.containerGrid.ColumnWidth = {'1x',0,0};
             elseif isScalar
@@ -502,12 +588,16 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
             % Ensure thumbs are within Limits
             obj.sliderThumb(1).Value = clip(obj.sliderThumb(1).Value, obj.Limits(1), obj.Limits(2));
             obj.sliderThumb(2).Value = clip(obj.sliderThumb(2).Value, obj.Limits(1), obj.Limits(2));
-            % Update editfield limits based on current thumbs
+            % Edit field constraints depend on mode: scalar fields can span the
+            % whole range, while range fields clamp against the opposite thumb.
             obj.updateEditfieldLimits();
             obj.updateRangePatchVx();
         end
 
         function updateEditfieldLimits(obj)
+            % During setup, thumb values are not fully authoritative yet, so
+            % both edit fields get broad limits. After startup, range mode
+            % narrows each field so lower cannot pass upper and vice versa.
             if obj.inStartup
                 obj.sliderValueEditField(1).Limits = obj.Limits;
                 obj.sliderValueEditField(2).Limits = obj.Limits;
@@ -571,6 +661,9 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
                 obj.deselectThumb(obj.hoverThumbIdx);
                 return
             end
+            if idx == obj.hoverThumbIdx
+                return
+            end
             % select the new thumb (any existing thumb will be deselected)
             obj.selectThumb(idx);
             % indicate it is the hovered thumb
@@ -581,7 +674,10 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
             if isnan(obj.activeThumbIdx), return; end
 
             thumbIdx = obj.activeThumbIdx;
-            thumbLims = obj.sliderValueEditField(obj.activeThumbIdx).Limits;
+            % Use slider state to determine drag bounds. In range
+            % mode those limits are tightened against the opposite thumb; in
+            % scalar mode they are simply obj.Limits.
+            thumbLims = obj.getThumbLimits(thumbIdx);
             newValue = clip(obj.sliderThumbAxes.CurrentPoint(1,1),thumbLims(1),thumbLims(2));
 
             if obj.RoundValues
@@ -594,7 +690,7 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
             obj.sliderThumb(thumbIdx).Value = newValue;
             obj.sliderValueEditField(thumbIdx).Value = newValue;
-            obj.updateRangePatchVx();
+            obj.updateRangePatchVx(); % keep drag updates to x-coordinate edits
 
             % emit ValueChanging event
             obj.onValueChanging();
@@ -607,21 +703,26 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
     methods
 
         function set.ValueMode(obj, val)
+            % ValueMode is intended as a construction-time option, but this
+            % setter keeps the visual state coherent if it is changed later.
             obj.ValueMode = val;
             obj.applyModeAppearance();
         end
 
         function set.ShowEditFields(obj, val)
+            % Show/hide edit controls by updating visibility and grid columns.
             obj.ShowEditFields = val;
             obj.applyModeAppearance();
         end
 
         function set.ShowFill(obj, val)
+            % Show/hide the filled patch; fill geometry follows ValueMode.
             obj.ShowFill = val;
             obj.applyModeAppearance();
         end
 
         function Value = get.Value(obj)
+            % Public Value shape follows ValueMode.
             switch obj.ValueMode
                 case "scalar"
                     Value = obj.sliderThumb(1).Value;
@@ -638,6 +739,8 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
             switch obj.ValueMode
                 case "scalar"
+                    % Scalar mode accepts exactly one value and updates only
+                    % the first thumb/edit field.
                     if ~isscalar(val)
                         error('matlabx:ui:control:Slider:InvalidValue', ...
                             'Scalar sliders require Value to be a scalar.');
@@ -654,6 +757,7 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
                     obj.sliderValueEditField(1).Value = val;
 
                 case "range"
+                    % Range mode preserves the original two-thumb API.
                     if numel(val) ~= 2
                         error('matlabx:ui:control:Slider:InvalidValue', ...
                             'Range sliders require Value to be a two-element vector.');
@@ -741,6 +845,9 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
     methods
 
         function sliderEditfieldValueChanged(obj, source, ~)
+            % UserData stores the thumb/edit-field index. Indexed assignment
+            % lets the same callback update lower/upper range values while
+            % still working for scalar mode, where only field 1 is visible.
             obj.Value(source.UserData) = source.Value;
             obj.onValueChanged();
         end
@@ -760,23 +867,31 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
         function tf = matches(obj, E)
 
-            tgtAncestor = ancestor(E.Target, 'matlab.ui.control.UIAxes');
-
-            if isempty(tgtAncestor) || isa(E.Target,'matlab.ui.control.UIAxes')
+            tgt = E.Target;
+            if isa(tgt,'matlab.ui.control.UIAxes') || ~isprop(tgt,'Parent')
                 tf = false;
                 return
             end
 
-            % true if sliderThumbAxes is the ancestor of the tgt
-            tf = obj.sliderThumbAxes == tgtAncestor;
+            % Slider hit targets are direct children of sliderThumbAxes
+            % (track patch, fill patch, or thumb line), so avoid ancestor()
+            % on every pointer event.
+            try
+                tf = tgt.Parent == obj.sliderThumbAxes;
+            catch
+                tf = false;
+            end
 
         end
 
         function onDown(obj, E)
 
             if isprop(E.Target, 'ID')
+                % Thumb hit: drag that exact thumb.
                 thumbIdx = E.Target.ID;
             else
+                % Track/fill hit: jump the nearest available thumb. In scalar
+                % mode obj.Value is scalar, so this naturally resolves to 1.
                 cursorX = obj.sliderThumbAxes.CurrentPoint(1,1);
                 [~, thumbIdx] = min(abs(obj.Value - cursorX));
             end
@@ -825,8 +940,12 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
     methods (Static)
 
         function [s,ax] = demo()
+            % Demo wiring:
+            %   - scalar sliders navigate C/Z/T in the ImageAxes
+            %   - one range slider per component controls display limits
+            % This intentionally exercises both ValueMode paths in one UI.
 
-            I = matlabx.image.Image5D.demo();
+            I = matlabx.image.Image5D.demo(512,512,3,10,10);
             N = I.NumComponents;
             fontSize = 12;
             viewerSize = 500;
@@ -894,6 +1013,8 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
                 "ValueChangingFcn",@(o,~) setT(o),...
                 "ValueChangedFcn",@(o,~) setT(o));
 
+            % Component display-limit sliders are preallocated as an object
+            % array so callers can index s.CLim(c) after the demo returns.
             s.CLim = matlabx.ui.control.Slider.empty(1,0);
 
             for c = 1:N
@@ -903,6 +1024,8 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
                     compName = "Component " + c;
                 end
 
+                % Match the edit-field display and rounding behavior to the
+                % underlying image component class.
                 switch comp.Class
                     case {'double','single'}
                         displayFmt = '%.2f';
@@ -949,11 +1072,14 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
             end
 
             function setCLimDuringSlide(src,channelIdx)
+                % Lower preview resolution while dragging keeps visual updates
+                % responsive on larger demo images.
                 ax.MaxRenderedResolution = 500;
                 ax.setCLim(src.Value,channelIdx);
             end
 
             function setCLim(src,channelIdx)
+                % Restore full rendering once the final value is committed.
                 ax.setCLim(src.Value,channelIdx);
                 ax.MaxRenderedResolution = 'none';
             end
@@ -962,12 +1088,4 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
     end
     
-end
-
-function val = onOffChar(tf)
-if tf
-    val = 'on';
-else
-    val = 'off';
-end
 end
