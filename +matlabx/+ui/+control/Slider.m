@@ -1,8 +1,14 @@
-classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
+classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
     %% Public API
 
     properties
+        % value shape and behavior: scalar uses one thumb, range uses two
+        ValueMode (1,1) string {mustBeMember(ValueMode, ["scalar", "range"])} = "range"
+        % whether to show numeric edit fields next to the slider
+        ShowEditFields (1,1) matlab.lang.OnOffSwitchState = "on"
+        % whether to show the filled slider region
+        ShowFill (1,1) matlab.lang.OnOffSwitchState = "on"
         % flag to determine whether values are rounded
         RoundValues (1,1) matlab.lang.OnOffSwitchState = 'off'
         % number of digits used for rounding 
@@ -37,8 +43,7 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
     end
 
     properties(SetObservable, Dependent, AbortSet)
-        % Value (1,2) double = [0,1]
-        Value (1,2) double
+        Value double
     end
 
     % properties we want property-based, minimal updates for
@@ -284,6 +289,8 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
             obj.L(end+1) = addlistener(obj,{'BackgroundColor','ThumbFaceColor','ThumbEdgeColor'},'PostSet',@(~,~)obj.onColorsChanged());
             obj.L(end+1) = addlistener(obj,{'TrackHeight','RangeHeight','Height'},'PostSet',@(~,~)obj.onDimensionsChanged());
             obj.L(end+1) = addlistener(obj,'Limits','PostSet',@(~,~)obj.onLimitsChanged());
+
+            obj.applyModeAppearance();
         end
 
         function update(obj)
@@ -376,11 +383,8 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
         function updateRangePatch(obj)
             % full update of Vertices, Faces, and FaceVertexCData
 
-            sliderValue = obj.Value;
-
             % x values
-            lo = sliderValue(1);
-            hi = sliderValue(2);
+            [lo, hi] = obj.getFillLimits();
 
             % X and Y coordinates of each vertex, from bottom left, CCW to top left
             X = obj.rangeVX*(hi-lo)+lo;
@@ -403,11 +407,57 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
 
         function updateRangePatchVx(obj)
             % x values used to calculate track patch coordinates
-            silderVal = obj.Value;
-            lo  = silderVal(1);
-            hi = silderVal(2);
+            [lo, hi] = obj.getFillLimits();
             % update of Vertex X coordinates only
             obj.rangePatch.Vertices(:,1) = obj.rangeVX*(hi-lo)+lo;
+        end
+
+        function [lo, hi] = getFillLimits(obj)
+            switch obj.ValueMode
+                case "scalar"
+                    lo = obj.Limits(1);
+                    hi = obj.sliderThumb(1).Value;
+                case "range"
+                    lo = obj.sliderThumb(1).Value;
+                    hi = obj.sliderThumb(2).Value;
+            end
+        end
+
+        function applyModeAppearance(obj)
+            if isempty(obj.containerGrid) || isempty(obj.sliderThumb)
+                return
+            end
+
+            isScalar = obj.ValueMode == "scalar";
+            showEdits = strcmp(char(obj.ShowEditFields), 'on');
+
+            obj.rangePatch.Visible = char(obj.ShowFill);
+
+            if isScalar
+                obj.sliderThumb(2).Visible = 'off';
+                obj.minLabel.Text = "Value";
+                obj.maxLabel.Visible = "off";
+                obj.sliderValueEditField(2).Visible = "off";
+            else
+                obj.sliderThumb(2).Visible = 'on';
+                obj.minLabel.Text = "Min";
+                obj.maxLabel.Visible = onOffChar(showEdits);
+                obj.sliderValueEditField(2).Visible = onOffChar(showEdits);
+            end
+
+            obj.minLabel.Visible = onOffChar(showEdits);
+            obj.sliderValueEditField(1).Visible = onOffChar(showEdits);
+
+            if ~showEdits
+                obj.containerGrid.ColumnWidth = {'1x',0,0};
+            elseif isScalar
+                obj.containerGrid.ColumnWidth = {'1x',50,0};
+            else
+                obj.containerGrid.ColumnWidth = {'1x',50,50};
+            end
+
+            obj.updateEditfieldLimits();
+            obj.updateRangePatch();
         end
 
         function onColorsChanged(obj)
@@ -454,6 +504,7 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
             obj.sliderThumb(2).Value = clip(obj.sliderThumb(2).Value, obj.Limits(1), obj.Limits(2));
             % Update editfield limits based on current thumbs
             obj.updateEditfieldLimits();
+            obj.updateRangePatchVx();
         end
 
         function updateEditfieldLimits(obj)
@@ -463,9 +514,14 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
 
-            % Update editfield limits based on current thumbs
-            obj.sliderValueEditField(1).Limits = [obj.Limits(1) obj.sliderThumb(2).Value];
-            obj.sliderValueEditField(2).Limits = [obj.sliderThumb(1).Value obj.Limits(2)];
+            switch obj.ValueMode
+                case "scalar"
+                    obj.sliderValueEditField(1).Limits = obj.Limits;
+                    obj.sliderValueEditField(2).Limits = obj.Limits;
+                case "range"
+                    obj.sliderValueEditField(1).Limits = [obj.Limits(1) obj.sliderThumb(2).Value];
+                    obj.sliderValueEditField(2).Limits = [obj.sliderThumb(1).Value obj.Limits(2)];
+            end
         end
 
     end
@@ -511,6 +567,10 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
             end
             % get the new thumb idx
             idx = tgt.ID;
+            if obj.ValueMode == "scalar" && idx ~= 1
+                obj.deselectThumb(obj.hoverThumbIdx);
+                return
+            end
             % select the new thumb (any existing thumb will be deselected)
             obj.selectThumb(idx);
             % indicate it is the hovered thumb
@@ -546,8 +606,28 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
     %% Dependent Set/Get
     methods
 
+        function set.ValueMode(obj, val)
+            obj.ValueMode = val;
+            obj.applyModeAppearance();
+        end
+
+        function set.ShowEditFields(obj, val)
+            obj.ShowEditFields = val;
+            obj.applyModeAppearance();
+        end
+
+        function set.ShowFill(obj, val)
+            obj.ShowFill = val;
+            obj.applyModeAppearance();
+        end
+
         function Value = get.Value(obj)
-            Value = [obj.sliderThumb(1).Value, obj.sliderThumb(2).Value];
+            switch obj.ValueMode
+                case "scalar"
+                    Value = obj.sliderThumb(1).Value;
+                case "range"
+                    Value = [obj.sliderThumb(1).Value, obj.sliderThumb(2).Value];
+            end
         end
 
         function set.Value(obj, val)
@@ -556,23 +636,49 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
                 val = round(val,obj.RoundDigits);
             end
 
-            lims1 = obj.sliderValueEditField(1).Limits;
-            lims2 = obj.sliderValueEditField(2).Limits;
+            switch obj.ValueMode
+                case "scalar"
+                    if ~isscalar(val)
+                        error('matlabx:ui:control:Slider:InvalidValue', ...
+                            'Scalar sliders require Value to be a scalar.');
+                    end
 
-            val(1) = clip(val(1),lims1(1),lims1(2));
-            val(2) = clip(val(2),lims2(1),lims2(2));
+                    lims = obj.sliderValueEditField(1).Limits;
+                    val = clip(val,lims(1),lims(2));
 
-            if isequal(val, obj.Value)
-                return
+                    if isequal(val, obj.Value)
+                        return
+                    end
+
+                    obj.sliderThumb(1).Value = val;
+                    obj.sliderValueEditField(1).Value = val;
+
+                case "range"
+                    if numel(val) ~= 2
+                        error('matlabx:ui:control:Slider:InvalidValue', ...
+                            'Range sliders require Value to be a two-element vector.');
+                    end
+
+                    val = reshape(val, 1, 2);
+
+                    lims1 = obj.sliderValueEditField(1).Limits;
+                    lims2 = obj.sliderValueEditField(2).Limits;
+
+                    val(1) = clip(val(1),lims1(1),lims1(2));
+                    val(2) = clip(val(2),lims2(1),lims2(2));
+
+                    if isequal(val, obj.Value)
+                        return
+                    end
+
+                    % update thumbs
+                    obj.sliderThumb(1).Value = val(1);
+                    obj.sliderThumb(2).Value = val(2);
+
+                    % update editfield values
+                    obj.sliderValueEditField(1).Value  = val(1);
+                    obj.sliderValueEditField(2).Value  = val(2);
             end
-
-            % update thumbs
-            obj.sliderThumb(1).Value = val(1);
-            obj.sliderThumb(2).Value = val(2);
-
-            % update editfield values
-            obj.sliderValueEditField(1).Value  = val(1);
-            obj.sliderValueEditField(2).Value  = val(2);
 
             % update x-coordinates of range patch vertices
             obj.updateRangePatchVx();
@@ -724,6 +830,7 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
             N = I.NumComponents;
             fontSize = 12;
             viewerSize = 500;
+            nNavigationSliders = 3;
 
             fig = uifigure(...
                 "WindowStyle","alwaysontop",...
@@ -734,8 +841,8 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
 
             panelTopChrome = matlabx.UICal.panelChromeHeight(fontSize,"FontUnits","pixels");
 
-            rowHeights = [{viewerSize + panelTopChrome}, repmat({'fit'}, 1, N)];
-            g = uigridlayout(fig,[N+1,1],...
+            rowHeights = [{viewerSize + panelTopChrome}, repmat({'fit'}, 1, N + nNavigationSliders)];
+            g = uigridlayout(fig,[N + nNavigationSliders + 1,1],...
                 "BackgroundColor",[0 0 0],...
                 "ColumnWidth",{500},...
                 "RowHeight",rowHeights,...
@@ -747,7 +854,47 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
                 "FontSize",fontSize,...
                 "ToolBelt",{'Zoom','Colorbar'});
 
-            s = matlabx.ui.control.RangeSliderEditField.empty(1,0);
+            s = struct();
+            s.C = matlabx.ui.control.Slider(g,...
+                "Title",'C',...
+                "ValueMode","scalar",...
+                "FontColor",[1 1 1],...
+                "Limits",[1 N],...
+                "Value",ax.C,...
+                "RoundValues","on",...
+                "RoundDigits",0,...
+                "ValueDisplayFormat",'%d',...
+                "TrackColor",[0 0 0],...
+                "ValueChangingFcn",@(o,~) setC(o),...
+                "ValueChangedFcn",@(o,~) setC(o));
+
+            s.Z = matlabx.ui.control.Slider(g,...
+                "Title",'Z',...
+                "ValueMode","scalar",...
+                "FontColor",[1 1 1],...
+                "Limits",[1 I.SizeZ],...
+                "Value",ax.Z,...
+                "RoundValues","on",...
+                "RoundDigits",0,...
+                "ValueDisplayFormat",'%d',...
+                "TrackColor",[0 0 0],...
+                "ValueChangingFcn",@(o,~) setZ(o),...
+                "ValueChangedFcn",@(o,~) setZ(o));
+
+            s.T = matlabx.ui.control.Slider(g,...
+                "Title",'T',...
+                "ValueMode","scalar",...
+                "FontColor",[1 1 1],...
+                "Limits",[1 I.SizeT],...
+                "Value",ax.T,...
+                "RoundValues","on",...
+                "RoundDigits",0,...
+                "ValueDisplayFormat",'%d',...
+                "TrackColor",[0 0 0],...
+                "ValueChangingFcn",@(o,~) setT(o),...
+                "ValueChangedFcn",@(o,~) setT(o));
+
+            s.CLim = matlabx.ui.control.Slider.empty(1,0);
 
             for c = 1:N
                 comp = I.Components(c);
@@ -768,7 +915,7 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
                         roundDigits = 2;
                 end
 
-                s(c) = matlabx.ui.control.RangeSliderEditField(g,...
+                s.CLim(c) = matlabx.ui.control.Slider(g,...
                     "Title",char(compName),...
                     "FontColor",[1 1 1],...
                     "Limits",comp.DataRange,...
@@ -781,10 +928,25 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
                     "ValueChangedFcn",@(o,~) setCLim(o,c));
             end
 
-            fig.InnerPosition(4) = viewerSize + panelTopChrome + N*s(1).ComponentHeight + N*5 + 10;
+            sliderHeight = s.C.ComponentHeight;
+            fig.InnerPosition(4) = viewerSize + panelTopChrome + ...
+                (N + nNavigationSliders)*sliderHeight + ...
+                (N + nNavigationSliders)*5 + 10;
 
             movegui(fig,'center')
             fig.Visible = "on";
+
+            function setC(src)
+                ax.C = src.Value;
+            end
+
+            function setZ(src)
+                ax.Z = src.Value;
+            end
+
+            function setT(src)
+                ax.T = src.Value;
+            end
 
             function setCLimDuringSlide(src,channelIdx)
                 ax.MaxRenderedResolution = 500;
@@ -800,4 +962,12 @@ classdef RangeSliderEditField < matlab.ui.componentcontainer.ComponentContainer
 
     end
     
+end
+
+function val = onOffChar(tf)
+if tf
+    val = 'on';
+else
+    val = 'off';
+end
 end

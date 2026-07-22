@@ -17,7 +17,7 @@ classdef SliderGroupDialog < handle
     properties (Access=private,Transient,NonCopyable)
         Fig matlab.ui.Figure
         Grid matlab.ui.container.GridLayout
-        Slider matlabx.ui.control.RangeSliderEditField
+        Slider matlabx.ui.control.Slider
     end
 
     methods
@@ -62,7 +62,7 @@ classdef SliderGroupDialog < handle
             % Sliders
 
             for i = 1:N
-                obj.Slider(i) = matlabx.ui.control.RangeSliderEditField(obj.Grid,...
+                obj.Slider(i) = matlabx.ui.control.Slider(obj.Grid,...
                     "Title",obj.Name{i},...
                     "FontColor",[1 1 1],...
                     "BackgroundColor",[0.12 0.12 0.12],...

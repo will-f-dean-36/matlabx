@@ -8,6 +8,7 @@ classdef SliderThumb < handle
     properties(Dependent)
         YPosition
         Value
+        Visible
     end
 
     properties(SetObservable,AbortSet)
@@ -137,6 +138,14 @@ classdef SliderThumb < handle
                 return
             end
             obj.thumb.YData = val;
+        end
+
+        function val = get.Visible(obj)
+            val = obj.thumb.Visible;
+        end
+
+        function set.Visible(obj,val)
+            obj.thumb.Visible = val;
         end
 
     end
