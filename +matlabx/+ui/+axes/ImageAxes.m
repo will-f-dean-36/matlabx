@@ -1231,7 +1231,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     methods
 
-        function addLink(obj,links,props)
+        function addLink(obj, links, props)
+            %ADDLINK Link selected ImageAxes properties across multiple axes.
+            %
+            % The link is bidirectional: this axes listens for changes and pushes
+            % them to every linked axes, and each linked axes does the same for the
+            % same property set. Properties should be SetObservable and safe to
+            % assign through their public setters.
+
             arguments
                 obj     (1,1) matlabx.ui.axes.ImageAxes
                 links   (1,:) matlabx.ui.axes.ImageAxes
@@ -1246,61 +1253,127 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
 
+            % Store this axes' outgoing link targets and linked property names.
             obj.linkedAxes = links;
             obj.linkedProps = props;
 
-            % listens to props for this object, updates links on change
+            % Listen to this axes and push changed linked properties to all targets.
             obj.LinkListener = addlistener(obj, props, 'PostSet', @(src,evt) obj.syncSlavesToSelf(src,evt));
 
-            % indicate that this object has links
+            % Mark this axes as linked before wiring the peer axes.
             obj.hasLinks = true;
 
             for i = 1:numel(links)
+                % Each peer stores every other axes in the link group, excluding
+                % itself, so any axes can originate a property change.
                 if i==1
                     links(1).linkedAxes = [obj,links(2:end)];
                 else
                     links(i).linkedAxes = [links(1:i-1),obj,links(i+1:end)];
                 end
+
+                % Each peer listens to the same linked property set.
                 links(i).linkedProps = props;
                 links(i).LinkListener = addlistener(links(i), props, 'PostSet', @(src,evt) links(i).syncSlavesToSelf(src,evt));
                 links(i).hasLinks = true;
             end
-
         end
 
-
         function removeLinks(obj)
-            if ~obj.hasLinks, return; end
+            %REMOVELINKS Remove all links from this ImageAxes link group.
+            %
+            % Calling this on any linked axes disconnects the whole group by clearing
+            % peer references, deleting link listeners, and resetting link state.
+
+            if ~obj.hasLinks
+                return
+            end
+
             for i = 1:numel(obj.linkedAxes)
+                % Clear each peer's link metadata.
                 obj.linkedAxes(i).linkedAxes = [];
                 obj.linkedAxes(i).linkedProps = {};
+
+                % Delete valid listener handles on each peer.
                 delete(obj.linkedAxes(i).LinkListener(isvalid(obj.linkedAxes(i).LinkListener)));
+
+                % Mark each peer as unlinked.
                 obj.linkedAxes(i).hasLinks = false;
             end
+
+            % Clear this axes' link metadata.
             obj.linkedAxes = [];
             obj.linkedProps = {};
+
+            % Delete this axes' listener and mark it as unlinked.
             delete(obj.LinkListener(isvalid(obj.LinkListener)));
             obj.hasLinks = false;
         end
 
         function syncSlavesToSelf(obj,~,evt)
-            % for each linked ImageAxes
+            %SYNCSLAVESTOSELF Propagate a linked property change to linked axes.
+            %
+            % Most linked properties can be assigned directly. Component display
+            % properties are cell arrays sized to each axes' NumComponents, so linked
+            % axes with different component counts need an overlap-only copy.
+
+            propName = evt.Source.Name;
+
             for i = 1:numel(obj.linkedAxes)
-                % disable slave LinkListener while setting properties
-                obj.linkedAxes(i).LinkListener.Enabled = false;
-                % attempt to sync changed property value with each linked axes
-                try
-                    % name of the changed property
-                    propName = evt.Source.Name;
-                    % sync value of linked axes to value of this axes
-                    obj.linkedAxes(i).(propName) = obj.(propName);
-                catch
-                    error('Failed to sync linked axes')
-                end
-                % re-enable slave LinkListener
-                obj.linkedAxes(i).LinkListener.Enabled = true;
+                target = obj.linkedAxes(i);
+
+                % Prevent recursive link propagation while this target is syncing.
+                target.LinkListener.Enabled = false;
+                cleanupListener = onCleanup(@() restoreLinkListener(target));
+
+                value = obj.getLinkedPropertyValueForTarget(propName, target);
+                target.(propName) = value;
+
+                % Re-enable immediately on success instead of waiting for function
+                % exit; onCleanup still handles errors.
+                delete(cleanupListener);
+                target.LinkListener.Enabled = true;
             end
         end
+
+
+        function value = getLinkedPropertyValueForTarget(obj, propName, target)
+            %GETLINKEDPROPERTYVALUEFORTARGET Return a value safe to assign to target.
+            %
+            % Component display properties are full component cell arrays. When two
+            % linked axes currently have different NumComponents, preserve the
+            % target's extra entries and copy only the shared component range.
+        
+            value = obj.(propName);
+        
+            switch propName
+                case {'ComponentColormaps','ComponentCLims','ComponentColors'}
+                    targetValue = target.(propName);
+                    n = min(numel(value), numel(targetValue));
+        
+                    if n == 0
+                        value = targetValue;
+                        return
+                    end
+        
+                    targetValue(1:n) = value(1:n);
+                    value = targetValue;
+            end
+        end
+        
+        function restoreLinkListener(target)
+            %RESTORELINKLISTENER Re-enable a linked axes listener after sync.
+            %
+            % This is intentionally tiny so syncSlavesToSelf can use onCleanup and
+            % still leave the listener enabled if a linked assignment errors.
+        
+            if ~isempty(target) && isvalid(target) && ~isempty(target.LinkListener)
+                target.LinkListener.Enabled = true;
+            end
+        end
+
+
+
 
     end
 
