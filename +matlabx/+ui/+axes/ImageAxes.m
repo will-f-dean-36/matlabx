@@ -1258,7 +1258,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.linkedProps = props;
 
             % Listen to this axes and push changed linked properties to all targets.
-            obj.LinkListener = addlistener(obj, props, 'PostSet', @(src,evt) obj.syncSlavesToSelf(src,evt));
+            obj.LinkListener = addlistener(obj, props, 'PostSet', @(src,evt) obj.syncPeersToSelf(src,evt));
 
             % Mark this axes as linked before wiring the peer axes.
             obj.hasLinks = true;
@@ -1274,8 +1274,15 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
                 % Each peer listens to the same linked property set.
                 links(i).linkedProps = props;
-                links(i).LinkListener = addlistener(links(i), props, 'PostSet', @(src,evt) links(i).syncSlavesToSelf(src,evt));
+                links(i).LinkListener = addlistener(links(i), props, 'PostSet', @(src,evt) links(i).syncPeersToSelf(src,evt));
                 links(i).hasLinks = true;
+            end
+
+            % Establish an initial shared state immediately instead of waiting
+            % for the next property change. The axes that addLink() was called
+            % on acts as the source of truth for this first synchronization.
+            for i = 1:numel(links)
+                links(i).syncSelfToLinkSource(obj, props);
             end
         end
 
@@ -1310,8 +1317,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.hasLinks = false;
         end
 
-        function syncSlavesToSelf(obj,~,evt)
-            %SYNCSLAVESTOSELF Propagate a linked property change to linked axes.
+        function syncPeersToSelf(obj,~,evt)
+            %SYNCPEERSTOSELF Propagate a linked property change to linked axes.
             %
             % Most linked properties can be assigned directly. Component display
             % properties are cell arrays sized to each axes' NumComponents, so linked
@@ -1333,6 +1340,70 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 % exit; onCleanup still handles errors.
                 delete(cleanupListener);
                 target.LinkListener.Enabled = true;
+            end
+        end
+
+        function syncSelfFromFirstLinkedPeer(obj)
+            %SYNCSELFFROMFIRSTLINKEDPEER Re-apply linked state after data reset.
+            %
+            % Replacing ImageData rebuilds view/display state from the new image.
+            % That internal rebuild bypasses the observable linked-property
+            % setters, so this axes explicitly pulls linked values back from an
+            % existing peer before the final render.
+
+            if ~obj.hasLinks || isempty(obj.linkedAxes) || isempty(obj.linkedProps)
+                return
+            end
+
+            for i = 1:numel(obj.linkedAxes)
+                source = obj.linkedAxes(i);
+                if ~isempty(source) && isvalid(source)
+                    obj.syncSelfToLinkSource(source, obj.linkedProps);
+                    return
+                end
+            end
+        end
+
+        function syncSelfToLinkSource(obj, source, props)
+            %SYNCSELFTOLINKSOURCE Pull linked property values from source.
+            %
+            % The local link listener is disabled while values are applied so a
+            % data-reset reconciliation does not push startup defaults or partially
+            % synchronized values back out to the rest of the link group.
+
+            if isempty(source) || ~isvalid(source) || isempty(props)
+                return
+            end
+
+            [~, listenerWasEnabled] = obj.disableValidLinkListeners();
+
+            cleanupListener = onCleanup(@() restoreLinkListenerState(obj, listenerWasEnabled));
+
+            for k = 1:numel(props)
+                propName = props{k};
+                value = source.getLinkedPropertyValueForTarget(propName, obj);
+                obj.(propName) = value;
+            end
+
+            delete(cleanupListener);
+            restoreLinkListenerState(obj, listenerWasEnabled);
+        end
+
+        function [listeners, wasEnabled] = disableValidLinkListeners(obj)
+            %DISABLEVALIDLINKLISTENERS Disable local link listeners temporarily.
+            listeners = event.listener.empty;
+            wasEnabled = false(1,0);
+
+            if isempty(obj.LinkListener)
+                return
+            end
+
+            listeners = obj.LinkListener(isvalid(obj.LinkListener));
+            wasEnabled = false(1,numel(listeners));
+
+            for ii = 1:numel(listeners)
+                wasEnabled(ii) = listeners(ii).Enabled;
+                listeners(ii).Enabled = false;
             end
         end
 
@@ -1364,11 +1435,30 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         function restoreLinkListener(target)
             %RESTORELINKLISTENER Re-enable a linked axes listener after sync.
             %
-            % This is intentionally tiny so syncSlavesToSelf can use onCleanup and
+            % This is intentionally tiny so syncPeersToSelf can use onCleanup and
             % still leave the listener enabled if a linked assignment errors.
         
             if ~isempty(target) && isvalid(target) && ~isempty(target.LinkListener)
                 target.LinkListener.Enabled = true;
+            end
+        end
+
+        function restoreLinkListenerState(target, wasEnabled)
+            %RESTORELINKLISTENERSTATE Restore a listener to its prior state.
+            %
+            % Initial link synchronization can involve axes whose listeners are
+            % already disabled by another sync operation, so preserve that state
+            % instead of blindly enabling the listener.
+
+            if isempty(target) || ~isvalid(target) || isempty(target.LinkListener)
+                return
+            end
+
+            listeners = target.LinkListener(isvalid(target.LinkListener));
+            n = min(numel(listeners), numel(wasEnabled));
+
+            for ii = 1:n
+                listeners(ii).Enabled = wasEnabled(ii);
             end
         end
 
@@ -1718,6 +1808,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             obj.ImageData_ = val;
             obj.syncViewStateToImageData();
+            obj.syncSelfFromFirstLinkedPeer();
             obj.syncRenderSourceToView(ResetView=true);
         end
     
@@ -1733,6 +1824,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.ImageData_ = matlabx.image.Image5D.fromComponents(cdata);
 
             obj.syncViewStateToImageData();
+            obj.syncSelfFromFirstLinkedPeer();
             obj.syncRenderSourceToView(ResetView=true);
         end
 

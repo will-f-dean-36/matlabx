@@ -335,10 +335,16 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function update(obj)
+            % if obj.inStartup
+            %     obj.updateEditfieldLimits();
+            %     obj.inStartup = false;
+            % end
+
             if obj.inStartup
-                obj.updateEditfieldLimits();
+                obj.setFreshEditfieldLimits();
                 obj.inStartup = false;
             end
+
         end
 
     end
@@ -580,30 +586,46 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
         end
 
+        % function onLimitsChanged(obj)
+        %     % Adjust axes XLim
+        %     obj.sliderThumbAxes.XLim = obj.Limits;
+        %     % adjust track patch coordinates
+        %     obj.updateTrackPatchVx();
+        %     % Ensure thumbs are within Limits
+        %     obj.sliderThumb(1).Value = clip(obj.sliderThumb(1).Value, obj.Limits(1), obj.Limits(2));
+        %     obj.sliderThumb(2).Value = clip(obj.sliderThumb(2).Value, obj.Limits(1), obj.Limits(2));
+        %     % Edit field constraints depend on mode: scalar fields can span the
+        %     % whole range, while range fields clamp against the opposite thumb.
+        %     obj.updateEditfieldLimits();
+        %     obj.updateRangePatchVx();
+        % end
+
         function onLimitsChanged(obj)
             % Adjust axes XLim
             obj.sliderThumbAxes.XLim = obj.Limits;
             % adjust track patch coordinates
             obj.updateTrackPatchVx();
+
+            % Edit field constraints depend on mode: scalar fields can span the
+            % whole range, while range fields clamp against the opposite thumb.
+            obj.setFreshEditfieldLimits();
+
             % Ensure thumbs are within Limits
             obj.sliderThumb(1).Value = clip(obj.sliderThumb(1).Value, obj.Limits(1), obj.Limits(2));
             obj.sliderThumb(2).Value = clip(obj.sliderThumb(2).Value, obj.Limits(1), obj.Limits(2));
-            % Edit field constraints depend on mode: scalar fields can span the
-            % whole range, while range fields clamp against the opposite thumb.
-            obj.updateEditfieldLimits();
+
             obj.updateRangePatchVx();
         end
 
-        function updateEditfieldLimits(obj)
-            % During setup, thumb values are not fully authoritative yet, so
-            % both edit fields get broad limits. After startup, range mode
-            % narrows each field so lower cannot pass upper and vice versa.
-            if obj.inStartup
-                obj.sliderValueEditField(1).Limits = obj.Limits;
-                obj.sliderValueEditField(2).Limits = obj.Limits;
-                return
-            end
+        function setFreshEditfieldLimits(obj)
+            % During setup or on component Limits change, thumb values are not 
+            % fully authoritative yet, so both edit fields get broad limits
+            obj.sliderValueEditField(1).Limits = obj.Limits;
+            obj.sliderValueEditField(2).Limits = obj.Limits;
+        end
 
+
+        function updateEditfieldLimits(obj)
             switch obj.ValueMode
                 case "scalar"
                     obj.sliderValueEditField(1).Limits = obj.Limits;
@@ -689,7 +711,13 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
             end
 
             obj.sliderThumb(thumbIdx).Value = newValue;
-            obj.sliderValueEditField(thumbIdx).Value = newValue;
+            try
+                obj.sliderValueEditField(thumbIdx).Value = newValue;
+            catch
+                warning('Value outside editfield limits')
+                disp(['Value: ',num2str(newValue)])
+                disp(['Limits: ',mat2str(obj.sliderValueEditField(thumbIdx).Limits)])
+            end
             obj.updateRangePatchVx(); % keep drag updates to x-coordinate edits
 
             % emit ValueChanging event
