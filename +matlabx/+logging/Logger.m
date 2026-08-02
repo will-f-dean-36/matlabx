@@ -29,6 +29,16 @@ classdef Logger < handle
         AutoDetectSource (1,1) logical = true
         SourceDetail (1,1) string {mustBeMember(SourceDetail,["short","full"])} = "short"
 
+        % Logging policy. Sink-specific values inherit Level/Detail when empty.
+        Level (1,1) string = "INFO"
+        Detail (1,1) string = "normal"
+        CommandWindowLevel (1,1) string = ""
+        CommandWindowDetail (1,1) string = ""
+        UILevel (1,1) string = ""
+        UIDetail (1,1) string = ""
+        FileLevel (1,1) string = ""
+        FileDetail (1,1) string = ""
+
         % Sinks toggles
         PrintToCommandWindow (1,1) logical = true
         EnableUISink (1,1) logical = false
@@ -60,10 +70,11 @@ classdef Logger < handle
         FilePath (1,:) char = ''
         FileFID (1,1) double = -1
 
-        % PendingLines (1,1) string = ""   % batched lines waiting to flush
-        PendingLines (:,1) string = ""   % batched lines waiting to flush
+        PendingUILines (:,1) string = ""   % batched UI lines waiting to flush
+        PendingFileLines (:,1) string = "" % batched file lines waiting to flush
 
-        PendingCount (1,1) double = 0
+        PendingUICount (1,1) double = 0
+        PendingFileCount (1,1) double = 0
         LastFlushTic (1,1) uint64 = uint64(0)
     end
 
@@ -77,6 +88,14 @@ classdef Logger < handle
                 opts.FlushMinIntervalSec (1,1) double {mustBeNonnegative} = 0.05
                 opts.AutoDetectSource (1,1) logical = true
                 opts.SourceDetail (1,1) string {mustBeMember(opts.SourceDetail,["short","full"])} = "short"
+                opts.Level = "INFO"
+                opts.Detail = "normal"
+                opts.CommandWindowLevel = ""
+                opts.CommandWindowDetail = ""
+                opts.UILevel = ""
+                opts.UIDetail = ""
+                opts.FileLevel = ""
+                opts.FileDetail = ""
             end
 
             self.KeepAll = opts.KeepAll;
@@ -86,6 +105,14 @@ classdef Logger < handle
             self.FlushMinIntervalSec = opts.FlushMinIntervalSec;
             self.AutoDetectSource = opts.AutoDetectSource;
             self.SourceDetail = opts.SourceDetail;
+            self.Level = opts.Level;
+            self.Detail = opts.Detail;
+            self.CommandWindowLevel = opts.CommandWindowLevel;
+            self.CommandWindowDetail = opts.CommandWindowDetail;
+            self.UILevel = opts.UILevel;
+            self.UIDetail = opts.UIDetail;
+            self.FileLevel = opts.FileLevel;
+            self.FileDetail = opts.FileDetail;
 
             self.StartTime = datetime('now');
             self.LastFlushTic = tic;
@@ -102,18 +129,40 @@ classdef Logger < handle
         function warn(self, msg, varargin),  self.log("WARN",  msg, varargin{:}); end
         function error(self, msg, varargin), self.log("ERROR", msg, varargin{:}); end
 
+        % ---- Policy configuration ----
+        function configure(self, config)
+        %CONFIGURE Apply a matlabx.config.Logging policy.
+            arguments
+                self (1,1) matlabx.logging.Logger
+                config = []
+            end
+
+            if isempty(config)
+                return
+            end
+
+            if isa(config, 'matlabx.config.Logging')
+                self.applyConfig_(config);
+            else
+                error('matlabx:logging:Logger:InvalidConfig', ...
+                    'Logger.configure expects a matlabx.config.Logging object.');
+            end
+        end
+
         % ---- Main log entry point ----
         function log(self, level, msg, opts)
             arguments
                 self (1,1) matlabx.logging.Logger
                 level (1,1) string
-                msg (1,1)       % string, char, MException
+                msg             % string, char, MException
                 opts.Source (1,1) string = ""
                 opts.Tag (1,1) string = ""
                 opts.Data = []
                 opts.Timestamp datetime = datetime('now')
                 opts.AlsoPrint (1,1) logical = false  % force print even if PrintToCommandWindow=false
             end
+
+            level = matlabx.logging.Logger.normalizeLevel(level);
 
             % --- normalize msg to string ---
             if isa(msg,'MException')
@@ -144,14 +193,7 @@ classdef Logger < handle
 
             % --- auto-detect Source if not provided ---
             if self.AutoDetectSource && strlength(opts.Source) == 0
-                st = dbstack(2, '-completenames');
-            
-                if ~isempty(st)
-                    opts.Source = matlabx.logging.formatCallerName( ...
-                        st(1).name, "Detail", self.SourceDetail);
-                else
-                    opts.Source = "unknown";
-                end
+                opts.Source = self.detectSource_();
             end
 
             e = struct( ...
@@ -164,20 +206,38 @@ classdef Logger < handle
 
             self.appendEntry_(e);
 
-            line = self.formatEntry_(e);
-
             % Immediate command window output (optionally)
-            if self.PrintToCommandWindow || opts.AlsoPrint
+            if opts.AlsoPrint || (self.PrintToCommandWindow && self.shouldEmit_("CommandWindow", e.level))
+                line = self.formatEntry_(e, self.effectiveDetail_("CommandWindow"));
                 % Use fprintf to preserve formatting and avoid string display quirks
                 fprintf('%s\n', line);
             end
 
             % Batch for UI/file sinks
-            if self.EnableUISink || self.EnableFileSink
-                self.queueLine_(line);
+            queued = false;
+            if self.EnableUISink && self.shouldEmit_("UI", e.level)
+                self.queueUILine_(self.formatEntry_(e, self.effectiveDetail_("UI")));
+                queued = true;
+            end
+
+            if self.EnableFileSink && self.shouldEmit_("File", e.level)
+                self.queueFileLine_(self.formatEntry_(e, self.effectiveDetail_("File")));
+                queued = true;
+            end
+
+            if queued
                 self.maybeFlush_();
             end
         end
+
+        function set.Level(self, value), self.Level = matlabx.logging.Logger.normalizeLevel(value); end
+        function set.Detail(self, value), self.Detail = matlabx.logging.Logger.normalizeDetail(value); end
+        function set.CommandWindowLevel(self, value), self.CommandWindowLevel = matlabx.logging.Logger.normalizeOptionalLevel(value); end
+        function set.UILevel(self, value), self.UILevel = matlabx.logging.Logger.normalizeOptionalLevel(value); end
+        function set.FileLevel(self, value), self.FileLevel = matlabx.logging.Logger.normalizeOptionalLevel(value); end
+        function set.CommandWindowDetail(self, value), self.CommandWindowDetail = matlabx.logging.Logger.normalizeOptionalDetail(value); end
+        function set.UIDetail(self, value), self.UIDetail = matlabx.logging.Logger.normalizeOptionalDetail(value); end
+        function set.FileDetail(self, value), self.FileDetail = matlabx.logging.Logger.normalizeOptionalDetail(value); end
 
         % ---- Sinks configuration ----
         function setUISink(self, fcn, enable)
@@ -254,8 +314,10 @@ classdef Logger < handle
             'data', cell(0,1));
 
             self.TotalCount = 0;
-            self.PendingLines = "";
-            self.PendingCount = 0;
+            self.PendingUILines = "";
+            self.PendingFileLines = "";
+            self.PendingUICount = 0;
+            self.PendingFileCount = 0;
             self.LastFlushTic = tic;
         end
 
@@ -266,6 +328,53 @@ classdef Logger < handle
     end
 
     methods (Access=private)
+        function applyConfig_(self, config)
+            self.Level = config.Level;
+            self.Detail = config.Detail;
+            self.SourceDetail = config.SourceDetail;
+            self.CommandWindowLevel = config.CommandWindowLevel;
+            self.CommandWindowDetail = config.CommandWindowDetail;
+            self.UILevel = config.UILevel;
+            self.UIDetail = config.UIDetail;
+            self.FileLevel = config.FileLevel;
+            self.FileDetail = config.FileDetail;
+        end
+
+        function source = detectSource_(self)
+            %DETECTSOURCE_ Infer the first non-logging caller from the stack.
+            %
+            % Facade calls add matlabx.Log.* and Logger.* frames between the
+            % user's code and Logger.log(). Skip those so SourceDetail remains a
+            % logger/policy concern without the facade hardcoding formatting.
+
+            st = dbstack(1, '-completenames');
+
+            for k = 1:numel(st)
+                name = string(st(k).name);
+                if self.isLoggingFrame_(name)
+                    continue
+                end
+
+                source = matlabx.logging.formatCallerName( ...
+                    name, "Detail", self.SourceDetail);
+                return
+            end
+
+            source = "unknown";
+        end
+
+        function tf = isLoggingFrame_(~, name)
+            name = string(name);
+            tf = startsWith(name, "matlabx.logging.Logger.") || ...
+                name == "matlabx.logging.Logger" || ...
+                startsWith(name, "matlabx.Log.") || ...
+                name == "matlabx.Log" || ...
+                startsWith(name, "Logger.") || ...
+                name == "Logger" || ...
+                startsWith(name, "Log.") || ...
+                name == "Log";
+        end
+
         function appendEntry_(self, e)
             self.TotalCount = self.TotalCount + 1;
 
@@ -279,8 +388,12 @@ classdef Logger < handle
             end
         end
 
-        function s = formatEntry_(self, e)
+        function s = formatEntry_(self, e, detail)
             % Build: [timestamp] [LEVEL] [Source] message  (configurable)
+            if nargin < 3
+                detail = self.Detail;
+            end
+
             parts = strings(0,1);
 
             ts = string(datetime(e.t, 'Format', self.TimestampFormat));
@@ -290,30 +403,71 @@ classdef Logger < handle
                 parts(end+1,1) = "[" + upper(e.level) + "]";
             end
 
-            if self.IncludeSource && strlength(e.source) > 0
+            includeSource = self.IncludeSource && strlength(e.source) > 0 && detail ~= "normal";
+            includeTag = self.IncludeTag && strlength(e.tag) > 0 && detail ~= "normal";
+
+            if includeSource
                 parts(end+1,1) = "[" + e.source + "]";
             end
 
-            if self.IncludeTag && strlength(e.tag) > 0
+            if includeTag
                 parts(end+1,1) = "[" + e.tag + "]";
             end
 
             parts(end+1,1) = e.msg;
 
             s = strjoin(parts, " ");
+
+            if detail == "debug"
+                s = self.appendDebugDetails_(s, e);
+            end
         end
 
-        function queueLine_(self, line)
-            if self.PendingCount == 0
-                self.PendingLines = line;
-            else
-                self.PendingLines(end+1,1) = line;
+        function s = appendDebugDetails_(~, s, e)
+            if ~isstruct(e.data)
+                return
             end
-            self.PendingCount = self.PendingCount + 1;
+
+            details = strings(0,1);
+
+            if isfield(e.data, 'identifier') && strlength(string(e.data.identifier)) > 0
+                details(end+1,1) = "identifier: " + string(e.data.identifier);
+            end
+
+            if isfield(e.data, 'stack') && ~isempty(e.data.stack)
+                details(end+1,1) = "stack:";
+                for k = 1:numel(e.data.stack)
+                    frame = e.data.stack(k);
+                    details(end+1,1) = sprintf("  %s (%s:%d)", ...
+                        string(frame.name), string(frame.file), frame.line);
+                end
+            end
+
+            if ~isempty(details)
+                s = s + newline + strjoin(details, newline);
+            end
+        end
+
+        function queueUILine_(self, line)
+            if self.PendingUICount == 0
+                self.PendingUILines = line;
+            else
+                self.PendingUILines(end+1,1) = line;
+            end
+            self.PendingUICount = self.PendingUICount + 1;
+        end
+
+        function queueFileLine_(self, line)
+            if self.PendingFileCount == 0
+                self.PendingFileLines = line;
+            else
+                self.PendingFileLines(end+1,1) = line;
+            end
+            self.PendingFileCount = self.PendingFileCount + 1;
         end
 
         function maybeFlush_(self)
-            if self.PendingCount < self.FlushEveryN
+            if max(self.PendingUICount, self.PendingFileCount) < self.FlushEveryN
                 return
             end
         
@@ -331,19 +485,24 @@ classdef Logger < handle
         end
 
         function flush_(self)
-            if self.PendingCount == 0
+            if self.PendingUICount == 0 && self.PendingFileCount == 0
                 return
             end
 
-            lines = self.PendingLines;
-            self.PendingLines = "";
-            self.PendingCount = 0;
+            uiLines = self.PendingUILines;
+            fileLines = self.PendingFileLines;
+            uiCount = self.PendingUICount;
+            fileCount = self.PendingFileCount;
+            self.PendingUILines = "";
+            self.PendingFileLines = "";
+            self.PendingUICount = 0;
+            self.PendingFileCount = 0;
             self.LastFlushTic = tic;
 
             % UI sink
-            if self.EnableUISink
+            if self.EnableUISink && uiCount > 0
                 try
-                    self.UISinkFcn(lines);
+                    self.UISinkFcn(uiLines);
                 catch ME
                     % If UI sink fails, disable it but keep running
                     self.EnableUISink = false;
@@ -352,10 +511,10 @@ classdef Logger < handle
             end
 
             % File sink
-            if self.EnableFileSink && self.FileFID > 0
+            if self.EnableFileSink && self.FileFID > 0 && fileCount > 0
                 try
-                    for i = 1:numel(lines)
-                        fprintf(self.FileFID, '%s\n', lines(i));
+                    for i = 1:numel(fileLines)
+                        fprintf(self.FileFID, '%s\n', fileLines(i));
                     end
                     % optional flush to disk; can be expensive on network drives
                     % fflush(self.FileFID);
@@ -363,6 +522,41 @@ classdef Logger < handle
                     self.EnableFileSink = false;
                     fprintf('[Logger] File sink disabled due to error: %s\n', ME.message);
                 end
+            end
+        end
+
+        function tf = shouldEmit_(self, sinkName, level)
+            tf = matlabx.logging.Logger.levelRank(level) >= ...
+                matlabx.logging.Logger.levelRank(self.effectiveLevel_(sinkName));
+        end
+
+        function level = effectiveLevel_(self, sinkName)
+            switch sinkName
+                case "CommandWindow"
+                    level = self.CommandWindowLevel;
+                case "UI"
+                    level = self.UILevel;
+                case "File"
+                    level = self.FileLevel;
+            end
+
+            if strlength(level) == 0
+                level = self.Level;
+            end
+        end
+
+        function detail = effectiveDetail_(self, sinkName)
+            switch sinkName
+                case "CommandWindow"
+                    detail = self.CommandWindowDetail;
+                case "UI"
+                    detail = self.UIDetail;
+                case "File"
+                    detail = self.FileDetail;
+            end
+
+            if strlength(detail) == 0
+                detail = self.Detail;
             end
         end
 
@@ -383,6 +577,30 @@ classdef Logger < handle
             end
             self.FileFID = fid;
             self.FilePath = filePath;
+        end
+    end
+
+    methods (Static)
+        function value = normalizeLevel(value)
+            value = matlabx.config.Logging.normalizeLevel(value);
+        end
+
+        function value = normalizeOptionalLevel(value)
+            value = matlabx.config.Logging.normalizeOptionalLevel(value);
+        end
+
+        function value = normalizeDetail(value)
+            value = matlabx.config.Logging.normalizeDetail(value);
+        end
+
+        function value = normalizeOptionalDetail(value)
+            value = matlabx.config.Logging.normalizeOptionalDetail(value);
+        end
+
+        function rank = levelRank(level)
+            level = matlabx.logging.Logger.normalizeLevel(level);
+            levels = ["DEBUG", "INFO", "WARN", "ERROR"];
+            rank = find(levels == level, 1, "first");
         end
     end
 end

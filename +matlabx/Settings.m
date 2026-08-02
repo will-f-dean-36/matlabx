@@ -2,11 +2,11 @@ classdef Settings
 %MATLABX.SETTINGS Static facade for matlabx user settings.
 %
 %   Get a setting:
-%       value = matlabx.Settings.Logging("ShowDebugOutput")
+%       value = matlabx.Settings.Logging("Level")
 %       settings = matlabx.Settings.get()
 %
 %   Set a setting on the cached settings object:
-%       matlabx.Settings.Logging("ShowDebugOutput", true)
+%       matlabx.Settings.Logging("Level", "DEBUG")
 %       matlabx.Settings.save()
 %
 %   Discover settings:

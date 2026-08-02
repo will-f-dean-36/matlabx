@@ -167,6 +167,21 @@ log.setFileSink(fullfile(tempdir, "matlabx.log"), true);
 log.PrintToCommandWindow = false;
 ```
 
+Logging policy lives in `matlabx.config.Logging` and can be applied through
+the facade:
+
+```matlab
+matlabx.Log.configure("Level", "INFO", "Detail", "normal")
+matlabx.Log.configure("CommandWindowLevel", "INFO", "FileLevel", "DEBUG", "FileDetail", "debug")
+matlabx.Log.configure("SourceDetail", "full")
+```
+
+`Level` is the minimum emitted level: `DEBUG`, `INFO`, `WARN`, or `ERROR`.
+`Detail` controls formatted output only; structured entries still retain full
+data. `SourceDetail` controls compact versus full auto-detected source names.
+`ShowDebugOutput` is kept for older settings, but new code should use
+`Level="DEBUG"`.
+
 ## Settings And Machine State
 
 User settings are managed by `matlabx.config.Settings` and saved as JSON:
@@ -183,8 +198,9 @@ For everyday use, the `matlabx.Settings` facade provides one-line get/set helper
 ```matlab
 settings = matlabx.Settings.get();
 
-showDebug = matlabx.Settings.Logging("ShowDebugOutput");
-matlabx.Settings.Logging("ShowDebugOutput", true);
+level = matlabx.Settings.Logging("Level");
+matlabx.Settings.Logging("Level", "DEBUG");
+matlabx.Settings.Logging("Detail", "verbose");
 
 fontSize = matlabx.Settings.UI("DefaultFontSize");
 matlabx.Settings.Images("DefaultColormap", 'gray');
