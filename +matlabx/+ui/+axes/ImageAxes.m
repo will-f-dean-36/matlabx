@@ -2235,10 +2235,12 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 % Color/ColorName
                 if ~isempty(comp.Color)
                     displayState(i).Color = comp.Color;
-                    displayState(i).ColorName = matlabx.colors.names.fromRGB(comp.Color,"Palette","MATLAB");
+                    displayState(i).ColorName = matlabx.ui.axes.ImageAxes.canonicalComponentColorName( ...
+                        matlabx.colors.names.fromRGB(comp.Color,"Palette","MATLAB"));
                 elseif hasOldEntry && ~isempty(old(i).Color)
                     displayState(i).Color = old(i).Color;
-                    displayState(i).ColorName = matlabx.colors.names.fromRGB(old(i).Color,"Palette","MATLAB");
+                    displayState(i).ColorName = matlabx.ui.axes.ImageAxes.canonicalComponentColorName( ...
+                        matlabx.colors.names.fromRGB(old(i).Color,"Palette","MATLAB"));
                 else
                     displayState(i).ColorName = string(defaultColors{1 + mod(i-1, numel(defaultColors))});
                     displayState(i).Color = matlabx.colors.names.toRGB(displayState(i).ColorName,"Palette","MATLAB");
@@ -2319,12 +2321,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             for k = 1:numel(idx)
                 ii = idx(k);
-                newName = string(colors{k});
-
-                if ~isscalar(newName)
-                    error('ImageAxes:InvalidComponentColor', ...
-                        'ComponentColors{%d} must be a text scalar.', ii);
-                end
+                newName = matlabx.ui.axes.ImageAxes.canonicalComponentColorName(colors{k});
 
                 if strcmp(obj.ComponentDisplay_(ii).ColorName, newName)
                     continue
@@ -3416,6 +3413,31 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         function names = getColorNames()
             % return names of allowed component colors
             names = {'cyan','magenta','yellow','red','green','blue'};
+        end
+
+        function name = canonicalComponentColorName(name)
+            %CANONICALCOMPONENTCOLORNAME Normalize to ImageAxes color names.
+            %
+            % matlabx.colors.names.fromRGB returns display-cased MATLAB palette
+            % names. ImageAxes exposes lowercase component color names, so keep
+            % internal ColorName state canonical before it reaches getters/links.
+
+            name = string(name);
+            if ~isscalar(name)
+                error('ImageAxes:InvalidComponentColor', ...
+                    'Component color must be a text scalar.');
+            end
+
+            canonicalNames = string(matlabx.ui.axes.ImageAxes.getColorNames());
+            matchIdx = find(strcmpi(name, canonicalNames), 1, 'first');
+
+            if isempty(matchIdx)
+                error('ImageAxes:InvalidComponentColor', ...
+                    'Component color "%s" must be one of: %s.', ...
+                    char(name), strjoin(cellstr(canonicalNames), ', '));
+            end
+
+            name = canonicalNames(matchIdx);
         end
 
         function names = getDefaultTools()
