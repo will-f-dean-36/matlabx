@@ -410,23 +410,21 @@ classdef BioFormatsImageSource < matlabx.image.ImageSource
         end
 
         function cls = bfPixelTypeToMatlabClass_(~, pixelType)
-            import loci.formats.FormatTools
-
-            if pixelType == FormatTools.UINT8
+            if pixelType == loci.formats.FormatTools.UINT8
                 cls = 'uint8';
-            elseif pixelType == FormatTools.INT8
+            elseif pixelType == loci.formats.FormatTools.INT8
                 cls = 'int8';
-            elseif pixelType == FormatTools.UINT16
+            elseif pixelType == loci.formats.FormatTools.UINT16
                 cls = 'uint16';
-            elseif pixelType == FormatTools.INT16
+            elseif pixelType == loci.formats.FormatTools.INT16
                 cls = 'int16';
-            elseif pixelType == FormatTools.UINT32
+            elseif pixelType == loci.formats.FormatTools.UINT32
                 cls = 'uint32';
-            elseif pixelType == FormatTools.INT32
+            elseif pixelType == loci.formats.FormatTools.INT32
                 cls = 'int32';
-            elseif pixelType == FormatTools.SINGLE
+            elseif pixelType == loci.formats.FormatTools.SINGLE
                 cls = 'single';
-            elseif pixelType == FormatTools.DOUBLE
+            elseif pixelType == loci.formats.FormatTools.DOUBLE
                 cls = 'double';
             else
                 error('BioFormatsImageSource:UnsupportedPixelType', ...
