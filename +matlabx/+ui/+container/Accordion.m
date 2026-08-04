@@ -145,7 +145,8 @@ classdef Accordion < matlab.ui.componentcontainer.ComponentContainer
         % No-ops so FigureEventHub doesn't error
         function onUp(~, ~),        end
         function onScroll(~, ~),    end
-        function onKey(~, ~),       end
+        function onKeyPress(~, ~),       end
+        function onKeyRelease(~, ~),     end
         
         function onEnter(obj,E)
             ID = obj.getTargetID(E.Target);

@@ -2644,13 +2644,13 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
-    %% Hub-facing event handlers (matches | onDown | onMove | onUp | onScroll | onKey | onEnter | onLeave)
+    %% Hub-facing event handlers (matches | onDown | onMove | onUp | onScroll | onKeyPress | onKeyRelease | onEnter | onLeave)
     methods
 
         % determine whether this instance should claim event from FigureEventHub
         function tf = matches(obj, E)
             % E.Target: hittest result from FigureEventHub that we are checking for a match to this component
-            % E.Kind: the specific kind of mouse event (i.e. 'Move', 'Down', 'Up', 'Scroll', or 'Key')
+            % E.Kind: the specific event kind (i.e. 'Move', 'Down', 'Up', 'Scroll', 'KeyPress', or 'KeyRelease')
             % E.RawEvent: event data associated with the event
 
             % true if child of UIAxes in this ImageAxes
@@ -2699,7 +2699,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.routeEventToTools(E);
         end
 
-        function onKey(obj, E)
+        function onKeyPress(obj, E)
             obj.routeEventToTools(E);
 
             switch E.Hotkey
@@ -2720,6 +2720,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 case 'shift+leftarrow'
                     obj.previousT();
             end
+        end
+
+        function onKeyRelease(obj, E)
+            obj.routeEventToTools(E);
         end
 
         function onEnter(obj,~)

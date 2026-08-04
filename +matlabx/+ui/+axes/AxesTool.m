@@ -19,12 +19,12 @@ classdef AxesTool < handle
 %   routing in two ways:
 %
 %   Interceptor
-%       An Enabled tool with InterceptsDown/Move/Up/Scroll/Key=true for an
+%       An Enabled tool with InterceptsDown/Move/Up/Scroll/KeyPress/KeyRelease=true for an
 %       event kind. The Host routes the event to the highest-priority
 %       matching interceptor by calling onDown(), onMove(), etc.
 %
 %   PassiveInterceptor
-%       An Installed tool with PassivelyInterceptsDown/Move/Up/Scroll/Key=true
+%       An Installed tool with PassivelyInterceptsDown/Move/Up/Scroll/KeyPress/KeyRelease=true
 %       for an event kind. The Host routes the event to every matching passive
 %       interceptor, in priority order, before the active interceptor by calling
 %       onPassiveDown(), onPassiveMove(), etc. Passive
@@ -58,13 +58,15 @@ classdef AxesTool < handle
         InterceptsMove (1,1) logical = false      % this tool actively receives 'Move' events when Enabled=true
         InterceptsUp (1,1) logical = false        % this tool actively receives 'Up' events when Enabled=true
         InterceptsScroll (1,1) logical = false    % this tool actively receives 'Scroll' events when Enabled=true
-        InterceptsKey (1,1) logical = false       % this tool actively receives 'Key' events when Enabled=true
+        InterceptsKeyPress (1,1) logical = false       % this tool actively receives 'KeyPress' events when Enabled=true
+        InterceptsKeyRelease (1,1) logical = false     % this tool actively receives 'KeyRelease' events when Enabled=true
 
         PassivelyInterceptsDown (1,1) logical = false     % this tool passively receives 'Down' events
         PassivelyInterceptsMove (1,1) logical = false     % this tool passively receives 'Move' events
         PassivelyInterceptsUp (1,1) logical = false       % this tool passively receives 'Up' events
         PassivelyInterceptsScroll (1,1) logical = false   % this tool passively receives 'Scroll' events
-        PassivelyInterceptsKey (1,1) logical = false      % this tool passively receives 'Key' events
+        PassivelyInterceptsKeyPress (1,1) logical = false      % this tool passively receives 'KeyPress' events
+        PassivelyInterceptsKeyRelease (1,1) logical = false    % this tool passively receives 'KeyRelease' events
 
         ListenToRenderSourceChanged (1,1) logical = false % listen to Host RenderSourceChanged events
 
@@ -106,12 +108,14 @@ classdef AxesTool < handle
             p.addParameter('InterceptsMove', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('InterceptsUp', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('InterceptsScroll', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('InterceptsKey', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('InterceptsKeyPress', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('InterceptsKeyRelease', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('PassivelyInterceptsDown', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('PassivelyInterceptsMove', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('PassivelyInterceptsUp', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('PassivelyInterceptsScroll', false, @(x)islogical(x)&&isscalar(x));
-            p.addParameter('PassivelyInterceptsKey', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('PassivelyInterceptsKeyPress', false, @(x)islogical(x)&&isscalar(x));
+            p.addParameter('PassivelyInterceptsKeyRelease', false, @(x)islogical(x)&&isscalar(x));
             p.addParameter('ListenToRenderSourceChanged', false, @(x)islogical(x)&&isscalar(x));
 
             p.parse(varargin{:});
@@ -127,12 +131,14 @@ classdef AxesTool < handle
             obj.InterceptsMove = p.Results.InterceptsMove;
             obj.InterceptsUp = p.Results.InterceptsUp;
             obj.InterceptsScroll = p.Results.InterceptsScroll;
-            obj.InterceptsKey = p.Results.InterceptsKey;
+            obj.InterceptsKeyPress = p.Results.InterceptsKeyPress;
+            obj.InterceptsKeyRelease = p.Results.InterceptsKeyRelease;
             obj.PassivelyInterceptsDown = p.Results.PassivelyInterceptsDown;
             obj.PassivelyInterceptsMove = p.Results.PassivelyInterceptsMove;
             obj.PassivelyInterceptsUp = p.Results.PassivelyInterceptsUp;
             obj.PassivelyInterceptsScroll = p.Results.PassivelyInterceptsScroll;
-            obj.PassivelyInterceptsKey = p.Results.PassivelyInterceptsKey;
+            obj.PassivelyInterceptsKeyPress = p.Results.PassivelyInterceptsKeyPress;
+            obj.PassivelyInterceptsKeyRelease = p.Results.PassivelyInterceptsKeyRelease;
             obj.ListenToRenderSourceChanged = p.Results.ListenToRenderSourceChanged;
 
             obj.configureHostEventListeners();
@@ -232,14 +238,16 @@ classdef AxesTool < handle
         function onMove(~,~,~),     end
         function onUp(~,~,~),       end
         function onScroll(~,~,~),   end
-        function onKey(~,~,~),      end
+        function onKeyPress(~,~,~),      end
+        function onKeyRelease(~,~,~),    end
 
         % Pointer routing (only PassiveInterceptors get these)
         function onPassiveDown(~,~,~),   end
         function onPassiveMove(~,~,~),   end
         function onPassiveUp(~,~,~),     end
         function onPassiveScroll(~,~,~), end
-        function onPassiveKey(~,~,~),    end
+        function onPassiveKeyPress(~,~,~),    end
+        function onPassiveKeyRelease(~,~,~),  end
 
         % Adjust pointer shape (override in subclass to set pointer - if empty, Host will set)
         function pointer = getPreferredPointer(~), pointer = ''; end
@@ -257,11 +265,14 @@ classdef AxesTool < handle
     methods
 
         function value = get.IsInterceptor(obj)
-            value = obj.InterceptsDown || obj.InterceptsMove || obj.InterceptsUp || obj.InterceptsScroll || obj.InterceptsKey;
+            value = obj.InterceptsDown || obj.InterceptsMove || obj.InterceptsUp || ...
+                obj.InterceptsScroll || obj.InterceptsKeyPress || obj.InterceptsKeyRelease;
         end
 
         function value = get.IsPassiveInterceptor(obj)
-            value = obj.PassivelyInterceptsDown || obj.PassivelyInterceptsMove || obj.PassivelyInterceptsUp || obj.PassivelyInterceptsScroll || obj.PassivelyInterceptsKey;
+            value = obj.PassivelyInterceptsDown || obj.PassivelyInterceptsMove || ...
+                obj.PassivelyInterceptsUp || obj.PassivelyInterceptsScroll || ...
+                obj.PassivelyInterceptsKeyPress || obj.PassivelyInterceptsKeyRelease;
         end
 
     end

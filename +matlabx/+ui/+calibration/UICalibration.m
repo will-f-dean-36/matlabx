@@ -529,6 +529,16 @@ classdef UICalibration < handle
 end
 
 function tf = sameNumericArray_(A, B)
+if numel(A) ~= numel(B)
+    tf = false;
+    return
+end
+
+if isvector(A) && isvector(B)
+    tf = all(abs(double(A(:)) - double(B(:))) <= 1);
+    return
+end
+
 tf = isequal(size(A), size(B)) && all(abs(double(A(:)) - double(B(:))) <= 1);
 end
 

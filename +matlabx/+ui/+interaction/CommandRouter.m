@@ -44,7 +44,7 @@ classdef CommandRouter < matlab.ui.componentcontainer.ComponentContainer
         function tf = matches(obj, E)
             tf = ...
                 obj.Enabled && ...
-                E.isKeyEvent() && ...
+                E.isKeyPressEvent() && ...
                 strlength(E.Key) > 0 && ...
                 isKey(obj.HotkeyFcnDict, E.Key);
         end
@@ -60,7 +60,7 @@ classdef CommandRouter < matlab.ui.componentcontainer.ComponentContainer
         % end
 
         % FigureEventHub hook: handle claimed event
-        function onKey(obj, E)
+        function onKeyPress(obj, E)
             key = E.Key;
             if isKey(obj.HotkeyFcnDict, key)
                 func = obj.HotkeyFcnDict(key);
@@ -76,7 +76,7 @@ classdef CommandRouter < matlab.ui.componentcontainer.ComponentContainer
         function onUp(~, ~),        end
         function onMove(~, ~),      end
         function onScroll(~, ~),    end
-        %function onKey(~, ~),       end
+        function onKeyRelease(~, ~), end
         function onEnter(~, ~),     end
         function onLeave(~, ~),     end
 

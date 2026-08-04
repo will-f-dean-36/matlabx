@@ -34,8 +34,8 @@ classdef Zoom < matlabx.ui.axes.AxesTool
                 'InterceptsMove',   false, ...
                 'InterceptsDown',   true, ...
                 'InterceptsScroll', true, ...
-                'InterceptsKey',    true, ...
-                'PassivelyInterceptsKey', true);
+                'InterceptsKeyPress',    true, ...
+                'PassivelyInterceptsKeyPress', true);
         end
 
         function onEnabled(obj)
@@ -125,8 +125,8 @@ classdef Zoom < matlabx.ui.axes.AxesTool
             end
         end
 
-        function onKey(obj, E)
-            obj.printStatus(sprintf('%s.onKey()', obj.Name));
+        function onKeyPress(obj, E)
+            obj.printStatus(sprintf('%s.onKeyPress()', obj.Name));
 
             switch E.Hotkey
                 case "meta+equal"
@@ -144,7 +144,7 @@ classdef Zoom < matlabx.ui.axes.AxesTool
     %% Passive event hooks (only when Installed==true && IsPassiveInterceptor==true)
     methods
 
-        function onPassiveKey(obj,E)
+        function onPassiveKeyPress(obj,E)
             if obj.ToggleHotkey == E.Hotkey
                 E.stop();
             else

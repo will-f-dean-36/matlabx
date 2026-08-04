@@ -952,7 +952,8 @@ classdef Slider < matlab.ui.componentcontainer.ComponentContainer
 
         % No-ops so FigureEventHub doesn't error
         function onScroll(~, ~),    end
-        function onKey(~, ~),       end
+        function onKeyPress(~, ~),       end
+        function onKeyRelease(~, ~),     end
 
         function onEnter(obj,~)
             obj.parentFig.Pointer = 'hand';

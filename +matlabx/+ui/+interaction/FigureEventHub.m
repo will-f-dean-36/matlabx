@@ -30,8 +30,9 @@ classdef FigureEventHub < handle
 % 
 % tgt: graphics obj under cursor (hittest(Fig) result)
 % 
-% kind: the event kind string the hub uses to sort events: 'Move'|'Down'|'Up'|'Scroll'
-%   Corresponds to: WindowButtonMotionFcn | WindowButtonDownFcn | WindowButtonUpFcn | WindowScrollWheelFcn
+% kind: the event kind string the hub uses to sort events:
+%   'Move'|'Down'|'Up'|'Scroll'|'KeyPress'|'KeyRelease'
+%   Corresponds to figure mouse, scroll, KeyPressFcn, and KeyReleaseFcn callbacks.
 %
 % evt: the MATLAB event struct passed from the figure callback (e.g., WindowButtonDownFcn arg, etc.)
 
@@ -49,14 +50,19 @@ classdef FigureEventHub < handle
         HoverID double = NaN        % ID of the current hover claimant
         CaptureID double = NaN      % ID of the registrant holding capture
 
-        % Extra listeners keyed by event kind:
-        % 'Down'|'Move'|'Up'|'Scroll'|'Key'
+        ModifierState (1,:) string = string.empty(1,0)
+        LastKey (1,1) string = ""
+        LastHotkey (1,1) string = ""
+        LastKeyTimestamp datetime = NaT
+
+        % Extra listeners keyed by event kind.
         ListenerRegistry struct = struct( ...
-            'Down',   struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
-            'Move',   struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
-            'Up',     struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
-            'Scroll', struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
-            'Key',    struct('id', {}, 'Fcn', {}, 'Priority', {}))
+            'Down',       struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
+            'Move',       struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
+            'Up',         struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
+            'Scroll',     struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
+            'KeyPress',   struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
+            'KeyRelease', struct('id', {}, 'Fcn', {}, 'Priority', {}))
 
         NextListenerID double = 1
     end
@@ -83,14 +89,16 @@ classdef FigureEventHub < handle
             obj.captureExistingCallback('WindowButtonMotionFcn', 'Move');
             obj.captureExistingCallback('WindowButtonUpFcn',     'Up');
             obj.captureExistingCallback('WindowScrollWheelFcn',  'Scroll');
-            obj.captureExistingCallback('KeyPressFcn',           'Key');
+            obj.captureExistingCallback('KeyPressFcn',           'KeyPress');
+            obj.captureExistingCallback('KeyReleaseFcn',         'KeyRelease');
 
             % Install hub dispatchers
             fig.WindowButtonDownFcn   = @(~,evt) obj.route('Down', evt);
             fig.WindowButtonMotionFcn = @(~,evt) obj.route('Move', evt);
             fig.WindowButtonUpFcn     = @(~,evt) obj.route('Up', evt);
             fig.WindowScrollWheelFcn  = @(~,evt) obj.route('Scroll', evt);
-            fig.KeyPressFcn           = @(~,evt) obj.route('Key', evt);
+            fig.KeyPressFcn           = @(~,evt) obj.route('KeyPress', evt);
+            fig.KeyReleaseFcn         = @(~,evt) obj.route('KeyRelease', evt);
         end
 
         function captureExistingCallback(obj, propName, kind)
@@ -251,8 +259,14 @@ classdef FigureEventHub < handle
             obj.pruneInvalidRegistrants();
             obj.pruneInvalidListeners(kind);
 
+            obj.updateKeyboardState(kind, evt);
+
             tgt = hittest(obj.Fig);
-            E = matlabx.ui.interaction.HubEvent(obj.Fig, tgt, kind, evt);
+            E = matlabx.ui.interaction.HubEvent(obj.Fig, tgt, kind, evt, ...
+                "ModifierState", obj.ModifierState, ...
+                "LastKey", obj.LastKey, ...
+                "LastHotkey", obj.LastHotkey, ...
+                "LastKeyTimestamp", obj.LastKeyTimestamp);
 
             % If captured, route only to current captor until mouse up
             if ~isnan(obj.CaptureID)
@@ -343,6 +357,31 @@ classdef FigureEventHub < handle
             end
         end
 
+        function updateKeyboardState(obj, kind, evt)
+            if ~any(string(kind) == ["KeyPress", "KeyRelease"])
+                return
+            end
+
+            if ~isa(evt, 'matlab.ui.eventdata.KeyData')
+                return
+            end
+
+            key = lower(string(evt.Key));
+            character = lower(string(evt.Character));
+            modifiers = matlabx.ui.interaction.FigureEventHub.canonicalModifiers_(evt.Modifier);
+
+            switch string(kind)
+                case "KeyPress"
+                    obj.ModifierState = matlabx.ui.interaction.FigureEventHub.canonicalModifiers_([modifiers, key]);
+                case "KeyRelease"
+                    obj.ModifierState = modifiers;
+            end
+
+            obj.LastKey = key;
+            obj.LastHotkey = matlabx.keyboard.normalize(key, character, obj.ModifierState);
+            obj.LastKeyTimestamp = datetime("now");
+        end
+
         function call(~, h, E)
             if ~isvalid(h), return; end
 
@@ -351,7 +390,8 @@ classdef FigureEventHub < handle
                 case 'Move',   h.onMove(E);
                 case 'Up',     h.onUp(E);
                 case 'Scroll', h.onScroll(E);
-                case 'Key',    h.onKey(E);
+                case 'KeyPress',   h.onKeyPress(E);
+                case 'KeyRelease', h.onKeyRelease(E);
             end
         end
 
@@ -443,13 +483,25 @@ classdef FigureEventHub < handle
                 'onUp', ...
                 'onMove', ...
                 'onScroll', ...
-                'onKey', ...
+                'onKeyPress', ...
+                'onKeyRelease', ...
                 'onEnter', ...
                 'onLeave'};
         end
 
         function kinds = supportedKinds()
-            kinds = {'Down', 'Move', 'Up', 'Scroll', 'Key'};
+            kinds = {'Down', 'Move', 'Up', 'Scroll', 'KeyPress', 'KeyRelease'};
+        end
+
+        function modifiers = canonicalModifiers_(modifiers)
+            modifiers = lower(string(modifiers));
+            modifiers(modifiers == "") = [];
+            modifiers(modifiers == "command") = "meta";
+            modifiers(modifiers == "option") = "alt";
+            modifiers(modifiers == "ctrl") = "control";
+
+            order = ["shift", "control", "alt", "meta"];
+            modifiers = intersect(order, unique(modifiers, "stable"), "stable");
         end
 
     end

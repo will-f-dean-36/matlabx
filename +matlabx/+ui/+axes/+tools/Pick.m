@@ -31,8 +31,8 @@ classdef Pick < matlabx.ui.axes.AxesTool
     properties (Access=private)
         % track box IDs in parallel with ROI handles
         BoxIds (1,:) string = string.empty(1,0)
-        ActiveBoxIdx = []
-        ActiveHoverIdx = []
+        ActiveBoxId (1,1) string = ""
+        ActiveHoverId (1,1) string = ""
         SelectedBoxIds (1,:) string = string.empty(1,0)
     end
 
@@ -99,6 +99,10 @@ classdef Pick < matlabx.ui.axes.AxesTool
 
         function onDown(obj, E)
 
+            if E.MouseChord ~= "click"
+                return
+            end
+
             H = obj.Host;
             XY = H.cursorPosition;
 
@@ -117,13 +121,7 @@ classdef Pick < matlabx.ui.axes.AxesTool
                 obj.BoxCreatedFcn(H, struct('ID', ID, 'CenterPx', [cx cy], 'BoxSize', s));
             end
 
-            % selection behavior: normal replaces, extend adds
-            switch E.SelectionType
-                case 'extend'
-                    obj.addToSelection(ID, 'Emit', true);
-                otherwise
-                    obj.setActive(ID);
-            end    
+            obj.setActive(ID);
         end
 
     end
@@ -136,6 +134,7 @@ classdef Pick < matlabx.ui.axes.AxesTool
 
             % ROIBox clicks handled by patch (drag/delete)
             if isprop(E.Target,'ID') && obj.hasBox(E.Target.ID)
+                obj.boxClickedById(E.Target.ID,E);
                 E.stop();
             end
         end
@@ -145,23 +144,23 @@ classdef Pick < matlabx.ui.axes.AxesTool
             % if we are primed for drag (button down on box with no cursor movement)
             if obj.Host.Mode.PrimedForDrag
                 % start dragging
-                obj.startDraggingBox(obj.ActiveBoxIdx);
+                obj.startDraggingBox(obj.activeBoxIdx());
                 return
             end
 
             % if we are in the middle of dragging a box
             if obj.Host.Mode.DragBox
                 % keep dragging and return
-                obj.dragBox(obj.ActiveBoxIdx);
+                obj.dragBox(obj.activeBoxIdx());
                 return
             end
 
             % cursor target is ROIBox patch
             if isa(E.Target,'matlab.graphics.primitive.Patch') && strcmp(get(E.Target,'Tag'),'ROIBox')
                 % turn HoverHighlight mode 'on' on the box (get idx from custom patch property, ID)
-                obj.startHoverByIdx(obj.idxOfId(E.Target.ID));
+                obj.startHoverById(E.Target.ID);
             else % cursor target is anything else
-                % turn off HoverHighlight mode for box corresponding to ActiveHoverIdx, if it exists
+                % turn off HoverHighlight mode for box corresponding to ActiveHoverId, if it exists
                 obj.stopHover();
             end
 
@@ -176,7 +175,7 @@ classdef Pick < matlabx.ui.axes.AxesTool
             end
 
             if obj.Host.Mode.DragBox
-                obj.stopDraggingBox(obj.ActiveBoxIdx);
+                obj.stopDraggingBox(obj.activeBoxIdx());
             end
         end
 
@@ -195,31 +194,81 @@ classdef Pick < matlabx.ui.axes.AxesTool
     %% Private Helpers (Pick)
     methods (Access=private)
 
+        function id = normalizeId_(~, id)
+            id = string(id);
+
+            if isempty(id)
+                id = "";
+            else
+                id = id(1);
+            end
+        end
+
         function idx = idxOfId(obj, id)
-            idx = find(obj.BoxIds == string(id), 1, 'first');
+            id = obj.normalizeId_(id);
+            if strlength(id) == 0
+                idx = [];
+                return
+            end
+
+            idx = find(obj.BoxIds == id, 1, 'first');
+        end
+
+        function idx = activeBoxIdx(obj)
+            idx = obj.idxOfId(obj.ActiveBoxId);
+        end
+
+        function idx = activeHoverIdx(obj)
+            idx = obj.idxOfId(obj.ActiveHoverId);
+        end
+
+        function TF = isValidBoxIdx(obj, idx)
+            TF = ~isempty(idx) ...
+                && isscalar(idx) ...
+                && idx>=1 ...
+                && idx<=numel(obj.BoxROI) ...
+                && isvalid(obj.BoxROI(idx));
         end
 
         % check if this tool owns box indicated by id
         function TF = hasBox(obj,id)
-            TF = ismember(id,obj.BoxIds);
+            id = obj.normalizeId_(id);
+            TF = strlength(id) > 0 && ismember(id,obj.BoxIds);
+        end
+
+        function deleteBoxById(obj, id)
+            id = obj.normalizeId_(id);
+            idx = obj.idxOfId(id);
+            if ~obj.isValidBoxIdx(idx), return; end
+
+            obj.deleteBoxByIdx(idx);
+
+            if ~isempty(obj.BoxDeletedFcn)
+                obj.BoxDeletedFcn(obj, struct('ID', id));
+            end
         end
 
         function deleteBoxByIdx(obj, idx)
+            if ~obj.isValidBoxIdx(idx)
+                return
+            end
 
-            % reset ActiveHoverIdx if necessary
-            if ~isempty(obj.ActiveHoverIdx) && obj.ActiveHoverIdx == idx
+            id = obj.BoxIds(idx);
+
+            % reset ActiveHoverId if necessary
+            if obj.ActiveHoverId == id
                 obj.Host.setMode('HoverBox',false);
-                obj.ActiveHoverIdx = [];
+                obj.ActiveHoverId = "";
             end
 
             % remove from selection first
-            id = obj.BoxIds(idx);
             obj.SelectedBoxIds(obj.SelectedBoxIds == id) = [];
 
 
-            % reset ActiveBoxIdx if necessary
-            if idx == obj.ActiveBoxIdx
-                obj.ActiveBoxIdx = [];
+            % reset ActiveBoxId if necessary
+            if obj.ActiveBoxId == id
+                obj.ActiveBoxId = "";
+                obj.emitActiveChanged("");
             end
 
             % delete
@@ -235,49 +284,61 @@ classdef Pick < matlabx.ui.axes.AxesTool
 
         end
 
-        function boxClickedById(obj, id)
-            id = string(id);
-            idx = obj.idxOfId(id);
-            if isempty(idx), return; end
-        
-            switch obj.Host.ParentFig.SelectionType
-                case 'alt'   % delete immediately (optimistic), then notify
-                    obj.deleteBoxByIdx(idx);   % remove overlay now
-                    if ~isempty(obj.BoxDeletedFcn)
-                        obj.BoxDeletedFcn(obj, struct('ID', id));
-                    end
+        function boxClickedById(obj, id, E)
+            id = obj.normalizeId_(id);
+            if ~obj.hasBox(id), return; end
+
+            switch E.MouseChord
+                case "control+contextclick"
+                    obj.deleteBoxById(id);
                     return
-        
-                case 'extend' % shift-click toggles selection membership
-                    if ismember(id, obj.SelectedBoxIds)
-                        obj.removeFromSelection(id, 'Emit', true);
-                    else
-                        obj.addToSelection(id, 'Emit', true);
-                    end
-                case 'open'
-                    %obj.clearBoxSelection();
-                    obj.setSelectedBoxIDs("","Emit",true);
-        
-                otherwise
-                    %obj.setSelection(id, 'Emit', true);
+
+                case "alt+click"
+                    obj.deactivateActive();
+
+                case "shift+extendclick"
+                    obj.toggleSelection(id, 'Emit', true);
+
+                case "click"
                     obj.setActive(id);
+                    obj.primeDrag();
             end
-        
-            % prime drag only for normal click (single select)
-            if obj.Host.ParentFig.SelectionType == "normal" && obj.Enabled
+        end
+
+        function primeDrag(obj)
+            if obj.Enabled && strlength(obj.ActiveBoxId) > 0
                 obj.Host.setMode('PrimedForDrag', true);
             end
         end
 
+
         function setActive(obj, id)
-            obj.ActiveBoxIdx = obj.idxOfId(id);
+            id = obj.normalizeId_(id);
+            if ~obj.isValidBoxIdx(obj.idxOfId(id)), return; end
+
+            obj.ActiveBoxId = id;
         
             obj.applySelectionHighlights();
+            obj.emitActiveChanged(id);
 
-            if ~isempty(obj.BoxActivatedFcn)
-                obj.BoxActivatedFcn(obj, struct('ID', id));
+        end
+
+        function deactivateActive(obj)
+            if strlength(obj.ActiveBoxId) == 0
+                return
             end
 
+            obj.ActiveBoxId = "";
+            obj.Host.setMode('PrimedForDrag', false);
+            obj.Host.setMode('DragBox', false);
+            obj.applySelectionHighlights();
+            obj.emitActiveChanged("");
+        end
+
+        function emitActiveChanged(obj, id)
+            if ~isempty(obj.BoxActivatedFcn)
+                obj.BoxActivatedFcn(obj, struct('ID', obj.normalizeId_(id)));
+            end
         end
 
         function setSelection(obj, id, opts)
@@ -330,6 +391,20 @@ classdef Pick < matlabx.ui.axes.AxesTool
             end
         end
 
+        function toggleSelection(obj, id, opts)
+            arguments
+                obj
+                id
+                opts.Emit (1,1) logical = false
+            end
+
+            if ismember(id, obj.SelectedBoxIds)
+                obj.removeFromSelection(id, 'Emit', opts.Emit);
+            else
+                obj.addToSelection(id, 'Emit', opts.Emit);
+            end
+        end
+
         function applySelectionHighlights(obj)
             % clear all selection and active highlights
             if isempty(obj.BoxROI), return; end
@@ -340,15 +415,16 @@ classdef Pick < matlabx.ui.axes.AxesTool
             end
 
             % apply active highlight
-            if ~isempty(obj.ActiveBoxIdx)
-                obj.BoxROI(obj.ActiveBoxIdx).ActiveHighlight = 'on';
+            activeIdx = obj.activeBoxIdx();
+            if obj.isValidBoxIdx(activeIdx)
+                obj.BoxROI(activeIdx).ActiveHighlight = 'on';
             end
 
             % apply selected highlights
             if isempty(obj.SelectedBoxIds), return; end
             for i = 1:numel(obj.SelectedBoxIds)
                 idx = obj.idxOfId(obj.SelectedBoxIds(i));
-                if ~isempty(idx) && idx>=1 && idx<=numel(obj.BoxROI) && isvalid(obj.BoxROI(idx))
+                if obj.isValidBoxIdx(idx)
                     obj.BoxROI(idx).SelectionHighlight = 'on';
                 end
             end
@@ -364,7 +440,7 @@ classdef Pick < matlabx.ui.axes.AxesTool
         function dragBox(obj, idx)
             XY = obj.Host.cursorPosition;
             % exit if pixel is empty or box idx is invalid
-            if isempty(XY) || idx<1 || idx>obj.nBoxes || ~isvalid(obj.BoxROI(idx)), return; end
+            if isempty(XY) || ~obj.isValidBoxIdx(idx), return; end
             % the size of the box being dragged
             s = obj.BoxROI(idx).BoxSize;
             % clamp so box edge does not exit image boundary
@@ -383,6 +459,9 @@ classdef Pick < matlabx.ui.axes.AxesTool
         function startDraggingBox(obj,idx)
             % we are no longer PrimedForDrag
             obj.Host.setMode('PrimedForDrag',false);
+            if ~obj.isValidBoxIdx(idx)
+                return
+            end
             % we are now dragging
             obj.Host.setMode('DragBox',true);
             % fire BoxMoveStartedFcn
@@ -396,7 +475,7 @@ classdef Pick < matlabx.ui.axes.AxesTool
 
         % executes on mouse up when DragBox Mode is on
         function stopDraggingBox(obj, idx)
-            if ~isempty(idx) && isscalar(idx) && idx>=1 && idx<=obj.nBoxes && isvalid(obj.BoxROI(idx))
+            if obj.isValidBoxIdx(idx)
                 obj.dragBox(idx); % snap to final position before stopping drag
                 if ~isempty(obj.BoxMoveCommittedFcn)
                     ID = obj.BoxIds(idx);
@@ -408,39 +487,43 @@ classdef Pick < matlabx.ui.axes.AxesTool
             obj.Host.updateFromTool();
         end
 
-        % set HoverHighlight mode to 'on' for box specified by idx
-        function startHoverByIdx(obj, idx)
+        % set HoverHighlight mode to 'on' for box specified by id
+        function startHoverById(obj, id)
+            id = obj.normalizeId_(id);
+            idx = obj.idxOfId(id);
             % idx is empty, return
-            if isempty(idx), return; end
+            if ~obj.isValidBoxIdx(idx), return; end
             % we are already hovering on this box, return
-            if idx == obj.ActiveHoverIdx, return; end
+            if id == obj.ActiveHoverId, return; end
             % if another box was being hovered on
-            if ~isempty(obj.ActiveHoverIdx)
+            hoverIdx = obj.activeHoverIdx();
+            if obj.isValidBoxIdx(hoverIdx)
                 % turn its hover status off
-                obj.BoxROI(obj.ActiveHoverIdx).HoverHighlight = 'off';
+                obj.BoxROI(hoverIdx).HoverHighlight = 'off';
             end
             % turn hover on for the box specified by idx
             obj.BoxROI(idx).HoverHighlight = 'on';
-            % set that idx as the ActiveHoverIdx
-            obj.ActiveHoverIdx = idx;
+            % set that id as the ActiveHoverId
+            obj.ActiveHoverId = id;
             % set Host HoverMox mode to true
             obj.Host.setMode('HoverBox', true);
         end
 
-        % set HoverHighlight mode to 'off' for box indicated by ActiveHoverIdx, if any
+        % set HoverHighlight mode to 'off' for box indicated by ActiveHoverId, if any
         function stopHover(obj)
             % if HoverBox Mode is already off, return
             if ~obj.Host.Mode.HoverBox, return; end
-            % if ActiveHoverIdx is empty, return
-            if isempty(obj.ActiveHoverIdx), return; end
+            % if ActiveHoverId is empty, return
+            if strlength(obj.ActiveHoverId) == 0, return; end
 
             % set HoverHighlight off on current active box (if valid)
-            if obj.ActiveHoverIdx <= obj.nBoxes && isvalid(obj.BoxROI(obj.ActiveHoverIdx))
-                obj.BoxROI(obj.ActiveHoverIdx).HoverHighlight = 'off';
+            hoverIdx = obj.activeHoverIdx();
+            if obj.isValidBoxIdx(hoverIdx)
+                obj.BoxROI(hoverIdx).HoverHighlight = 'off';
             end
 
-            % set ActiveHoverIdx as empty
-            obj.ActiveHoverIdx = [];
+            % set ActiveHoverId as empty
+            obj.ActiveHoverId = "";
             % set HoverBox Mode to off
             obj.Host.setMode('HoverBox', false);
         end
@@ -490,8 +573,8 @@ classdef Pick < matlabx.ui.axes.AxesTool
                 "ID", string(id), ...
                 "Label", opts.Label, ...
                 "EdgeColor", opts.EdgeColor, ...
-                "FaceColor", opts.FaceColor, ...
-                "ButtonDownFcn", @(~,~) obj.boxClickedById(string(id)));
+                "FaceColor", opts.FaceColor);
+
 
             obj.BoxCenters(end+1,:) = [cx cy];
             obj.BoxIds(end+1)       = string(id);
@@ -509,7 +592,8 @@ classdef Pick < matlabx.ui.axes.AxesTool
             obj.BoxROI = matlabx.ui.axes.overlays.ROIBox.empty();
             obj.BoxCenters = zeros(0,2);
             obj.BoxIds = string.empty(1,0);
-            obj.ActiveBoxIdx = [];
+            obj.ActiveBoxId = "";
+            obj.ActiveHoverId = "";
             obj.SelectedBoxIds = string.empty(1,0);
         end
 
@@ -536,12 +620,17 @@ classdef Pick < matlabx.ui.axes.AxesTool
         end
 
         function clearBoxSelection(obj)
-            obj.SelectedBoxIds = [];
+            obj.SelectedBoxIds = string.empty(1,0);
             obj.applySelectionHighlights();
         end
 
         function setActiveBoxID(obj,id)
-            obj.setActive(id);
+            id = obj.normalizeId_(id);
+            if strlength(id) == 0
+                obj.deactivateActive();
+            else
+                obj.setActive(id);
+            end
         end
 
         function setBoxLabelByID(obj, id, label)
