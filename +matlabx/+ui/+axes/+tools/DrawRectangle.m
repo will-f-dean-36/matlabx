@@ -22,35 +22,46 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
     end
 
     %% Appearance
-    properties
-
-        ROIColor (1,3) double = [1 1 1]
-        ROILineWidth (1,1) double = 1
-        ROIFaceAlpha (1,1) double = 0.1
-        %ROIMarkerSize (1,1) double = 3
-        ROIMarkerSize (1,1) double = 8
-
-        AnnotationLineColor (1,3) double = [1 1 1]
-        AnnotationLineWidth (1,1) double = 0.5
-    end
-
-
     properties (Dependent)
+        ROIColor (1,3) double
+        ROILineWidth (1,1) double
+        ROIFaceAlpha (1,1) double
+        ROIMarkerSize (1,1) double
+
+        AnnotationLineColor (1,3) double
+        AnnotationLineWidth (1,1) double
+        RotationAngleVisible (1,1) matlab.lang.OnOffSwitchState
+
         FontSize (1,1) double
+        FontColor (1,3) double
     end
 
     properties (Access=private)
+        ROIColor_ (1,3) double = [1 1 1]
+        ROILineWidth_ (1,1) double = 1
+        ROIFaceAlpha_ (1,1) double = 0.1
+        ROIMarkerSize_ (1,1) double = 8
+
+        AnnotationLineColor_ (1,3) double = [1 1 1]
+        AnnotationLineWidth_ (1,1) double = 0.5
+        RotationAngleVisible_ (1,1) matlab.lang.OnOffSwitchState = 'on'
+
         FontSize_ (1,1) double = 12
+        FontColor_ (1,3) double = [1 1 1]
     end
 
     %% Behavior
-    properties
+    properties (Dependent)
         % RotationAngleMode - controls how RotationAngle output values and annotations behave
         % 'full-circle'
         %   Use default value from images.roi.Rectangle — in range [0,360), CCW from +x-axis for x -> right, y -> down
         % 'half-circle'
         %   Wrap angles to fall in range [-90,90), CCW from +x-axis for x -> right, y -> down
-        RotationAngleMode (1,:) char {mustBeMember(RotationAngleMode,{'full-circle','half-circle'})} = 'full-circle'
+        RotationAngleMode (1,:) char
+    end
+
+    properties (Access=private)
+        RotationAngleMode_ (1,:) char {mustBeMember(RotationAngleMode_,{'full-circle','half-circle'})} = 'full-circle'
     end
 
     %% Internal helpers
@@ -84,11 +95,11 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
                 'AxesType',"image",...
                 'Icon',matlabx.internal.Paths.icons('RectangleROIIcon.png'),...
                 'Priority',10,...
+                'Style','push',...
                 'IsExclusive',true,...
-                'InterceptsDown',true,...
-                'InterceptsUp',true,...
                 'PassivelyInterceptsMove',true,...
-                'PassivelyInterceptsDown',true);
+                'PassivelyInterceptsDown',true,...
+                'PassivelyInterceptsUp',true);
             % rectangular ROI
             obj.RectROI = images.roi.Rectangle.empty();
             % annotation lines
@@ -103,19 +114,14 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
             obj.ROIContextMenu_Delete = uimenu(obj.ROIContextMenu,"Text","Delete","MenuSelectedFcn",@(~,~) obj.deleteROI());
         end
 
-        % Toggled Enabled=true via toolbar button
-        function onEnabled(obj)
+        % Toolbar push arms drawing for the next background click.
+        function onPush(obj)
             obj.Host.setMode('DrawRectangle', true);
-        end
-
-        % Toggled Enabled=false via toolbar button
-        function onDisabled(obj)
-            obj.Host.setMode('DrawRectangle', false);
         end
 
         % Called AFTER installed from Host, use for any extra required startup actions
         function onInstall(obj)
-            obj.Host.addMode('DrawRectangle'); % tool Enabled state
+            obj.Host.addMode('DrawRectangle'); % next background click starts drawing
             obj.Host.addMode('DrawingRectangle'); % rectangle is currently being drawn
             obj.Host.addMode('HoverRectangle'); % cursor is hovering on obj.RectROI
         end
@@ -133,6 +139,9 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
     methods (Access=private)
 
         function updateAnnotations(obj)
+            if ~obj.graphicsReady()
+                return
+            end
 
             % get coordinates for annotations
             [WidthMidlineXY,XRayXY,ArcPolylineXY,LabelXY] = obj.getAnnotationData();
@@ -142,7 +151,90 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
             set(obj.ArcPolyline,"XData",ArcPolylineXY(1,:),"YData",ArcPolylineXY(2,:));
             % set Position and String of annotation labels
             set(obj.AngleLabel,"Position",LabelXY,"String",obj.RotationAngleDisplay,"FontSize",obj.FontSize_);
+            obj.applyAppearance();
             
+        end
+
+        function applyAppearance(obj)
+            if ~isempty(obj.RectROI) && isvalid(obj.RectROI)
+                set(obj.RectROI, ...
+                    'Color',obj.ROIColor_, ...
+                    'LineWidth',obj.ROILineWidth_, ...
+                    'FaceAlpha',obj.ROIFaceAlpha_, ...
+                    'MarkerSize',obj.ROIMarkerSize_);
+            end
+
+            if ~isempty(obj.WidthMidline) && isvalid(obj.WidthMidline)
+                set(obj.WidthMidline, ...
+                    "Color",obj.AnnotationLineColor_, ...
+                    "LineWidth",obj.AnnotationLineWidth_, ...
+                    "Visible",'on');
+            end
+
+            rotationVisible = obj.RotationAngleVisible_;
+
+            if ~isempty(obj.XRay) && isvalid(obj.XRay)
+                set(obj.XRay, ...
+                    "Color",obj.AnnotationLineColor_, ...
+                    "LineWidth",obj.AnnotationLineWidth_, ...
+                    "Visible",rotationVisible);
+            end
+
+            if ~isempty(obj.ArcPolyline) && isvalid(obj.ArcPolyline)
+                set(obj.ArcPolyline, ...
+                    "Color",obj.AnnotationLineColor_, ...
+                    "LineWidth",obj.AnnotationLineWidth_, ...
+                    "Visible",rotationVisible);
+            end
+
+            if ~isempty(obj.AngleLabel) && isvalid(obj.AngleLabel)
+                set(obj.AngleLabel, ...
+                    "FontSize",obj.FontSize_, ...
+                    "Color",obj.FontColor_, ...
+                    "Visible",rotationVisible);
+            end
+        end
+
+        function TF = graphicsReady(obj)
+            TF = ~isempty(obj.RectROI) && isvalid(obj.RectROI) ...
+                && ~isempty(obj.WidthMidline) && isvalid(obj.WidthMidline) ...
+                && ~isempty(obj.XRay) && isvalid(obj.XRay) ...
+                && ~isempty(obj.ArcPolyline) && isvalid(obj.ArcPolyline) ...
+                && ~isempty(obj.AngleLabel) && isvalid(obj.AngleLabel);
+        end
+
+        function beginDrawingFromEvent(obj, E)
+            % skip toolbar buttons
+            if ~isempty(ancestor(E.Target,'matlab.ui.container.Toolbar')) || isa(E.Target,'matlab.graphics.shape.internal.Button')
+                return
+            end
+
+            % Existing ROI manipulation wins over a newly armed draw.
+            if obj.Host.Mode.HoverRectangle
+                E.stop(); % clicks on existing ROI should not open host context menu
+                return
+            end
+
+            XY = obj.Host.cursorPosition;
+            if isempty(XY), return; end
+
+            % Replace the old ROI immediately so stale annotations do not flash
+            % while images.roi.Rectangle enters its interactive draw state.
+            if obj.ROIExists
+                obj.deleteROI('Emit',false);
+            end
+
+            obj.createROI();
+            obj.Host.setMode('DrawingRectangle',true);
+            obj.RectROI.beginDrawingFromPoint(XY);
+            E.stop();
+        end
+
+        function finishDrawing(obj)
+            if obj.Host.Mode.DrawingRectangle
+                obj.Host.setMode('DrawingRectangle',false);
+                obj.Host.setMode('DrawRectangle',false);
+            end
         end
 
     end
@@ -151,42 +243,12 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
     methods
 
         function onDown(obj, E)
-
-            % skip toolbar buttons
-            if ~isempty(ancestor(E.Target,'matlab.ui.container.Toolbar')) || isa(E.Target,'matlab.graphics.shape.internal.Button')
-                return
-            end
-
-            % if hovering on existing ROI -> stop propagation and return
-            if obj.Host.Mode.HoverRectangle
-                E.stop(); % clicks on existing ROI should not open host context menu
-                return
-            end
-
-            XY = obj.Host.cursorPosition;
-
-            if isempty(XY), return; end
-
-            if ~obj.ROIExists
-                obj.createROI();
-            end
-
-            % indicate that we are now drawing
-            obj.Host.setMode('DrawingRectangle',true);
-
-            % begin drawing rectangle from clicked point
-            obj.RectROI.beginDrawingFromPoint(XY);
+            obj.beginDrawingFromEvent(E);
         end
 
 
         function onUp(obj, ~)
-
-            % we were drawing a new rectangle before mouse up
-            if obj.Host.Mode.DrawingRectangle
-                % we are no longer drawing
-                obj.Host.setMode('DrawingRectangle',false);
-            end
-
+            obj.finishDrawing();
         end
 
     end
@@ -211,6 +273,14 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
                 E.stop(); % clicks on existing ROI should not open host context menu
                 return
             end
+
+            if obj.Host.Mode.DrawRectangle && E.MouseChord == "click"
+                obj.beginDrawingFromEvent(E);
+            end
+        end
+
+        function onPassiveUp(obj,~)
+            obj.finishDrawing();
         end
 
     end
@@ -332,32 +402,48 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
                 obj.ROIListeners(2) = addlistener(obj.RectROI, 'ROIMoved', @(~, ~) obj.onROIMoved(obj.RectROI));
                 % indicate that the ROI exists
                 obj.ROIExists = true;
+                obj.applyAppearance();
             end
         end
 
-        function deleteROI(obj)
+        function deleteROI(obj, opts)
+            arguments
+                obj
+                opts.Emit (1,1) logical = true
+            end
+
             % detach listeners and replace with empty array of event.listener
             if ~isempty(obj.ROIListeners)
                 delete(obj.ROIListeners(isvalid(obj.ROIListeners)));
             end
             obj.ROIListeners = event.listener.empty;
             % delete the ROI and replace with empty array of images.roi.Rectangle
-            delete(obj.RectROI)
+            if ~isempty(obj.RectROI)
+                delete(obj.RectROI(isvalid(obj.RectROI)));
+            end
             obj.RectROI = images.roi.Rectangle.empty();
             % delete the annotation lines and replace with empty array of matlab.graphics.primitive.Line
-            delete(obj.WidthMidline)
+            if ~isempty(obj.WidthMidline)
+                delete(obj.WidthMidline(isvalid(obj.WidthMidline)));
+            end
             obj.WidthMidline = matlab.graphics.primitive.Line.empty();
-            delete(obj.XRay)
+            if ~isempty(obj.XRay)
+                delete(obj.XRay(isvalid(obj.XRay)));
+            end
             obj.XRay = matlab.graphics.primitive.Line.empty();            
-            delete(obj.ArcPolyline)
+            if ~isempty(obj.ArcPolyline)
+                delete(obj.ArcPolyline(isvalid(obj.ArcPolyline)));
+            end
             obj.ArcPolyline = matlab.graphics.primitive.Line.empty();
             % delete the annotation labels and replace with empty array of matlab.graphics.primitive.Text
-            delete(obj.AngleLabel)
+            if ~isempty(obj.AngleLabel)
+                delete(obj.AngleLabel(isvalid(obj.AngleLabel)));
+            end
             obj.AngleLabel = matlab.graphics.primitive.Text.empty();
             % indicate the ROI does not exist
             obj.ROIExists = false;
             % fire ROIDeletedFcn callback if it exists
-            if ~isempty(obj.ROIDeletedFcn)
+            if opts.Emit && ~isempty(obj.ROIDeletedFcn)
                 obj.ROIDeletedFcn();
             end
         end
@@ -477,7 +563,7 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
     methods
 
         function theta = get.RotationAngleOut(obj)
-            switch obj.RotationAngleMode
+            switch obj.RotationAngleMode_
                 case 'full-circle'
                     theta = obj.RectROI.RotationAngle;
                 case 'half-circle'
@@ -494,15 +580,95 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
     %% Set/Get for public props with private backing
     methods
 
+        function val = get.ROIColor(obj)
+            val = obj.ROIColor_;
+        end
+
+        function set.ROIColor(obj,val)
+            obj.ROIColor_ = val;
+            obj.applyAppearance();
+        end
+
+        function val = get.ROILineWidth(obj)
+            val = obj.ROILineWidth_;
+        end
+
+        function set.ROILineWidth(obj,val)
+            obj.ROILineWidth_ = val;
+            obj.applyAppearance();
+        end
+
+        function val = get.ROIFaceAlpha(obj)
+            val = obj.ROIFaceAlpha_;
+        end
+
+        function set.ROIFaceAlpha(obj,val)
+            obj.ROIFaceAlpha_ = val;
+            obj.applyAppearance();
+        end
+
+        function val = get.ROIMarkerSize(obj)
+            val = obj.ROIMarkerSize_;
+        end
+
+        function set.ROIMarkerSize(obj,val)
+            obj.ROIMarkerSize_ = val;
+            obj.applyAppearance();
+        end
+
+        function val = get.AnnotationLineColor(obj)
+            val = obj.AnnotationLineColor_;
+        end
+
+        function set.AnnotationLineColor(obj,val)
+            obj.AnnotationLineColor_ = val;
+            obj.applyAppearance();
+        end
+
+        function val = get.AnnotationLineWidth(obj)
+            val = obj.AnnotationLineWidth_;
+        end
+
+        function set.AnnotationLineWidth(obj,val)
+            obj.AnnotationLineWidth_ = val;
+            obj.applyAppearance();
+        end
+
+        function val = get.RotationAngleVisible(obj)
+            val = obj.RotationAngleVisible_;
+        end
+
+        function set.RotationAngleVisible(obj,val)
+            obj.RotationAngleVisible_ = val;
+            obj.applyAppearance();
+        end
+
+        function val = get.RotationAngleMode(obj)
+            val = obj.RotationAngleMode_;
+        end
+
+        function set.RotationAngleMode(obj,val)
+            mustBeMember(val,{'full-circle','half-circle'});
+            obj.RotationAngleMode_ = val;
+            obj.updateAnnotations();
+        end
+
         function val = get.FontSize(obj)
             val = obj.FontSize_;
         end
 
         function set.FontSize(obj,val)
             obj.FontSize_ = val;
-            if ~isempty(obj.AngleLabel)
-                obj.AngleLabel.FontSize = val;
-            end
+            obj.applyAppearance();
+        end
+
+        function val = get.FontColor(obj)
+            val = obj.FontColor_;
+        end
+
+        function set.FontColor(obj,val)
+            obj.FontColor_ = val;
+            obj.applyAppearance();
         end
 
     end
