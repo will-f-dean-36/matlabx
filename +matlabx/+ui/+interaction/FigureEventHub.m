@@ -54,6 +54,8 @@ classdef FigureEventHub < handle
         LastKey (1,1) string = ""
         LastHotkey (1,1) string = ""
         LastKeyTimestamp datetime = NaT
+        ShortcutModifierStateMaxAge duration = seconds(1)
+        ShortcutModifierStateTimestamp datetime = NaT
 
         % Extra listeners keyed by event kind.
         ListenerRegistry struct = struct( ...
@@ -260,6 +262,7 @@ classdef FigureEventHub < handle
             obj.pruneInvalidListeners(kind);
 
             obj.updateKeyboardState(kind, evt);
+            obj.expireStaleShortcutModifierState(kind);
 
             tgt = hittest(obj.Fig);
             E = matlabx.ui.interaction.HubEvent(obj.Fig, tgt, kind, evt, ...
@@ -373,13 +376,51 @@ classdef FigureEventHub < handle
             switch string(kind)
                 case "KeyPress"
                     obj.ModifierState = matlabx.ui.interaction.FigureEventHub.canonicalModifiers_([modifiers, key]);
+                    if obj.isShortcutLikeKeyEvent_(key, modifiers)
+                        obj.ShortcutModifierStateTimestamp = datetime("now");
+                    elseif obj.isModifierKey_(key)
+                        obj.ShortcutModifierStateTimestamp = NaT;
+                    end
                 case "KeyRelease"
                     obj.ModifierState = modifiers;
+                    if isempty(obj.ModifierState)
+                        obj.ShortcutModifierStateTimestamp = NaT;
+                    end
             end
 
             obj.LastKey = key;
             obj.LastHotkey = matlabx.keyboard.normalize(key, character, obj.ModifierState);
             obj.LastKeyTimestamp = datetime("now");
+        end
+
+        function expireStaleShortcutModifierState(obj, kind)
+            if string(kind) ~= "Down" ...
+                    || isempty(obj.ModifierState) ...
+                    || isnat(obj.ShortcutModifierStateTimestamp)
+                return
+            end
+
+            if datetime("now") - obj.ShortcutModifierStateTimestamp > obj.ShortcutModifierStateMaxAge
+                obj.ModifierState = string.empty(1,0);
+                obj.ShortcutModifierStateTimestamp = NaT;
+            end
+        end
+
+        function tf = isShortcutLikeKeyEvent_(obj, key, modifiers)
+            key = lower(string(key));
+            modifiers = matlabx.ui.interaction.FigureEventHub.canonicalModifiers_(modifiers);
+
+            primaryShortcutModifiers = ["meta", "control"];
+
+            tf = ~isempty(modifiers) ...
+                && any(ismember(modifiers, primaryShortcutModifiers)) ...
+                && ~obj.isModifierKey_(key);
+        end
+
+        function tf = isModifierKey_(~, key)
+            key = lower(string(key));
+            modifierKeys = ["shift", "control", "alt", "meta", "command", "option", "ctrl"];
+            tf = any(key == modifierKeys);
         end
 
         function call(~, h, E)
