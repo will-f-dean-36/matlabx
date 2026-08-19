@@ -19,6 +19,30 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 %   -----
 %   If multiple ImageAxes instances share a figure, give each a unique Name
 %   so figure-event hit testing can distinguish their axes/toolbars.
+%
+%   Per-component display API
+%   -------------------------
+%   CLim and Colormap are current-component convenience properties:
+%
+%       ax.CLim = [low high]
+%       ax.Colormap = hot(256)
+%
+%   ComponentCLims, ComponentColors, and ComponentColormaps are full-state
+%   cell-array properties with one entry per component. They update stored
+%   display state without changing ComponentColorMode, which makes them useful
+%   for restoring saved display state, preloading colors/LUTs, or linking axes:
+%
+%       ax.ComponentCLims = {[0 100], [0 200]}
+%
+%   For targeted edits, prefer the helper methods. With no index they update
+%   the current component; with a scalar or vector index they apply the same
+%   value to those components. setComponentColor activates color mode, and
+%   setComponentColormap activates LUT mode:
+%
+%       ax.setComponentCLim([0 100])
+%       ax.setComponentCLim([0 100], [1 3])
+%       ax.setComponentColormap(gray(256), 2)
+%       ax.setComponentColor("cyan", [1 2])
 
 
     %% Tools
@@ -106,13 +130,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     properties (Access=private)
         % Current view coordinates and display modes.
-        ViewState_ struct = struct( ...
-            'C', 1, ...
-            'Z', 1, ...
-            'T', 1, ...
-            'ShowComposite', false, ...
-            'CLimMode', 'auto', ...
-            'ComponentColorMode', 'colors');
+        ViewState_ (1,1) matlabx.ui.axes.ImageAxesViewState = matlabx.ui.axes.ImageAxesViewState()
 
         % Canonical Image5D data model.
         ImageData_ (1,1) matlabx.image.Image5D = matlabx.image.Image5D.fromComponents(zeros(256,256,3))
@@ -121,12 +139,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         RenderSource_ (:,:,:) = matlabx.ui.axes.ImageAxes.placeholderImage
 
         % Per-component contrast/color/LUT display state.
-        ComponentDisplay_ (1,:) struct = struct( ...
-            'CLim', {}, ...
-            'ColorName', {}, ...
-            'Color', {}, ...
-            'Colormap', {}, ...
-            'DisplayMap', {})
+        ComponentDisplay_ (1,:) matlabx.ui.axes.ImageAxesComponentDisplayState = matlabx.ui.axes.ImageAxesComponentDisplayState.empty()
     end
 
     %% UI/Graphics
@@ -510,7 +523,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         ViewBoxFaceAlpha = 0.25
         ViewBoxLineWidth = 1
 
-        ViewBoxTop = 0.05
+        ViewBoxTop = 0.01
         ViewBoxLeft = 0.01
     end
 
@@ -1897,14 +1910,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
     
         function set.CLim(obj, val)
-            idx = obj.ViewState_.C;
-
-            changed = obj.setComponentCLims_({double(val)}, idx);
-            obj.ViewState_.CLimMode = 'manual';
-
-            if changed
-                obj.updateDisplayMapping();
-            end
+            obj.setComponentCLim(double(val), obj.ViewState_.C);
         end
 
         % --- CLimMode ---
@@ -2035,7 +2041,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function set.Colormap(obj, val)
             idx = obj.ViewState_.C;
-            obj.setColormap(double(val), idx);
+            obj.setComponentColormap(double(val), idx);
         end
 
 
@@ -2109,13 +2115,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
-
-
-
-
-    
-        % --- setCLim ---
-        function setCLim(obj, clim, idx)
+        % --- setComponentCLim ---
+        function setComponentCLim(obj, clim, idx)
+        %SETCOMPONENTCLIM Set one CLim on the current component or selected components.
             arguments
                 obj (1,1) matlabx.ui.axes.ImageAxes
                 clim (1,2) double
@@ -2127,18 +2129,15 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
     
             idx = obj.validateComponentIndices(idx);
-            clims = repmat({double(clim)}, 1, numel(idx));
-            changed = obj.setComponentCLims_(clims, idx);
-            obj.ViewState_.CLimMode = 'manual';
-
-            if changed
-                obj.updateDisplayMapping();
-            end
+            clims = obj.ComponentCLims;
+            clims(idx) = repmat({double(clim)}, 1, numel(idx));
+            obj.ComponentCLims = clims;
         end
 
 
-        % --- setColormap ---
-        function setColormap(obj, cmap, idx)
+        % --- setComponentColormap ---
+        function setComponentColormap(obj, cmap, idx)
+        %SETCOMPONENTCOLORMAP Set one colormap on the current component or selected components.
             arguments
                 obj (1,1) matlabx.ui.axes.ImageAxes
                 cmap (256,3) double
@@ -2151,21 +2150,15 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             idx = obj.validateComponentIndices(idx);
 
-            modeChanged = ~strcmp(obj.ViewState_.ComponentColorMode, 'luts');
-            obj.ViewState_.ComponentColorMode = 'luts';
-
-            cmaps = repmat({double(cmap)}, 1, numel(idx));
-            changed = obj.setComponentColormaps_(cmaps, idx);
-
-            if changed || modeChanged
-                obj.updateAllDisplayMaps();
-                obj.updateDisplayMapping();
-            end
-
+            obj.ComponentColorMode = 'luts';
+            cmaps = obj.ComponentColormaps;
+            cmaps(idx) = repmat({double(cmap)}, 1, numel(idx));
+            obj.ComponentColormaps = cmaps;
         end
 
         % --- setComponentColor ---
         function setComponentColor(obj, colorName, idx)
+        %SETCOMPONENTCOLOR Set one named color on the current component or selected components.
             arguments
                 obj (1,1) matlabx.ui.axes.ImageAxes
                 colorName
@@ -2177,13 +2170,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
 
             idx = obj.validateComponentIndices(idx);
-            colors = repmat({colorName}, 1, numel(idx));
-            changed = obj.setComponentColors_(colors, idx);
-
-            if changed
-                obj.updateAllDisplayMaps();
-                obj.updateDisplayMapping();
-            end
+            obj.ComponentColorMode = 'colors';
+            colors = obj.ComponentColors;
+            colors(idx) = repmat({colorName}, 1, numel(idx));
+            obj.ComponentColors = colors;
         end
 
 
@@ -2212,12 +2202,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         function displayState = initializeComponentDisplayState(obj, n)
             old = obj.ComponentDisplay_;
 
-            displayState = repmat(struct( ...
-                'CLim', [], ...
-                'ColorName', "", ...
-                'Color', [], ...
-                'Colormap', [], ...
-                'DisplayMap', []), 1, n);
+            displayState = repmat(matlabx.ui.axes.ImageAxesComponentDisplayState(), 1, n);
 
             defaultColors = matlabx.ui.axes.ImageAxes.getColorNames();
     
@@ -3291,11 +3276,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function onContrastToolValueChanged(obj,o,e)
-            obj.setCLim(o.Value, e.ID);
+            obj.setComponentCLim(o.Value, e.ID);
         end
 
         function onContrastToolValueChanging(obj,o,e)
-            obj.setCLim(o.Value, e.ID);
+            obj.setComponentCLim(o.Value, e.ID);
         end
 
         % --- MetadataWindow ---
