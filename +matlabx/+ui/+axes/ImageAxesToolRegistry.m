@@ -1,9 +1,9 @@
 classdef ImageAxesToolRegistry
 %IMAGEAXESTOOLREGISTRY Tool loading, installation, toolbar, and routing helpers.
 %
-%   ImageAxes keeps the public API for now: loadTool(), installTool(),
-%   ToolBox, ToolBelt, enableTool(), and similar methods all delegate here.
-%   This collaborator owns the mechanics of managing tool lifecycle and lookup.
+%   ImageAxes exposes a compact Tools property. Assigning tool names installs
+%   those tools; reading Tools returns the installed tool-object struct. This
+%   collaborator owns the mechanics behind that user-facing API.
 %
 %   Terminology:
 %       Loaded tool
@@ -12,17 +12,14 @@ classdef ImageAxesToolRegistry
 %       Installed tool
 %           A loaded tool is active in the host's tool registry, has a toolbar
 %           button if appropriate, can contribute hotkeys, and can receive routed
-%           events. Installed tools live in host.ToolRegistry and host.Tools.
-%       ToolBox
-%           Public list of loaded tool names.
-%       ToolBelt
-%           Public list of installed tool names.
+%           events. Installed tools live in host.ToolRegistry and host.Tools_.
 %
-%   This class is intentionally mechanical. It preserves current ImageAxes API
-%   behavior while moving the bookkeeping and toolbar wiring out of the host.
+%   This class is intentionally mechanical. It keeps lifecycle bookkeeping,
+%   toolbar wiring, and event-routing lookup out of the host class.
 
     methods (Static)
         function initialize(host)
+        %INITIALIZE Create empty loaded and installed tool maps on the host.
             % Use containers.Map to preserve existing lookup behavior by tool name.
             host.ToolList = containers.Map('KeyType', 'char', 'ValueType', 'any');
             host.ToolRegistry = containers.Map('KeyType', 'char', 'ValueType', 'any');
@@ -40,7 +37,7 @@ classdef ImageAxesToolRegistry
             % Installation creates the user-facing affordances and registries:
             % toolbar button, Tools struct entry, installed-tool map, and hotkeys.
             matlabx.ui.axes.ImageAxesToolRegistry.addToolbarButton(host, tool);
-            host.Tools.(tool.Name) = tool;
+            host.Tools_.(char(tool.Name)) = tool;
             host.ToolRegistry(char(tool.Name)) = tool;
             host.registerToolHotkeys(tool);
         end
@@ -55,17 +52,18 @@ classdef ImageAxesToolRegistry
             % Remove contributed host state in the reverse order of registration.
             host.HotkeyRegistry.removeOwner(tool);
             matlabx.ui.axes.ImageAxesToolRegistry.removeToolbarButton(host, tool);
-            host.Tools = rmfield(host.Tools, tool.Name);
+            host.Tools_ = rmfield(host.Tools_, char(tool.Name));
             host.ToolRegistry.remove(char(tool.Name));
         end
 
         function loadAll(host)
-            % Load every concrete tool class in matlabx.ui.axes.tools.
+        %LOADALL Load every concrete tool class in matlabx.ui.axes.tools.
             toolNames = host.getToolNames();
             matlabx.ui.axes.ImageAxesToolRegistry.loadMany(host, toolNames);
         end
 
         function unloadAll(host)
+        %UNLOADALL Unload every currently loaded tool.
             % Copy names before unloading because unload mutates ToolList.
             if isempty(host.ToolList)
                 return
@@ -76,7 +74,9 @@ classdef ImageAxesToolRegistry
         end
 
         function loadMany(host, toolNames)
-            % Bulk wrapper used by ToolBox setup and constructor initialization.
+        %LOADMANY Load a list of tool names.
+            % Bulk wrapper used by internal setup paths that need tool objects
+            % before installation.
             if isempty(toolNames)
                 return
             end
@@ -87,7 +87,8 @@ classdef ImageAxesToolRegistry
         end
 
         function unloadMany(host, toolNames)
-            % Bulk wrapper used by ToolBox teardown and ImageAxes deletion.
+        %UNLOADMANY Unload a list of tool names.
+            % Bulk wrapper used by teardown and deletion paths.
             if isempty(toolNames)
                 return
             end
@@ -127,7 +128,8 @@ classdef ImageAxesToolRegistry
         end
 
         function installMany(host, toolNames)
-            % Bulk wrapper used by ToolBelt setup.
+        %INSTALLMANY Install a list of loaded tool names.
+            % Bulk wrapper used by installed-tool setup.
             if isempty(toolNames)
                 return
             end
@@ -182,6 +184,7 @@ classdef ImageAxesToolRegistry
         end
 
         function enable(host, name)
+        %ENABLE Enable an installed state tool by name.
             % State tools own their Enabled flag and lifecycle hooks.
             tool = matlabx.ui.axes.ImageAxesToolRegistry.getInstalled(host, name);
             if isempty(tool)
@@ -192,6 +195,7 @@ classdef ImageAxesToolRegistry
         end
 
         function disable(host, name)
+        %DISABLE Disable an installed state tool by name.
             % Disable is safe to call for missing/uninstalled tools.
             tool = matlabx.ui.axes.ImageAxesToolRegistry.getInstalled(host, name);
             if isempty(tool)
@@ -202,12 +206,14 @@ classdef ImageAxesToolRegistry
         end
 
         function tf = enabled(host, name)
+        %ENABLED Return true when an installed tool is enabled.
             % Public query helper used by apps and smoke tests.
             tool = matlabx.ui.axes.ImageAxesToolRegistry.getInstalled(host, name);
             tf = ~isempty(tool) && isvalid(tool) && tool.Enabled;
         end
 
         function toggle(host, toolState, name)
+        %TOGGLE Enable or disable a state tool from a toolbar value.
             % Toolbar state buttons call this with their Value.
             switch toolState
                 case true
@@ -218,11 +224,13 @@ classdef ImageAxesToolRegistry
         end
 
         function push(host, name)
+        %PUSH Execute a push-style installed tool.
             % Toolbar push buttons call this; currently just a semantic alias to run.
             matlabx.ui.axes.ImageAxesToolRegistry.run(host, name);
         end
 
         function run(host, name)
+        %RUN Invoke an installed tool's push action.
             % Push-style tools execute onPush() through AxesTool.push().
             tool = matlabx.ui.axes.ImageAxesToolRegistry.getInstalled(host, name);
             if isempty(tool)
@@ -233,6 +241,7 @@ classdef ImageAxesToolRegistry
         end
 
         function disableActiveExclusive(host)
+        %DISABLEACTIVEEXCLUSIVE Disable the host's active exclusive tool.
             % Exclusive tools are coordinated by the host, but the actual disable
             % operation is still routed through the registry for consistency.
             existingExclusive = host.ActiveExclusiveTool;
@@ -245,6 +254,7 @@ classdef ImageAxesToolRegistry
         end
 
         function tool = getInstalled(host, name)
+        %GETINSTALLED Return an installed tool by name, or empty if missing.
             % Return [] instead of erroring to match existing ImageAxes behavior.
             tool = [];
 
@@ -254,6 +264,7 @@ classdef ImageAxesToolRegistry
         end
 
         function tool = getLoaded(host, name)
+        %GETLOADED Return a loaded tool by name, or empty if missing.
             % Return [] instead of erroring to match existing ImageAxes behavior.
             tool = [];
 
@@ -311,12 +322,14 @@ classdef ImageAxesToolRegistry
         end
 
         function toolsCell = prioritySort(host)
+        %PRIORITYSORT Return installed tools sorted by descending priority.
             % Sorted installed tools are used for pointer and label contributions.
             toolsCell = matlabx.ui.axes.ImageAxesToolRegistry.prioritySortCell( ...
                 matlabx.ui.axes.ImageAxesToolRegistry.installedToolValues(host));
         end
 
         function toolsCell = prioritySortCell(toolsCell)
+        %PRIORITYSORTCELL Sort a cell array of tools by descending priority.
             % Stable enough for current use: equal priorities preserve sort's normal
             % behavior for the input cell array.
             if isempty(toolsCell)
@@ -328,33 +341,17 @@ classdef ImageAxesToolRegistry
             toolsCell = toolsCell(sortIdx);
         end
 
-        function names = getToolBox(host)
-            % ToolBox is the public view of loaded tool names.
-            names = host.ToolList.keys;
-        end
-
-        function setToolBox(host, newToolBox)
-            % ToolBox changes construct/delete tool objects. Installing is handled by
-            % ToolBelt, so removing a loaded installed tool first uninstalls it.
-            oldToolBox = matlabx.ui.axes.ImageAxesToolRegistry.getToolBox(host);
-            toolsToAdd = setdiff(newToolBox, oldToolBox, 'stable');
-            toolsToRemove = setdiff(oldToolBox, newToolBox, 'stable');
-
-            matlabx.ui.axes.ImageAxesToolRegistry.loadMany(host, toolsToAdd);
-            matlabx.ui.axes.ImageAxesToolRegistry.unloadMany(host, toolsToRemove);
-        end
-
-        function names = getToolBelt(host)
-            % ToolBelt is the public view of installed tool names.
+        function names = getInstalledNames(host)
+        %GETINSTALLEDNAMES Return installed tool names.
             names = host.ToolRegistry.keys;
         end
 
-        function setToolBelt(host, newToolBelt)
-            % ToolBelt changes installation state. New tools are loaded on demand but
-            % removed tools are only uninstalled, not unloaded.
-            oldToolBelt = matlabx.ui.axes.ImageAxesToolRegistry.getToolBelt(host);
-            toolsToAdd = setdiff(newToolBelt, oldToolBelt, 'stable');
-            toolsToRemove = setdiff(oldToolBelt, newToolBelt, 'stable');
+        function setInstalledNames(host, newToolNames)
+        %SETINSTALLEDNAMES Replace the host's installed-tool set.
+            newToolNames = matlabx.ui.axes.ImageAxesToolRegistry.normalizeToolNames(newToolNames);
+            oldToolNames = matlabx.ui.axes.ImageAxesToolRegistry.getInstalledNames(host);
+            toolsToAdd = setdiff(newToolNames, oldToolNames, 'stable');
+            toolsToRemove = setdiff(oldToolNames, newToolNames, 'stable');
 
             for i = 1:numel(toolsToAdd)
                 % Preserve existing behavior: installing a missing tool implicitly
@@ -370,7 +367,8 @@ classdef ImageAxesToolRegistry
         end
 
         function uninstallMany(host, toolNames)
-            % Bulk wrapper used by ToolBelt removal.
+        %UNINSTALLMANY Uninstall a list of tool names.
+            % Bulk wrapper used by installed-tool removal.
             if isempty(toolNames)
                 return
             end
@@ -421,12 +419,25 @@ classdef ImageAxesToolRegistry
 
     methods (Static, Access=private)
         function toolsCell = installedToolValues(host)
+        %INSTALLEDTOOLVALUES Return installed tools as a cell array.
             % Normalize empty map state to an empty cell array for callers.
             if isempty(host.ToolRegistry)
                 toolsCell = {};
             else
                 toolsCell = host.ToolRegistry.values;
             end
+        end
+
+        function names = normalizeToolNames(names)
+        %NORMALIZETOOLNAMES Convert user tool declarations to a cellstr row.
+            if isempty(names)
+                names = {};
+                return
+            end
+
+            names = cellstr(string(names));
+            names = reshape(names, 1, []);
+            names(cellfun(@isempty, names)) = [];
         end
     end
 

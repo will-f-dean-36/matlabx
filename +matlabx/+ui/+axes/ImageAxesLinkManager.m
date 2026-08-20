@@ -177,6 +177,7 @@ classdef ImageAxesLinkManager
 
     methods (Static, Access=private)
         function clearHost(host)
+        %CLEARHOST Remove link metadata and listeners from one axes.
             % Delete valid listeners before clearing metadata to avoid orphaned
             % callbacks retaining host references.
             if isempty(host) || ~isvalid(host)
@@ -194,6 +195,7 @@ classdef ImageAxesLinkManager
         end
 
         function [listeners, wasEnabled] = disableValidLinkListeners(host)
+        %DISABLEVALIDLINKLISTENERS Temporarily disable valid link listeners.
             % Return prior Enabled states so nested/initial sync can restore the
             % exact listener state instead of blindly enabling everything.
             listeners = event.listener.empty;
@@ -213,6 +215,7 @@ classdef ImageAxesLinkManager
         end
 
         function restoreLinkListenerState(host, wasEnabled)
+        %RESTORELINKLISTENERSTATE Restore previously captured listener states.
             % Restore only the listeners that still exist. Handles may disappear if
             % the axes or link group is deleted during a callback.
             if isempty(host) || ~isvalid(host) || isempty(host.LinkListener)

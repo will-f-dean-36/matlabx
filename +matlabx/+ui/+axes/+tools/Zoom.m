@@ -41,7 +41,6 @@ classdef Zoom < matlabx.ui.axes.AxesTool
         %ONENABLED  Enable Zoom when toolbar button is enabled.
             obj.ScrollEventCount = 0;
             obj.LastScrollDirection = 0;
-            obj.Host.setMode('Zoom', true);
             obj.Host.enableZoom();
         end
 
@@ -50,19 +49,8 @@ classdef Zoom < matlabx.ui.axes.AxesTool
             obj.ScrollEventCount = 0;
             obj.LastScrollDirection = 0;
             if isvalid(obj.Host)
-                obj.Host.setMode('Zoom', false);
                 obj.Host.disableZoom();
             end
-        end
-
-        function onInstall(obj)
-        %ONINSTALL  Register Zoom mode with the host.
-            obj.Host.addMode('Zoom');
-        end
-
-        function onUninstall(obj)
-        %ONUNINSTALL  Remove Zoom mode from the host.
-            obj.Host.removeMode('Zoom');
         end
 
     end
@@ -144,7 +132,7 @@ classdef Zoom < matlabx.ui.axes.AxesTool
     methods
 
         function pointer = getPreferredPointer(obj)
-            if obj.Host.Mode.Zoom
+            if obj.Enabled
                 pointer = 'crosshair';
             else
                 pointer = '';
@@ -153,7 +141,7 @@ classdef Zoom < matlabx.ui.axes.AxesTool
 
         function str = getLabelString(obj)
             % Return char vector with info on zoom level.
-            switch obj.Host.Mode.Zoom
+            switch obj.Enabled
                 case true
                     str = 'Zoom: on';
                 case false
@@ -162,14 +150,4 @@ classdef Zoom < matlabx.ui.axes.AxesTool
         end
 
     end
-    %% Teardown
-    methods (Access = protected)
-
-        % called at the beginning of superclass delete()
-        function teardown(obj)
-            % extra required cleanup on teardown
-        end
-
-    end
-
 end

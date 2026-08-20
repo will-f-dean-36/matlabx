@@ -116,21 +116,21 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
 
         % Toolbar push arms drawing for the next background click.
         function onPush(obj)
-            obj.Host.setMode('DrawRectangle', true);
+            obj.setMode('PrimedToDraw', true);
         end
 
         % Called AFTER installed from Host, use for any extra required startup actions
         function onInstall(obj)
-            obj.Host.addMode('DrawRectangle'); % next background click starts drawing
-            obj.Host.addMode('DrawingRectangle'); % rectangle is currently being drawn
-            obj.Host.addMode('HoverRectangle'); % cursor is hovering on obj.RectROI
+            obj.addMode('PrimedToDraw'); % next background click starts drawing
+            obj.addMode('DrawingRectangle'); % rectangle is currently being drawn
+            obj.addMode('HoverRectangle'); % cursor is hovering on obj.RectROI
         end
 
         % Called AFTER uninstalled from Host, use for any extra required cleanup actions
         function onUninstall(obj)
-            obj.Host.removeMode('DrawRectangle');
-            obj.Host.removeMode('DrawingRectangle');
-            obj.Host.removeMode('HoverRectangle');
+            obj.removeMode('PrimedToDraw');
+            obj.removeMode('DrawingRectangle');
+            obj.removeMode('HoverRectangle');
         end
 
     end
@@ -210,7 +210,7 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
             end
 
             % Existing ROI manipulation wins over a newly armed draw.
-            if obj.Host.Mode.HoverRectangle
+            if obj.Mode.HoverRectangle
                 E.stop(); % clicks on existing ROI should not open host context menu
                 return
             end
@@ -225,15 +225,15 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
             end
 
             obj.createROI();
-            obj.Host.setMode('DrawingRectangle',true);
+            obj.setMode('DrawingRectangle',true);
             obj.RectROI.beginDrawingFromPoint(XY);
             E.stop();
         end
 
         function finishDrawing(obj)
-            if obj.Host.Mode.DrawingRectangle
-                obj.Host.setMode('DrawingRectangle',false);
-                obj.Host.setMode('DrawRectangle',false);
+            if obj.Mode.DrawingRectangle
+                obj.setMode('DrawingRectangle',false);
+                obj.setMode('PrimedToDraw',false);
             end
         end
 
@@ -260,21 +260,21 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
 
             % cursor target (parent) is our obj.RectROI
             if isa(E.Target.Parent,'images.roi.Rectangle') && strcmp(E.Target.Parent.Tag,'RectROI')
-                obj.Host.setMode('HoverRectangle',true);
+                obj.setMode('HoverRectangle',true);
             else % cursor target is anything else
-                obj.Host.setMode('HoverRectangle',false);
+                obj.setMode('HoverRectangle',false);
             end
 
         end
 
         function onPassiveDown(obj,E)
             % if hovering on existing ROI -> stop propagation and return
-            if obj.Host.Mode.HoverRectangle
+            if obj.Mode.HoverRectangle
                 E.stop(); % clicks on existing ROI should not open host context menu
                 return
             end
 
-            if obj.Host.Mode.DrawRectangle && E.MouseChord == "click"
+            if obj.Mode.PrimedToDraw && E.MouseChord == "click"
                 obj.beginDrawingFromEvent(E);
             end
         end
@@ -308,9 +308,9 @@ classdef DrawRectangle < matlabx.ui.axes.AxesTool
 
         function pointer = getPreferredPointer(obj)
             % Host calls to get desired pointer
-            if obj.Host.Mode.HoverRectangle
+            if obj.Mode.HoverRectangle
                 pointer = 'default';
-            elseif obj.Host.Mode.DrawRectangle
+            elseif obj.Mode.PrimedToDraw
                 pointer = 'crosshair';
             else
                 pointer = '';

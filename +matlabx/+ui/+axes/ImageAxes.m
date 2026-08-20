@@ -43,23 +43,26 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 %       ax.setComponentCLim([0 100], [1 3])
 %       ax.setComponentColormap(gray(256), 2)
 %       ax.setComponentColor("cyan", [1 2])
+%
+%   Tools API
+%   ---------
+%   Tools is intentionally asymmetric. Assign a string array or cellstr to
+%   choose installed tools. Read Tools to access the installed tool objects:
+%
+%       ax.Tools = ["Zoom","Pick","DrawRectangle"]
+%       ax.Tools.Pick.BoxSize = 40
 
 
     %% Tools
 
-    properties (SetAccess={?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxesToolRegistry})
-        % struct() of installed tools, fieldnames match tool Name
-        Tools struct = struct()
-    end
-
     properties (Dependent)
-        % the set of tools to INSTALL (tools which are listed in the toolbar)
-        ToolBelt
-        % the set of tools to LOAD (tools which are available for install)
-        ToolBox
+        % Assign names to install tools; read back installed tool objects.
+        Tools
     end
 
     properties (Access={?matlabx.ui.axes.ImageAxesToolRegistry})
+        % struct() of installed tools, fieldnames match tool Name
+        Tools_ struct = struct()
         % registry of loaded tools
         ToolList        % containers.Map name->tool
         % registry of installed tools
@@ -227,11 +230,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         YLim = []
     end
 
-    %% Modes for routing
-    properties (SetAccess=private)
-        Mode struct = struct()
-    end
-
     %% Hub registration
     properties (Access=private)
         Hub matlabx.ui.interaction.FigureEventHub
@@ -332,11 +330,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % initialize registries for loaded and installed tools
             matlabx.ui.axes.ImageAxesToolRegistry.initialize(obj);
             obj.HotkeyRegistry = matlabx.ui.axes.ImageAxesHotkeyRegistry();
-
-            % load all tools in obj.ToolBox
-            obj.loadTools(obj.ToolBox);
-            % install all tools in obj.ToolBelt
-            obj.installTools(obj.ToolBelt);
 
             % Hub registration (one hub per figure; this instance registers itself)
             obj.Hub = matlabx.ui.interaction.FigureEventHub.ensure(obj.ParentFig);
@@ -2276,39 +2269,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     %% Tool-accessible helpers
     methods (Access=?matlabx.ui.axes.AxesTool, Hidden=true)
         
-        function setMode(obj, modeName, modeState)
-            % if mode does not exist
-            if ~isfield(obj.Mode,modeName)
-                % warn and return
-                warning('Could not set mode state. "%s" mode does not exist.',modeName)
-                return
-            end
-            % set the mode state
-            obj.Mode.(modeName) = logical(modeState);
-        end
-
-        function addMode(obj, modeName)
-            % if mode already exists
-            if isfield(obj.Mode,modeName)
-                % warn and return
-                warning('Could not add mode. "%s" mode already exists',modeName)
-                return
-            end
-            % add the mode (false by default)
-            obj.Mode.(modeName) = false;
-        end
-
-        function removeMode(obj, modeName)
-            % if mode does not exist
-            if ~isfield(obj.Mode,modeName)
-                % warn and return
-                warning('Could not remove mode. "%s" mode does not exist.',modeName)
-                return
-            end
-            % remove the mode
-            obj.Mode = rmfield(obj.Mode,modeName);
-        end
-
         function updateFromTool(obj)
             obj.updateBottomLabelText();
             obj.updatePointer();
@@ -2801,27 +2761,25 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
-    %% User-facing tool management (Set/Get to change loaded/installed tools)
+    %% User-facing tool management
     methods
 
-        % get loaded tool names
-        function ToolBox = get.ToolBox(obj)
-            ToolBox = matlabx.ui.axes.ImageAxesToolRegistry.getToolBox(obj);
+        function tools = get.Tools(obj)
+        %GET.TOOLS Return installed tool objects as a struct.
+            tools = obj.Tools_;
         end
 
-        % set loaded tools
-        function set.ToolBox(obj,newToolBox)
-            matlabx.ui.axes.ImageAxesToolRegistry.setToolBox(obj, newToolBox);
-        end
-
-        % get installed tool names
-        function ToolBelt = get.ToolBelt(obj)
-            ToolBelt = matlabx.ui.axes.ImageAxesToolRegistry.getToolBelt(obj);
-        end
-
-        % set installed tools (load first if necessary)
-        function set.ToolBelt(obj,newToolBelt)
-            matlabx.ui.axes.ImageAxesToolRegistry.setToolBelt(obj, newToolBelt);
+        function set.Tools(obj, toolNames)
+        %SET.TOOLS Install the named tools and remove tools not listed.
+        %
+        %   Assignment configures which tools are installed:
+        %
+        %       ax.Tools = ["Zoom","Pick"]
+        %
+        %   Reading the property returns the installed tool handles:
+        %
+        %       ax.Tools.Pick.BoxSize = 25
+            matlabx.ui.axes.ImageAxesToolRegistry.setInstalledNames(obj, toolNames);
         end
 
     end
@@ -3054,7 +3012,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             switch name
                 case 'default'
                     ax = matlabx.ui.axes.ImageAxes(fig,...
-                        "ToolBelt",{'Zoom','Colorbar'},...
+                        "Tools",{'Zoom','Colorbar'},...
                         "Units","normalized",...
                         "Position",[0 0 1 1],...
                         "CData",imread("rice.png"),...
@@ -3063,7 +3021,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 case 'empty'
                     ax = matlabx.ui.axes.ImageAxes(fig,...
                         "CData",[],...
-                        "ToolBelt",{'Zoom','Colorbar'},...
+                        "Tools",{'Zoom','Colorbar'},...
                         "Units","normalized",...
                         "Position",[0 0 1 1],...
                         "CLim",[0 1]);
@@ -3073,7 +3031,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                     cdata = {I1,I2};
                     ax = matlabx.ui.axes.ImageAxes(fig,...
                         "CData",cdata,...
-                        "ToolBelt",{'Zoom','Colorbar'},...
+                        "Tools",{'Zoom','Colorbar'},...
                         "Units","normalized",...
                         "Position",[0 0 1 1]);
             end

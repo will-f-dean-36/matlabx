@@ -89,6 +89,7 @@ classdef AxesTool < handle
     properties (SetAccess=protected)
         Enabled (1,1) logical = false       % true/false (set by toggling toolbar buttons)
         Installed (1,1) logical = false     % true/false (whether the tool is installed in the Host)
+        Mode struct = struct()              % tool-owned logical states for subclasses
     end
 
     % special properties for development/debugging purposes
@@ -290,7 +291,49 @@ classdef AxesTool < handle
 
     methods(Access=protected)
 
+        function addMode(obj, modeName)
+        %ADDMODE Add a false-valued logical mode owned by this tool.
+            modeName = char(modeName);
+
+            if isfield(obj.Mode, modeName)
+                warning('Could not add mode. "%s" mode already exists.', modeName)
+                return
+            end
+
+            obj.Mode.(modeName) = false;
+        end
+
+        function setMode(obj, modeName, modeState)
+        %SETMODE Set one tool-owned logical mode.
+            modeName = char(modeName);
+
+            if ~isfield(obj.Mode, modeName)
+                warning('Could not set mode state. "%s" mode does not exist.', modeName)
+                return
+            end
+
+            obj.Mode.(modeName) = logical(modeState);
+        end
+
+        function removeMode(obj, modeName)
+        %REMOVEMODE Remove a tool-owned mode.
+            modeName = char(modeName);
+
+            if ~isfield(obj.Mode, modeName)
+                warning('Could not remove mode. "%s" mode does not exist.', modeName)
+                return
+            end
+
+            obj.Mode = rmfield(obj.Mode, modeName);
+        end
+
+        function tf = isMode(obj, modeName)
+        %ISMODE Return true when a named tool-owned mode exists.
+            tf = isfield(obj.Mode, char(modeName));
+        end
+
         function configureHostEventListeners(obj)
+        %CONFIGUREHOSTEVENTLISTENERS Attach optional host notification listeners.
             obj.L = event.listener.empty;
 
             if obj.ListenToRenderSourceChanged
@@ -302,6 +345,7 @@ classdef AxesTool < handle
         end
 
         function printStatus(obj,status)
+        %PRINTSTATUS Emit a debug log message for this tool.
             matlabx.Log.DEBUG( ...
                 strip(string(status)), ...
                 "Source", class(obj), ...
@@ -343,7 +387,9 @@ classdef AxesTool < handle
     methods (Access = protected)
 
         % teardown hook for subclasses, implement to perform any needed cleanup before tool deletion
-        function teardown(~),     end
+        function teardown(~)
+        %TEARDOWN Hook for subclasses that need deletion cleanup.
+        end
 
     end
 

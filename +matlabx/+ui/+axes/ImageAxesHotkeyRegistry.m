@@ -154,7 +154,7 @@ classdef ImageAxesHotkeyRegistry < handle
 
     methods (Access=private)
         function removeInvalidOwners(obj)
-            % Remove bindings whose owner is a deleted handle object.
+        %REMOVEINVALIDOWNERS Remove bindings whose owner is a deleted handle.
             if isempty(obj.Keys)
                 return
             end
@@ -168,6 +168,7 @@ classdef ImageAxesHotkeyRegistry < handle
         end
 
         function removeByMask(obj, remove)
+        %REMOVEBYMASK Delete bindings selected by a logical mask.
             % Apply the same logical deletion mask to every parallel storage array.
             if ~any(remove)
                 return
@@ -184,6 +185,7 @@ classdef ImageAxesHotkeyRegistry < handle
 
     methods (Static, Access=private)
         function key = canonicalizeHotkeyString(key)
+        %CANONICALIZEHOTKEYSTRING Normalize a declared hotkey string.
             % Canonicalize a declared hotkey string, not raw key event fields.
             key = lower(string(key));
 
@@ -194,6 +196,7 @@ classdef ImageAxesHotkeyRegistry < handle
         end
 
         function tf = ownerIsValid(owner)
+        %OWNERISVALID Return false for deleted handle owners.
             % Empty/non-handle owners are treated as durable registry entries.
             tf = true;
 
@@ -211,6 +214,7 @@ classdef ImageAxesHotkeyRegistry < handle
         end
 
         function tf = ownersMatch(a, b)
+        %OWNERSMATCH Return true when two registry owners are equal.
             % Handle equality can throw for some deleted or unusual objects.
             try
                 tf = isequal(a, b);
