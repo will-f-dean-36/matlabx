@@ -358,7 +358,7 @@ classdef AxesTool < handle
 
     %% teardown
 
-    methods (Access = {?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxes, ?matlabx.ui.axes.ImageAxesToolRegistry})
+    methods (Access = {?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxes, ?matlabx.ui.axes.ImageAxesToolManager})
 
         % subclass delete() will be called before this runs
         function delete(obj)

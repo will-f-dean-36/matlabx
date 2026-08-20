@@ -170,19 +170,31 @@ classdef ImageAxesResizeLayout
             S.SizingGridAbsolutePositionPx = getpixelposition(sizingGrid,true);
             S.PanelOuterPositionPx = getpixelposition(panel);
             S.PanelAbsoluteOuterPositionPx = getpixelposition(panel,true);
-            S.PanelInnerPositionPx = panel.InnerPosition;
+            S.PanelInnerPosition = panel.InnerPosition;
+            S.PanelInnerPositionPx = ...
+                matlabx.ui.axes.ImageAxesResizeLayout.positionFromReferencePx( ...
+                panel.InnerPosition, panel.Units, S.PanelOuterPositionPx);
             S.MainAxesOuterPositionPx = getpixelposition(mainAxes);
             S.MainAxesAbsoluteOuterPositionPx = getpixelposition(mainAxes,true);
-            S.MainAxesInnerPositionPx = mainAxes.InnerPosition;
+            S.MainAxesInnerPosition = mainAxes.InnerPosition;
+            S.MainAxesInnerPositionPx = ...
+                matlabx.ui.axes.ImageAxesResizeLayout.positionFromReferencePx( ...
+                mainAxes.InnerPosition, mainAxes.Units, S.PanelInnerPositionPx);
             S.StaticAxesOuterPositionPx = getpixelposition(staticAxes);
             S.StaticAxesAbsoluteOuterPositionPx = getpixelposition(staticAxes,true);
-            S.StaticAxesInnerPositionPx = staticAxes.InnerPosition;
+            S.StaticAxesInnerPosition = staticAxes.InnerPosition;
+            S.StaticAxesInnerPositionPx = ...
+                matlabx.ui.axes.ImageAxesResizeLayout.positionFromReferencePx( ...
+                staticAxes.InnerPosition, staticAxes.Units, S.PanelInnerPositionPx);
 
             S.SizingGridColumnWidth = sizingGrid.ColumnWidth;
             S.SizingGridRowHeight = sizingGrid.RowHeight;
+            S.PanelUnits = string(panel.Units);
             S.PanelFontSize = panel.FontSize;
             S.PanelFontUnits = panel.FontUnits;
             S.PanelTitle = string(panel.Title);
+            S.MainAxesUnits = string(mainAxes.Units);
+            S.StaticAxesUnits = string(staticAxes.Units);
 
             % Delta fields compare realized UI sizes against the requested layout.
             % Nonzero values here point to MATLAB container/axes realization rather
@@ -196,10 +208,46 @@ classdef ImageAxesResizeLayout
                 S.PanelInnerPositionPx(3) - S.PanelWidthPx;
             S.ActualInnerVsCalculatedImageHeightDeltaPx = ...
                 S.PanelInnerPositionPx(4) - S.PanelImageAreaHeightPx;
-            S.ActualMainAxesVsImageWidthDeltaPx = ...
-                S.MainAxesOuterPositionPx(3) - S.PanelWidthPx;
-            S.ActualMainAxesVsImageHeightDeltaPx = ...
-                S.MainAxesOuterPositionPx(4) - S.PanelImageAreaHeightPx;
+            S.ActualMainAxesInnerVsPanelInnerWidthDeltaPx = ...
+                S.MainAxesInnerPositionPx(3) - S.PanelInnerPositionPx(3);
+            S.ActualMainAxesInnerVsPanelInnerHeightDeltaPx = ...
+                S.MainAxesInnerPositionPx(4) - S.PanelInnerPositionPx(4);
+            S.ActualStaticAxesInnerVsPanelInnerWidthDeltaPx = ...
+                S.StaticAxesInnerPositionPx(3) - S.PanelInnerPositionPx(3);
+            S.ActualStaticAxesInnerVsPanelInnerHeightDeltaPx = ...
+                S.StaticAxesInnerPositionPx(4) - S.PanelInnerPositionPx(4);
+            S.ActualMainAxesOuterVsPanelInnerWidthDeltaPx = ...
+                S.MainAxesOuterPositionPx(3) - S.PanelInnerPositionPx(3);
+            S.ActualMainAxesOuterVsPanelInnerHeightDeltaPx = ...
+                S.MainAxesOuterPositionPx(4) - S.PanelInnerPositionPx(4);
+        end
+    end
+
+    methods (Static, Access=private)
+        function posPx = positionFromReferencePx(pos, units, referencePosPx)
+        %POSITIONFROMREFERENCEPX Convert a position vector using a pixel reference.
+        %
+        %   This is intentionally conservative and diagnostic-only. MATLAB's
+        %   getpixelposition does not expose InnerPosition, so normalized inner
+        %   positions are scaled from a known pixel rectangle without mutating Units.
+
+            units = string(units);
+
+            if units == "pixels"
+                posPx = pos;
+                return
+            end
+
+            if units ~= "normalized" || numel(pos) ~= 4 || numel(referencePosPx) ~= 4
+                posPx = NaN(1,4);
+                return
+            end
+
+            posPx = [ ...
+                referencePosPx(1) + pos(1) * referencePosPx(3), ...
+                referencePosPx(2) + pos(2) * referencePosPx(4), ...
+                pos(3) * referencePosPx(3), ...
+                pos(4) * referencePosPx(4)];
         end
     end
 

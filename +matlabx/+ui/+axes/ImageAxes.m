@@ -60,18 +60,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         Tools
     end
 
-    properties (Access={?matlabx.ui.axes.ImageAxesToolRegistry})
-        % struct() of installed tools, fieldnames match tool Name
-        Tools_ struct = struct()
-        % registry of loaded tools
-        ToolList        % containers.Map name->tool
-        % registry of installed tools
-        ToolRegistry    % containers.Map name->tool
+    properties (Access={?matlabx.ui.axes.ImageAxesToolManager})
+        % manager for tool lifecycle, routing lookup, and installed tool objects
+        ToolManager matlabx.ui.axes.ImageAxesToolManager
         % registry of host/tool hotkeys
         HotkeyRegistry matlabx.ui.axes.ImageAxesHotkeyRegistry
     end
 
-    properties (Access={?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxesToolRegistry})
+    properties (Access={?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxesToolManager})
         % the currently enabled tool with IsExclusive=true (if it exists)
         ActiveExclusiveTool
         % struct() of ToolbarButtons, fieldnames match tool Name
@@ -171,7 +167,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     % tool-accessible
-    properties (Access={?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxesToolRegistry})
+    properties (Access={?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxesToolManager})
         mainAxes matlab.ui.control.UIAxes
     end
 
@@ -327,8 +323,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % setup and store colorbar
             obj.Colorbar = colorbar(obj.mainAxes,"east","Visible","off","PickableParts","none","HitTest","off");
 
-            % initialize registries for loaded and installed tools
-            matlabx.ui.axes.ImageAxesToolRegistry.initialize(obj);
+            % initialize tool lifecycle/hotkey managers
+            obj.ToolManager = matlabx.ui.axes.ImageAxesToolManager(obj);
             obj.HotkeyRegistry = matlabx.ui.axes.ImageAxesHotkeyRegistry();
 
             % Hub registration (one hub per figure; this instance registers itself)
@@ -1355,6 +1351,55 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 PendingSizeUpdate=obj.pendingSizeUpdate);
         end
 
+        function S = getDebugStatus(obj, includeSizeDiagnostics)
+            toolStruct = obj.Tools;
+            toolNames = string(fieldnames(toolStruct));
+
+            enabledMask = false(size(toolNames));
+            for i = 1:numel(toolNames)
+                tool = toolStruct.(char(toolNames(i)));
+                if isvalid(tool) && tool.Enabled
+                    enabledMask(i) = true;
+                end
+            end
+            enabledTools = toolNames(enabledMask);
+
+            S = struct();
+            S.Class = string(class(obj));
+            S.Name = obj.Name;
+            S.IsValid = isvalid(obj);
+            S.ParentFigure = string(class(obj.ParentFig));
+            S.ImageDataClass = string(class(obj.ImageData_));
+            S.ImageSize = [obj.ImageData_.SizeY, obj.ImageData_.SizeX];
+            S.NumComponents = obj.NumComponents;
+            S.RenderSourceSize = obj.RenderSourceSize;
+            S.RenderSourceKind = string(obj.RenderSourceKind);
+            S.RenderSourceClass = string(obj.RenderSourceClass);
+            S.View = struct( ...
+                "C", obj.C, ...
+                "Z", obj.Z, ...
+                "T", obj.T, ...
+                "ShowComposite", string(obj.ShowComposite), ...
+                "CLimMode", string(obj.CLimMode), ...
+                "ComponentColorMode", string(obj.ComponentColorMode));
+            S.Tools = struct( ...
+                "Installed", toolNames(:).', ...
+                "Enabled", enabledTools(:).');
+            S.Zoom = struct( ...
+                "ZoomEnabled", obj.ZoomEnabled, ...
+                "FollowCursorEnabled", obj.FollowCursorEnabled, ...
+                "XLim", obj.mainAxes.XLim, ...
+                "YLim", obj.mainAxes.YLim);
+            S.UpdateState = struct( ...
+                "PendingSizeUpdate", obj.pendingSizeUpdate, ...
+                "LastResizeLayoutKey", obj.LastResizeLayoutKey_, ...
+                "InStartup", obj.inStartup);
+
+            if includeSizeDiagnostics
+                S.SizeDiagnostics = obj.getSizeDiagnostics();
+            end
+        end
+
         function updateBottomLabelText(obj)
         
             px = obj.activePixel;
@@ -1398,7 +1443,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                     valStr = '';
             end
         
-            tools = matlabx.ui.axes.ImageAxesToolRegistry.prioritySort(obj);
+            tools = obj.ToolManager.prioritySort();
             txt = cell(1,numel(tools));
         
             for i = 1:numel(tools)
@@ -1435,7 +1480,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             if isempty(obj.activePixel), obj.ParentFig.Pointer = 'arrow'; return; end
 
             % get cell array of installed tools, sorted by priority
-            tools = matlabx.ui.axes.ImageAxesToolRegistry.prioritySort(obj);
+            tools = obj.ToolManager.prioritySort();
 
             % no tools found, set pointer to 'arrow'
             if isempty(tools), obj.ParentFig.Pointer = 'arrow'; return; end
@@ -2581,52 +2626,52 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % register a tool (add it to the installed tool registry) - tools call this themselves
         function registerTool(obj, tool)
-            matlabx.ui.axes.ImageAxesToolRegistry.register(obj, tool);
+            obj.ToolManager.register(tool);
         end
 
         % remove tool from installed tool registry - it remains loaded
         function unregisterTool(obj, tool)
-            matlabx.ui.axes.ImageAxesToolRegistry.unregister(obj, tool);
+            obj.ToolManager.unregister(tool);
         end
 
         % load all tools in matlabx.ui.axes.tools
         function loadAllTools(obj)
-            matlabx.ui.axes.ImageAxesToolRegistry.loadAll(obj);
+            obj.ToolManager.loadAll();
         end
 
         % unload all currently loaded tools
         function unloadAllTools(obj)
-            matlabx.ui.axes.ImageAxesToolRegistry.unloadAll(obj);
+            obj.ToolManager.unloadAll();
         end
 
         % load tools specified by toolNames (cell array of char vectors)
         function loadTools(obj,toolNames)
-            matlabx.ui.axes.ImageAxesToolRegistry.loadMany(obj, toolNames);
+            obj.ToolManager.loadMany(toolNames);
         end
 
         % load tool specified by name
         function loadTool(obj, name)
-            matlabx.ui.axes.ImageAxesToolRegistry.load(obj, name);
+            obj.ToolManager.load(name);
         end
 
         % unload tool specified by name
         function unloadTool(obj, name)
-            matlabx.ui.axes.ImageAxesToolRegistry.unload(obj, name);
+            obj.ToolManager.unload(name);
         end
 
         % install tools specified by toolNames (cell array of char vectors)
         function installTools(obj,toolNames)
-            matlabx.ui.axes.ImageAxesToolRegistry.installMany(obj, toolNames);
+            obj.ToolManager.installMany(toolNames);
         end
 
         % install tool specified by name
         function installTool(obj,name)
-            matlabx.ui.axes.ImageAxesToolRegistry.install(obj, name);
+            obj.ToolManager.install(name);
         end
 
         % uninstall tool specified by name
         function uninstallTool(obj,name)
-            matlabx.ui.axes.ImageAxesToolRegistry.uninstall(obj, name);
+            obj.ToolManager.uninstall(name);
         end
 
     end
@@ -2675,12 +2720,12 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % add a toolbar button for the tool (tool calls this on install)
         function addToolbarButton(obj, tool)
-            matlabx.ui.axes.ImageAxesToolRegistry.addToolbarButton(obj, tool);
+            obj.ToolManager.addToolbarButton(tool);
         end
 
         % add a toolbar button for the tool (tool calls this on uninstall)
         function removeToolbarButton(obj, tool)
-            matlabx.ui.axes.ImageAxesToolRegistry.removeToolbarButton(obj, tool);
+            obj.ToolManager.removeToolbarButton(tool);
         end
 
     end
@@ -2690,38 +2735,38 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % enable installed tool specified by name
         function enableTool(obj, name)
-            matlabx.ui.axes.ImageAxesToolRegistry.enable(obj, name);
+            obj.ToolManager.enable(name);
         end
 
         % disable installed tool specified by name
         function disableTool(obj, name)
-            matlabx.ui.axes.ImageAxesToolRegistry.disable(obj, name);
+            obj.ToolManager.disable(name);
         end
 
         % query Enabled state of tool specified by name
         function tf = toolEnabled(obj, name)
-            tf = matlabx.ui.axes.ImageAxesToolRegistry.enabled(obj, name);
+            tf = obj.ToolManager.enabled(name);
         end
 
         % toggle Enabled state of "state" tool specified by name (toolbar button ValueChangedFcn)
         function onToolToggle(obj,toolState,name)
-            matlabx.ui.axes.ImageAxesToolRegistry.toggle(obj, toolState, name);
+            obj.ToolManager.toggle(toolState, name);
         end
 
         % run "push" tool specified by name (toolbar button ButtonPushedFcn)
         function onToolPush(obj,name)
-            matlabx.ui.axes.ImageAxesToolRegistry.push(obj, name);
+            obj.ToolManager.push(name);
         end
 
         % run installed tool specified by name
         function runTool(obj, name)
-            matlabx.ui.axes.ImageAxesToolRegistry.run(obj, name);
+            obj.ToolManager.run(name);
         end
 
 
         % disable ActiveExclusiveTool if it exists
         function disableActiveExclusive(obj)
-            matlabx.ui.axes.ImageAxesToolRegistry.disableActiveExclusive(obj);
+            obj.ToolManager.disableActiveExclusive();
         end
 
     end
@@ -2731,32 +2776,27 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % get installed tool specified by name
         function t = getInstalledTool(obj, name)
-            t = matlabx.ui.axes.ImageAxesToolRegistry.getInstalled(obj, name);
+            t = obj.ToolManager.getInstalled(name);
         end
 
         % get loaded tool specified by name
         function t = getLoadedTool(obj, name)
-            t = matlabx.ui.axes.ImageAxesToolRegistry.getLoaded(obj, name);
+            t = obj.ToolManager.getLoaded(name);
         end
 
         % get the highest Priority Interceptor for the specified eventType
         function tool = getPriorityInterceptor(obj,eventType)
-            tool = matlabx.ui.axes.ImageAxesToolRegistry.getPriorityInterceptor(obj, eventType);
+            tool = obj.ToolManager.getPriorityInterceptor(eventType);
         end
 
         % get cell array of PassiveInterceptors for the specified eventType, sorted by descending Priority
         function toolsCell = getPriorityPassiveInterceptors(obj,eventType)
-            toolsCell = matlabx.ui.axes.ImageAxesToolRegistry.getPriorityPassiveInterceptors(obj, eventType);
-        end
-
-        % given a containers.Map of tools, return cell array of tools sorted by descending Priority
-        function toolsCell = prioritySortTools(~,toolsMap)
-            toolsCell = matlabx.ui.axes.ImageAxesToolRegistry.prioritySortCell(toolsMap.values);
+            toolsCell = obj.ToolManager.getPriorityPassiveInterceptors(eventType);
         end
 
         % given a cell array of tools, return the same cell array sorted by descending Priority
-        function toolsCell = prioritySortToolsCell(~,toolsCell)
-            toolsCell = matlabx.ui.axes.ImageAxesToolRegistry.prioritySortCell(toolsCell);
+        function toolsCell = prioritySortToolsCell(obj,toolsCell)
+            toolsCell = obj.ToolManager.prioritySortCell(toolsCell);
         end
 
     end
@@ -2766,7 +2806,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function tools = get.Tools(obj)
         %GET.TOOLS Return installed tool objects as a struct.
-            tools = obj.Tools_;
+            tools = obj.ToolManager.Tools;
         end
 
         function set.Tools(obj, toolNames)
@@ -2779,7 +2819,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         %   Reading the property returns the installed tool handles:
         %
         %       ax.Tools.Pick.BoxSize = 25
-            matlabx.ui.axes.ImageAxesToolRegistry.setInstalledNames(obj, toolNames);
+            obj.ToolManager.setInstalledNames(toolNames);
         end
 
     end
@@ -2899,10 +2939,35 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
-    %% Hidden entrypoint for debugging
+    %% Debugging helpers
     methods (Hidden)
-        function DEBUG_(obj)
-            debug
+        function S = debug(obj, opts)
+        %DEBUG Print ImageAxes status and optionally enter keyboard debug mode.
+        %
+        %   ax.debug() prints a compact status report with view, image, tool, and
+        %   layout diagnostic values.
+        %
+        %   S = ax.debug() returns the report struct without printing.
+        %
+        %   ax.debug("Stop",true) calls KEYBOARD before returning so private state
+        %   such as obj.ViewState_, obj.ComponentDisplay_, and the local report S
+        %   can be inspected interactively from the command window.
+
+            arguments
+                obj (1,1) matlabx.ui.axes.ImageAxes
+                opts.Stop (1,1) logical = false
+                opts.IncludeSizeDiagnostics (1,1) logical = true
+            end
+
+            S = obj.getDebugStatus(opts.IncludeSizeDiagnostics);
+
+            if nargout == 0
+                matlabx.struct.prettyPrint(S);
+            end
+
+            if opts.Stop
+                keyboard %#ok<KEYBOARDFUN>
+            end
         end
     end
 
