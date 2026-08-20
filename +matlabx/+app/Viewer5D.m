@@ -151,6 +151,10 @@ classdef Viewer5D < handle
             ax = obj.Viewer.getAxes();
         end
 
+        function ax = getImageAxes(obj)
+            ax = obj.Viewer;
+        end
+
     end
 
     %% setup helpers
@@ -272,7 +276,7 @@ classdef Viewer5D < handle
         function setupViewer(obj)
             % ImageAxes object for the viewer
             obj.Viewer = matlabx.ui.axes.ImageAxes(obj.Grid,...
-                "ToolBelt",     {'Zoom', 'Colorbar', 'ChooseColormap', 'Pick', 'DrawRectangle'},...
+                "Tools",     {'Zoom', 'Colorbar', 'ChooseColormap', 'Pick', 'DrawRectangle'},...
                 "ImageData",    obj.Image,...
                 "Name",         "Viewer",...
                 "FontSize",     obj.FontSize);
