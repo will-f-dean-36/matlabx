@@ -27,12 +27,20 @@ classdef AxesTool < handle
 %       An Installed tool with PassivelyInterceptsDown/Move/Up/Scroll/KeyPress/KeyRelease=true
 %       for an event kind. The Host routes the event to every matching passive
 %       interceptor, in priority order, before the active interceptor by calling
-%       onPassiveDown(), onPassiveMove(), etc. Passive
-%       interceptors are useful for persistent overlays or hotkeys that must be
-%       maintained even while the tool is disabled.
+%       onPassiveDown(), onPassiveMove(), etc. Passive interceptors are useful
+%       for persistent overlays or event observation that must continue even
+%       while the tool is disabled. Simple tool toggle shortcuts should use
+%       ToggleHotkey, which the Host registers when the tool is installed.
 %
 %   A tool can call E.stop() to prevent the active interceptor and downstream
 %   Host behavior from receiving the event.
+%
+%   Tool hotkeys
+%   ------------
+%   ToggleHotkey declares the keypress that toggles or runs a tool while it is
+%   installed. Prefer matlabx.keyboard.hotkey(...) for declarations:
+%
+%       ToggleHotkey = matlabx.keyboard.hotkey("z", "Modifiers", ["shift","meta"])
 %
 %   Host notifications
 %   ------------------
@@ -306,7 +314,7 @@ classdef AxesTool < handle
 
     %% teardown
 
-    methods (Access = {?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxes})
+    methods (Access = {?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxes, ?matlabx.ui.axes.ImageAxesToolRegistry})
 
         % subclass delete() will be called before this runs
         function delete(obj)

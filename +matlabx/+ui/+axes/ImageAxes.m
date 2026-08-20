@@ -47,7 +47,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     %% Tools
 
-    properties (SetAccess=?matlabx.ui.axes.AxesTool)
+    properties (SetAccess={?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxesToolRegistry})
         % struct() of installed tools, fieldnames match tool Name
         Tools struct = struct()
     end
@@ -59,14 +59,16 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         ToolBox
     end
 
-    properties (Access=private)
+    properties (Access={?matlabx.ui.axes.ImageAxesToolRegistry})
         % registry of loaded tools
         ToolList        % containers.Map name->tool
         % registry of installed tools
         ToolRegistry    % containers.Map name->tool
+        % registry of host/tool hotkeys
+        HotkeyRegistry matlabx.ui.axes.ImageAxesHotkeyRegistry
     end
 
-    properties (Access=?matlabx.ui.axes.AxesTool)
+    properties (Access={?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxesToolRegistry})
         % the currently enabled tool with IsExclusive=true (if it exists)
         ActiveExclusiveTool
         % struct() of ToolbarButtons, fieldnames match tool Name
@@ -166,7 +168,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     % tool-accessible
-    properties (Access=?matlabx.ui.axes.AxesTool)
+    properties (Access={?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxesToolRegistry})
         mainAxes matlab.ui.control.UIAxes
     end
 
@@ -188,6 +190,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     properties (Access=private)
         % flags to help coalesce/manage updates
         pendingSizeUpdate (1,1) logical = false
+        LastResizeLayoutKey_ (1,5) double = NaN(1,5)
         inStartup (1,1) logical = true
     end
 
@@ -327,8 +330,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.Colorbar = colorbar(obj.mainAxes,"east","Visible","off","PickableParts","none","HitTest","off");
 
             % initialize registries for loaded and installed tools
-            obj.ToolList = containers.Map('KeyType','char','ValueType','any');
-            obj.ToolRegistry = containers.Map('KeyType','char','ValueType','any');
+            matlabx.ui.axes.ImageAxesToolRegistry.initialize(obj);
+            obj.HotkeyRegistry = matlabx.ui.axes.ImageAxesHotkeyRegistry();
 
             % load all tools in obj.ToolBox
             obj.loadTools(obj.ToolBox);
@@ -403,7 +406,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 obj.FontSize_ = obj.FontSize;
                 obj.uipanelOverheadPx_ = obj.UICal.uipanelTopChromeHeightPx(obj.FontSize_);
                 obj.inStartup = false;
-                obj.updateOnResize();
             end
 
             % set the Tag property of the axes used for event routing
@@ -1232,11 +1234,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
 
     %% Axes linking
-    properties (SetAccess=private)
+    properties (SetAccess=?matlabx.ui.axes.ImageAxesLinkManager)
         hasLinks        (1,1) logical = false
     end
 
-    properties (Access=private)
+    properties (Access=?matlabx.ui.axes.ImageAxesLinkManager)
         linkedAxes      (1,:) = []
         linkedProps     (1,:) cell = {}
         LinkListener    event.listener
@@ -1258,45 +1260,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 props   (1,:) cell = matlabx.ui.axes.ImageAxes.getLinkableProperties()
             end
 
-            if obj.hasLinks
-                error("matlabx:ui:axes:ImageAxes:UnableToLink","Axes is already linked");
-            end
-
-            if isempty(links) || isempty(props)
-                return
-            end
-
-            % Store this axes' outgoing link targets and linked property names.
-            obj.linkedAxes = links;
-            obj.linkedProps = props;
-
-            % Listen to this axes and push changed linked properties to all targets.
-            obj.LinkListener = addlistener(obj, props, 'PostSet', @(src,evt) obj.syncPeersToSelf(src,evt));
-
-            % Mark this axes as linked before wiring the peer axes.
-            obj.hasLinks = true;
-
-            for i = 1:numel(links)
-                % Each peer stores every other axes in the link group, excluding
-                % itself, so any axes can originate a property change.
-                if i==1
-                    links(1).linkedAxes = [obj,links(2:end)];
-                else
-                    links(i).linkedAxes = [links(1:i-1),obj,links(i+1:end)];
-                end
-
-                % Each peer listens to the same linked property set.
-                links(i).linkedProps = props;
-                links(i).LinkListener = addlistener(links(i), props, 'PostSet', @(src,evt) links(i).syncPeersToSelf(src,evt));
-                links(i).hasLinks = true;
-            end
-
-            % Establish an initial shared state immediately instead of waiting
-            % for the next property change. The axes that addLink() was called
-            % on acts as the source of truth for this first synchronization.
-            for i = 1:numel(links)
-                links(i).syncSelfToLinkSource(obj, props);
-            end
+            matlabx.ui.axes.ImageAxesLinkManager.add(obj, links, props);
         end
 
         function removeLinks(obj)
@@ -1305,55 +1269,12 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % Calling this on any linked axes disconnects the whole group by clearing
             % peer references, deleting link listeners, and resetting link state.
 
-            if ~obj.hasLinks
-                return
-            end
-
-            for i = 1:numel(obj.linkedAxes)
-                % Clear each peer's link metadata.
-                obj.linkedAxes(i).linkedAxes = [];
-                obj.linkedAxes(i).linkedProps = {};
-
-                % Delete valid listener handles on each peer.
-                delete(obj.linkedAxes(i).LinkListener(isvalid(obj.linkedAxes(i).LinkListener)));
-
-                % Mark each peer as unlinked.
-                obj.linkedAxes(i).hasLinks = false;
-            end
-
-            % Clear this axes' link metadata.
-            obj.linkedAxes = [];
-            obj.linkedProps = {};
-
-            % Delete this axes' listener and mark it as unlinked.
-            delete(obj.LinkListener(isvalid(obj.LinkListener)));
-            obj.hasLinks = false;
+            matlabx.ui.axes.ImageAxesLinkManager.remove(obj);
         end
 
         function syncPeersToSelf(obj,~,evt)
             %SYNCPEERSTOSELF Propagate a linked property change to linked axes.
-            %
-            % Most linked properties can be assigned directly. Component display
-            % properties are cell arrays sized to each axes' NumComponents, so linked
-            % axes with different component counts need an overlap-only copy.
-
-            propName = evt.Source.Name;
-
-            for i = 1:numel(obj.linkedAxes)
-                target = obj.linkedAxes(i);
-
-                % Prevent recursive link propagation while this target is syncing.
-                target.LinkListener.Enabled = false;
-                cleanupListener = onCleanup(@() restoreLinkListener(target));
-
-                value = obj.getLinkedPropertyValueForTarget(propName, target);
-                target.(propName) = value;
-
-                % Re-enable immediately on success instead of waiting for function
-                % exit; onCleanup still handles errors.
-                delete(cleanupListener);
-                target.LinkListener.Enabled = true;
-            end
+            matlabx.ui.axes.ImageAxesLinkManager.syncPeersToSource(obj, evt);
         end
 
         function syncSelfFromFirstLinkedPeer(obj)
@@ -1364,17 +1285,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % setters, so this axes explicitly pulls linked values back from an
             % existing peer before the final render.
 
-            if ~obj.hasLinks || isempty(obj.linkedAxes) || isempty(obj.linkedProps)
-                return
-            end
-
-            for i = 1:numel(obj.linkedAxes)
-                source = obj.linkedAxes(i);
-                if ~isempty(source) && isvalid(source)
-                    obj.syncSelfToLinkSource(source, obj.linkedProps);
-                    return
-                end
-            end
+            matlabx.ui.axes.ImageAxesLinkManager.syncFromFirstPeer(obj);
         end
 
         function syncSelfToLinkSource(obj, source, props)
@@ -1384,99 +1295,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % data-reset reconciliation does not push startup defaults or partially
             % synchronized values back out to the rest of the link group.
 
-            if isempty(source) || ~isvalid(source) || isempty(props)
-                return
-            end
-
-            [~, listenerWasEnabled] = obj.disableValidLinkListeners();
-
-            cleanupListener = onCleanup(@() restoreLinkListenerState(obj, listenerWasEnabled));
-
-            for k = 1:numel(props)
-                propName = props{k};
-                value = source.getLinkedPropertyValueForTarget(propName, obj);
-                obj.(propName) = value;
-            end
-
-            delete(cleanupListener);
-            restoreLinkListenerState(obj, listenerWasEnabled);
+            matlabx.ui.axes.ImageAxesLinkManager.syncFromSource(obj, source, props);
         end
-
-        function [listeners, wasEnabled] = disableValidLinkListeners(obj)
-            %DISABLEVALIDLINKLISTENERS Disable local link listeners temporarily.
-            listeners = event.listener.empty;
-            wasEnabled = false(1,0);
-
-            if isempty(obj.LinkListener)
-                return
-            end
-
-            listeners = obj.LinkListener(isvalid(obj.LinkListener));
-            wasEnabled = false(1,numel(listeners));
-
-            for ii = 1:numel(listeners)
-                wasEnabled(ii) = listeners(ii).Enabled;
-                listeners(ii).Enabled = false;
-            end
-        end
-
-
-        function value = getLinkedPropertyValueForTarget(obj, propName, target)
-            %GETLINKEDPROPERTYVALUEFORTARGET Return a value safe to assign to target.
-            %
-            % Component display properties are full component cell arrays. When two
-            % linked axes currently have different NumComponents, preserve the
-            % target's extra entries and copy only the shared component range.
-        
-            value = obj.(propName);
-        
-            switch propName
-                case {'ComponentColormaps','ComponentCLims','ComponentColors'}
-                    targetValue = target.(propName);
-                    n = min(numel(value), numel(targetValue));
-        
-                    if n == 0
-                        value = targetValue;
-                        return
-                    end
-        
-                    targetValue(1:n) = value(1:n);
-                    value = targetValue;
-            end
-        end
-        
-        function restoreLinkListener(target)
-            %RESTORELINKLISTENER Re-enable a linked axes listener after sync.
-            %
-            % This is intentionally tiny so syncPeersToSelf can use onCleanup and
-            % still leave the listener enabled if a linked assignment errors.
-        
-            if ~isempty(target) && isvalid(target) && ~isempty(target.LinkListener)
-                target.LinkListener.Enabled = true;
-            end
-        end
-
-        function restoreLinkListenerState(target, wasEnabled)
-            %RESTORELINKLISTENERSTATE Restore a listener to its prior state.
-            %
-            % Initial link synchronization can involve axes whose listeners are
-            % already disabled by another sync operation, so preserve that state
-            % instead of blindly enabling the listener.
-
-            if isempty(target) || ~isvalid(target) || isempty(target.LinkListener)
-                return
-            end
-
-            listeners = target.LinkListener(isvalid(target.LinkListener));
-            n = min(numel(listeners), numel(wasEnabled));
-
-            for ii = 1:n
-                listeners(ii).Enabled = wasEnabled(ii);
-            end
-        end
-
-
-
 
     end
 
@@ -1495,49 +1315,51 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             if obj.pendingSizeUpdate
                 return
-            else
-                obj.pendingSizeUpdate = true;
             end
 
-            oldPosUnits = obj.Units;
+            obj.pendingSizeUpdate = true;
+            cleanupPendingFlag = onCleanup(@() obj.clearPendingSizeUpdate());
 
-            obj.Units = "pixels";
-            compPos = obj.Position;
-
-            obj.Units = oldPosUnits;
-            panelTop = obj.uipanelOverheadPx_;
-
-
-            W = compPos(3);
-            H = compPos(4);
-            trueH = H - panelTop;
-
-
-            imgH = obj.ImageData_.SizeY;
-            imgW = obj.ImageData_.SizeX;
-
-            targetRatio = imgH / imgW;          % height / width
-            currentRatio = trueH / W;
-
-            if currentRatio > targetRatio
-                % Figure is too tall for the image
-                newW = W;
-                newH = W * targetRatio;
-            else
-                % Figure is too wide for the image
-                newH = trueH;
-                newW = trueH / targetRatio;
+            S = obj.computeResizeLayout();
+            if ~S.IsValid
+                return
             end
 
-            newH = newH + panelTop;
+            layoutKey = S.LayoutKey;
+            if isequal(layoutKey, obj.LastResizeLayoutKey_)
+                return
+            end
 
-            wPad = (W-newW)/2;
-            hPad = (H-newH)/2;
+            matlabx.ui.axes.ImageAxesResizeLayout.apply(obj.sizingGrid, S);
+            obj.LastResizeLayoutKey_ = layoutKey;
+        end
 
-            set(obj.sizingGrid,'ColumnWidth',{wPad,newW,wPad},'RowHeight',{hPad,newH,hPad});
-            drawnow;
+        function clearPendingSizeUpdate(obj)
+            if isvalid(obj)
+                obj.pendingSizeUpdate = false;
+            end
+        end
 
-            obj.pendingSizeUpdate = false;
+        function S = computeResizeLayout(obj)
+            S = matlabx.ui.axes.ImageAxesResizeLayout.compute( ...
+                obj, ...
+                obj.ImageData_.SizeY, ...
+                obj.ImageData_.SizeX, ...
+                obj.uipanelOverheadPx_);
+        end
+
+        function S = getSizeDiagnostics(obj)
+            S = obj.computeResizeLayout();
+            S = matlabx.ui.axes.ImageAxesResizeLayout.addDiagnostics( ...
+                S, ...
+                obj, ...
+                obj.Grid, ...
+                obj.sizingGrid, ...
+                obj.Panel, ...
+                obj.mainAxes, ...
+                obj.staticAxes, ...
+                LastResizeLayoutKey=obj.LastResizeLayoutKey_, ...
+                PendingSizeUpdate=obj.pendingSizeUpdate);
         end
 
         function updateBottomLabelText(obj)
@@ -1583,7 +1405,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                     valStr = '';
             end
         
-            tools = obj.prioritySortTools(obj.ToolRegistry);
+            tools = matlabx.ui.axes.ImageAxesToolRegistry.prioritySort(obj);
             txt = cell(1,numel(tools));
         
             for i = 1:numel(tools)
@@ -1620,7 +1442,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             if isempty(obj.activePixel), obj.ParentFig.Pointer = 'arrow'; return; end
 
             % get cell array of installed tools, sorted by priority
-            tools = obj.prioritySortTools(obj.ToolRegistry);
+            tools = matlabx.ui.axes.ImageAxesToolRegistry.prioritySort(obj);
 
             % no tools found, set pointer to 'arrow'
             if isempty(tools), obj.ParentFig.Pointer = 'arrow'; return; end
@@ -1650,27 +1472,23 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function updateImageCData(obj)
-            obj.hImage.CData = obj.DisplayCData;
+            matlabx.ui.axes.ImageAxesDisplayRenderer.updateImageCData( ...
+                obj.hImage, obj.DisplayCData);
         end
 
         function updateColorbar(obj)
-            ticks = {};
-            labels = {};
-
-            idx = obj.ViewState_.C;
-            comp = obj.ImageData_.Components(idx);
-            clim = obj.ComponentDisplay_(idx).CLim;
-
-            if strcmp(comp.Kind, 'scalar') && ~strcmp(comp.Class,'logical') && ~isempty(clim)
-                [ticks, labels] = matlabx.ui.axes.ImageAxes.getColorbarTickLabels(comp.Class, clim);
-            end
-
-            obj.Colorbar.Ticks = ticks;
-            obj.Colorbar.TickLabels = labels;
+            matlabx.ui.axes.ImageAxesDisplayRenderer.updateColorbar( ...
+                obj.Colorbar, ...
+                obj.ImageData_, ...
+                obj.ComponentDisplay_, ...
+                obj.ViewState_.C);
         end
 
         function updateAxesColormap(obj)
-            obj.mainAxes.Colormap = obj.ComponentDisplay_(obj.ViewState_.C).DisplayMap;
+            matlabx.ui.axes.ImageAxesDisplayRenderer.updateAxesColormap( ...
+                obj.mainAxes, ...
+                obj.ComponentDisplay_, ...
+                obj.ViewState_.C);
         end
 
         function updateFontSizes(obj)
@@ -1875,26 +1693,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % --- DisplayCData: graphics-ready image CData ---
         function v = get.DisplayCData(obj)
-            if obj.ViewState_.ShowComposite
-                v = obj.RenderSource_;
-                return
-            end
-
-            clim = obj.ComponentDisplay_(obj.ViewState_.C).CLim;
-            comp = obj.ImageData_.Components(obj.ViewState_.C);
-
-            I = obj.RenderSource_;
-
-            switch comp.Kind
-                case 'scalar'
-                    if strcmp(comp.Class,'logical') || isempty(clim)
-                        v = I;
-                    else
-                        v = matlabx.image.process.rescaleLinear(I, clim);
-                    end
-                case 'rgb'
-                    v = I;
-            end
+            v = matlabx.ui.axes.ImageAxesDisplayRenderer.getDisplayCData( ...
+                obj.RenderSource_, ...
+                obj.ImageData_, ...
+                obj.ComponentDisplay_, ...
+                obj.ViewState_);
         end
 
         % --- CLim ---
@@ -2455,55 +2258,17 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function updateAllDisplayMaps(obj)
-            for i = 1:obj.NumComponents
-                obj.ComponentDisplay_(i).DisplayMap = obj.getDisplayMap( ...
-                    obj.ComponentDisplay_(i), obj.ViewState_.ComponentColorMode);
-            end
+            obj.ComponentDisplay_ = matlabx.ui.axes.ImageAxesDisplayRenderer.updateAllDisplayMaps( ...
+                obj.ComponentDisplay_, obj.ViewState_.ComponentColorMode);
         end
     
         function map = getDisplayMap(~, displayState, mode)
-            switch mode
-                case 'colors'
-                    map = matlabx.colors.ops.colorGradient( ...
-                        [0 0 0], ...
-                        matlabx.colors.names.toRGB(char(displayState.ColorName),"Palette","MATLAB"), ...
-                        256);
-                case 'luts'
-                    map = displayState.Colormap;
-            end
+            map = matlabx.ui.axes.ImageAxesDisplayRenderer.getDisplayMap(displayState, mode);
         end
     
         function I = getCompositeImage(obj)
-            if ~obj.ImageData_.CanMergeComponents
-                I = obj.ImageData_.getPlane(obj.ViewState_.C,obj.ViewState_.Z,obj.ViewState_.T);
-                return
-            end
-    
-            if ~strcmp(obj.ImageData_.MultiComponentKind, 'scalar')
-                I = obj.ImageData_.getPlane(obj.ViewState_.C,obj.ViewState_.Z,obj.ViewState_.T);
-                return
-            end
-    
-            data = cell(1, obj.NumComponents);
-            clims = zeros(obj.NumComponents, 2);
-    
-            for c = 1:obj.NumComponents
-                data{c} = obj.ImageData_.getPlane(c,obj.ViewState_.Z,obj.ViewState_.T);
-                clims(c,:) = obj.ComponentDisplay_(c).CLim;
-            end
-    
-            switch obj.ViewState_.ComponentColorMode
-                case 'colors'
-                    colors = zeros(obj.NumComponents, 3);
-                    for i = 1:obj.NumComponents
-                        colors(i,:) = matlabx.colors.names.toRGB(char(obj.ComponentDisplay_(i).ColorName),"Palette","MATLAB");
-                    end
-                    I = matlabx.image.compose.mergeChannelsRGB_add(data, clims, colors);
-    
-                case 'luts'
-                    maps = {obj.ComponentDisplay_.DisplayMap};
-                    I = matlabx.image.compose.mergeChannelsRGB_LUT(data, clims, maps);
-            end
+            I = matlabx.ui.axes.ImageAxesDisplayRenderer.getCompositeImage( ...
+                obj.ImageData_, obj.ComponentDisplay_, obj.ViewState_);
         end
     
     end
@@ -2560,6 +2325,20 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     %% Derived getters and setters
     methods
+
+        function S = printSizeDiagnostics(obj)
+        %PRINTSIZEDIAGNOSTICS Print temporary ImageAxes layout diagnostics.
+        %
+        %   ax.printSizeDiagnostics() prints component, grid, panel, axes, and
+        %   image aspect-fit sizing values. S = ax.printSizeDiagnostics() returns
+        %   the diagnostic struct as well.
+
+            S = obj.getSizeDiagnostics();
+
+            if nargout == 0
+                matlabx.struct.prettyPrint(S);
+            end
+        end
 
         % cursor position in axes/image
         function cursorPosition = get.cursorPosition(obj)
@@ -2685,6 +2464,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function onKeyPress(obj, E)
+            obj.routeHotkey(E);
+            if E.StopPropagation, return; end
+
             obj.routeEventToTools(E);
 
             switch E.Hotkey
@@ -2810,6 +2592,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
+        function routeHotkey(obj,E)
+            if isempty(obj.HotkeyRegistry)
+                return
+            end
+
+            obj.HotkeyRegistry.dispatch(E);
+        end
+
         function routeToPassiveInterceptors(obj,E)
             % cell array of PassiveInterceptors for this eventType, sorted by Priority
             passiveInterceptors = obj.getPriorityPassiveInterceptors(E.Kind);
@@ -2831,138 +2621,91 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % register a tool (add it to the installed tool registry) - tools call this themselves
         function registerTool(obj, tool)
-            if ~isvalid(tool)
-                warning('Failed to register tool. Invalid handle.')
-                return
-            end
-
-            % add toolbar button
-            obj.addToolbarButton(tool);
-            % add to installed tools struct
-            obj.Tools.(tool.Name) = tool;
-
-            % add to registry
-            obj.ToolRegistry(char(tool.Name)) = tool;
+            matlabx.ui.axes.ImageAxesToolRegistry.register(obj, tool);
         end
 
         % remove tool from installed tool registry - it remains loaded
         function unregisterTool(obj, tool)
-            % if tool is not registered
-            if ~obj.ToolRegistry.isKey(char(tool.Name))
-                warning('Failed to unregister tool. "%s" tool is not currently registered.',tool.Name)
-                return
-            end
-
-            % remove toolbar button
-            obj.removeToolbarButton(tool);
-            % remove from installed tools struct
-            obj.Tools = rmfield(obj.Tools,tool.Name);
-
-            % remove from registry
-            obj.ToolRegistry.remove(char(tool.Name));
+            matlabx.ui.axes.ImageAxesToolRegistry.unregister(obj, tool);
         end
 
         % load all tools in matlabx.ui.axes.tools
         function loadAllTools(obj)
-            % cell array of tool names
-            toolNames = obj.getToolNames();
-            % return if no tools found
-            if isempty(toolNames), return; end
-            % load each tool
-            for i = 1:numel(toolNames), obj.loadTool(toolNames{i}); end
+            matlabx.ui.axes.ImageAxesToolRegistry.loadAll(obj);
         end
 
         % unload all currently loaded tools
         function unloadAllTools(obj)
-            % cell array of tool names
-            toolNames = obj.ToolList.keys;
-            % return if no tools are currently loaded
-            if isempty(toolNames), return; end
-            % unload each tool
-            for i = 1:numel(toolNames), obj.unloadTool(toolNames{i}); end
+            matlabx.ui.axes.ImageAxesToolRegistry.unloadAll(obj);
         end
 
         % load tools specified by toolNames (cell array of char vectors)
         function loadTools(obj,toolNames)
-            % return if no tools found
-            if isempty(toolNames), return; end
-            % load each tool
-            for i = 1:numel(toolNames), obj.loadTool(toolNames{i}); end
+            matlabx.ui.axes.ImageAxesToolRegistry.loadMany(obj, toolNames);
         end
 
         % load tool specified by name
         function loadTool(obj, name)
-            if obj.ToolList.isKey(char(name))
-                warning('Failed to load tool. "%s" tool already loaded.',name)
-                return
-            end
-            % add to loaded Tools registry
-            obj.ToolList(char(name)) = matlabx.ui.axes.tools.(char(name))(obj);
+            matlabx.ui.axes.ImageAxesToolRegistry.load(obj, name);
         end
 
         % unload tool specified by name
         function unloadTool(obj, name)
-            if ~obj.ToolList.isKey(char(name))
-                warning('Failed to unload tool. "%s" tool is not loaded.',name)
-                return
-            end
-            % get from loaded tools registry
-            tool = obj.getLoadedTool(name);
-            % if tool is installed, uninstall before unloading
-            if tool.Installed, obj.uninstallTool(tool.Name); end
-
-            % delete the tool (it will perform teardown tasks)
-            delete(tool)
-            % remove from loaded Tools registry
-            obj.ToolList.remove(char(name));
+            matlabx.ui.axes.ImageAxesToolRegistry.unload(obj, name);
         end
 
         % install tools specified by toolNames (cell array of char vectors)
         function installTools(obj,toolNames)
-            % return if empty
-            if isempty(toolNames), return; end
-            % install each tool
-            for i = 1:numel(toolNames), obj.installTool(toolNames{i}); end
+            matlabx.ui.axes.ImageAxesToolRegistry.installMany(obj, toolNames);
         end
 
         % install tool specified by name
         function installTool(obj,name)
-            thisTool = obj.getLoadedTool(name);
-            % if no tool with this name found in tool list
-            if isempty(thisTool)
-                warning('Failed to install tool. "%s" tool is not loaded.',name)
-                return
-            end
-            % check if tool is already registered
-            if obj.ToolRegistry.isKey(char(thisTool.Name))
-                warning('Failed to install tool. "%s" tool is already installed.',name)
-                return
-            end
-            % check whether this tool supports image axes
-            if ~ismember(thisTool.AxesType, ["image", "both"])
-                warning('Failed to install tool. "%s" tool is for "%s" axes, not image axes.', ...
-                    char(name), char(thisTool.AxesType))
-                return
-            end
-            % call the tool's install() method, it will register itself and perform startup tasks
-            thisTool.install();
+            matlabx.ui.axes.ImageAxesToolRegistry.install(obj, name);
         end
 
         % uninstall tool specified by name
         function uninstallTool(obj,name)
-            thisTool = obj.getLoadedTool(name);
-            % if no tool with this name found in tool list
-            if isempty(thisTool)
-                warning('Failed to uninstall tool. "%s" tool is not loaded.',name)
+            matlabx.ui.axes.ImageAxesToolRegistry.uninstall(obj, name);
+        end
+
+    end
+
+    %% Hotkey management
+    methods
+
+        function registerToolHotkeys(obj, tool)
+            if strlength(tool.ToggleHotkey) == 0
                 return
             end
-            % if no tool with this name is currently installed
-            if ~obj.ToolRegistry.isKey(char(thisTool.Name))
-                warning('Failed to uninstall tool. "%s" tool is already uninstalled.',name)
+
+            obj.HotkeyRegistry.add( ...
+                tool.ToggleHotkey, ...
+                @(E) obj.onToolToggleHotkey(tool.Name, E), ...
+                "Owner", tool, ...
+                "Description", tool.Name + " toggle", ...
+                "Priority", tool.Priority);
+        end
+
+        function onToolToggleHotkey(obj, name, E)
+            t = obj.getInstalledTool(name);
+
+            if isempty(t)
                 return
             end
-            % call the tool's uninstall() method, it will remove itself from the registry and perform cleanup tasks
-            thisTool.uninstall();
+
+            E.stop();
+
+            switch t.Style
+                case 'push'
+                    obj.runTool(name);
+                case 'state'
+                    if t.Enabled
+                        obj.disableTool(name);
+                    else
+                        obj.enableTool(name);
+                    end
+            end
         end
 
     end
@@ -2972,42 +2715,12 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % add a toolbar button for the tool (tool calls this on install)
         function addToolbarButton(obj, tool)
-            % obj.ToolbarButtons.(tool.Name) = axtoolbarbtn(obj.mainAxes.Toolbar,'state',...
-            %     'Tooltip',tool.Tooltip,...
-            %     'Icon',tool.Icon,...
-            %     'ValueChangedFcn',@(btn,~) onToolToggle(obj, btn.Value, tool.Name));
-
-            switch tool.Style
-                case 'push'
-                    obj.ToolbarButtons.(tool.Name) = axtoolbarbtn(obj.mainAxes.Toolbar,'push',...
-                        'Tooltip',tool.Tooltip,...
-                        'Icon',tool.Icon,...
-                        'ButtonPushedFcn',@(btn,~) onToolPush(obj, tool.Name));
-                case 'state'
-                    obj.ToolbarButtons.(tool.Name) = axtoolbarbtn(obj.mainAxes.Toolbar,'state',...
-                        'Tooltip',tool.Tooltip,...
-                        'Icon',tool.Icon,...
-                        'ValueChangedFcn',@(btn,~) onToolToggle(obj, btn.Value, tool.Name));
-            end
-
-            % reset the toolbar (it will disappear on hover otherwise)
-            obj.mainAxes.Toolbar.reset;
+            matlabx.ui.axes.ImageAxesToolRegistry.addToolbarButton(obj, tool);
         end
 
         % add a toolbar button for the tool (tool calls this on uninstall)
         function removeToolbarButton(obj, tool)
-            % tool name not found in obj.ToolbarButtons struct, exit early
-            if ~isfield(obj.ToolbarButtons,tool.Name), return; end
-            % toolbar button linked to this tool
-            tbButton = obj.ToolbarButtons.(tool.Name);
-            % button is not valid, exit early
-            if ~isvalid(tbButton), return; end
-            % delete the toolbar button
-            delete(tbButton)
-            % delete the corresponding field in obj.ToolbarButtons struct
-            obj.ToolbarButtons = rmfield(obj.ToolbarButtons,tool.Name);
-            % reset the toolbar (it will disappear on hover otherwise)
-            obj.mainAxes.Toolbar.reset;
+            matlabx.ui.axes.ImageAxesToolRegistry.removeToolbarButton(obj, tool);
         end
 
     end
@@ -3017,55 +2730,38 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % enable installed tool specified by name
         function enableTool(obj, name)
-            t = obj.getInstalledTool(name); 
-            if isempty(t), return; end
-            t.enable();
+            matlabx.ui.axes.ImageAxesToolRegistry.enable(obj, name);
         end
 
         % disable installed tool specified by name
         function disableTool(obj, name)
-            t = obj.getInstalledTool(name);
-            if isempty(t), return; end
-            t.disable();
+            matlabx.ui.axes.ImageAxesToolRegistry.disable(obj, name);
         end
 
         % query Enabled state of tool specified by name
         function tf = toolEnabled(obj, name)
-            t = obj.getInstalledTool(name);
-            tf = ~isempty(t) && isvalid(t) && t.Enabled;
+            tf = matlabx.ui.axes.ImageAxesToolRegistry.enabled(obj, name);
         end
 
         % toggle Enabled state of "state" tool specified by name (toolbar button ValueChangedFcn)
         function onToolToggle(obj,toolState,name)
-            switch toolState
-                case true
-                    obj.enableTool(name);
-                case false
-                    obj.disableTool(name);
-            end
+            matlabx.ui.axes.ImageAxesToolRegistry.toggle(obj, toolState, name);
         end
 
         % run "push" tool specified by name (toolbar button ButtonPushedFcn)
         function onToolPush(obj,name)
-            obj.runTool(name);
+            matlabx.ui.axes.ImageAxesToolRegistry.push(obj, name);
         end
 
         % run installed tool specified by name
         function runTool(obj, name)
-            t = obj.getInstalledTool(name); 
-            if isempty(t), return; end
-            t.push();
+            matlabx.ui.axes.ImageAxesToolRegistry.run(obj, name);
         end
 
 
         % disable ActiveExclusiveTool if it exists
         function disableActiveExclusive(obj)
-            % get the existing exclusive tool
-            existingExclusive = obj.ActiveExclusiveTool;
-            % exit if none found
-            if isempty(existingExclusive), return; end
-            % otherwise disable it
-            obj.disableTool(existingExclusive.Name);
+            matlabx.ui.axes.ImageAxesToolRegistry.disableActiveExclusive(obj);
         end
 
     end
@@ -3075,65 +2771,32 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % get installed tool specified by name
         function t = getInstalledTool(obj, name)
-            t = [];
-            if ~isempty(obj.ToolRegistry) && isKey(obj.ToolRegistry, char(name))
-                t = obj.ToolRegistry(char(name));
-            end
+            t = matlabx.ui.axes.ImageAxesToolRegistry.getInstalled(obj, name);
         end
 
         % get loaded tool specified by name
         function t = getLoadedTool(obj, name)
-            t = [];
-            if ~isempty(obj.ToolList) && isKey(obj.ToolList, char(name))
-                t = obj.ToolList(char(name));
-            end
+            t = matlabx.ui.axes.ImageAxesToolRegistry.getLoaded(obj, name);
         end
 
         % get the highest Priority Interceptor for the specified eventType
         function tool = getPriorityInterceptor(obj,eventType)
-            % cell array of Installed tools
-            toolsCell = obj.ToolRegistry.values;
-            % no Installed tools, exit early
-            if isempty(toolsCell), tool = []; return; end
-            % get logical idx of Installed, Enabled tools that can Intercept the given eventType
-            idx = cellfun(@(t) t.Enabled & t.("Intercepts"+eventType) ,toolsCell,'UniformOutput',true);
-            % no matching tools, exit early
-            if ~any(idx), tool = []; return; end
-            % sort the tools by priority (descending order)
-            tools = obj.prioritySortToolsCell(toolsCell(idx));
-            % return the first element (highest priority)
-            tool = tools{1};
+            tool = matlabx.ui.axes.ImageAxesToolRegistry.getPriorityInterceptor(obj, eventType);
         end
 
         % get cell array of PassiveInterceptors for the specified eventType, sorted by descending Priority
         function toolsCell = getPriorityPassiveInterceptors(obj,eventType)
-            % cell array of Installed tools
-            toolsCell = obj.ToolRegistry.values;
-            % no Installed tools, exit early
-            if isempty(toolsCell), return; end
-            % get logical idx of Installed tools that passively intercept the given eventType
-            idx = cellfun(@(t) t.("PassivelyIntercepts"+eventType),toolsCell,'UniformOutput',true);
-            % no matching tools, exit early
-            if ~any(idx), toolsCell = {}; return; end
-            % sort the tools by priority (descending order)
-            toolsCell = obj.prioritySortToolsCell(toolsCell(idx));
+            toolsCell = matlabx.ui.axes.ImageAxesToolRegistry.getPriorityPassiveInterceptors(obj, eventType);
         end
 
         % given a containers.Map of tools, return cell array of tools sorted by descending Priority
-        function toolsCell = prioritySortTools(obj,toolsMap)
-            % sort toolsMap.values by priority in descending order
-            toolsCell = obj.prioritySortToolsCell(toolsMap.values);
+        function toolsCell = prioritySortTools(~,toolsMap)
+            toolsCell = matlabx.ui.axes.ImageAxesToolRegistry.prioritySortCell(toolsMap.values);
         end
 
         % given a cell array of tools, return the same cell array sorted by descending Priority
         function toolsCell = prioritySortToolsCell(~,toolsCell)
-            % empty cell, exit early
-            if isempty(toolsCell), return; end
-            % array of (sorted) Priority values for each tool
-            priority = cellfun(@(t) t.Priority,toolsCell,'UniformOutput',true);
-            [~,sortIdx] = sort(priority,'descend');
-            % sort using the idxs returned by sort
-            toolsCell = toolsCell(sortIdx);
+            toolsCell = matlabx.ui.axes.ImageAxesToolRegistry.prioritySortCell(toolsCell);
         end
 
     end
@@ -3143,64 +2806,22 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % get loaded tool names
         function ToolBox = get.ToolBox(obj)
-            ToolBox = obj.ToolList.keys;
+            ToolBox = matlabx.ui.axes.ImageAxesToolRegistry.getToolBox(obj);
         end
 
         % set loaded tools
         function set.ToolBox(obj,newToolBox)
-            % cell array of currently loaded tool names
-            oldToolBox = obj.ToolBox;
-            % tools in newToolBox that are not in oldToolBox (need to load them)
-            toolsToAdd = setdiff(newToolBox,oldToolBox,'stable');
-            % tools in oldToolBox that are not in newToolBox (need to unload them)
-            toolsToRemove = setdiff(oldToolBox,newToolBox,'stable');
-            % load all new tools in newToolBox
-            if ~isempty(toolsToAdd)
-                for i = 1:numel(toolsToAdd)
-                    % load the tool
-                    obj.loadTool(toolsToAdd{i});
-                end
-            end
-            % unload any loaded tools not in newToolBox
-            if ~isempty(toolsToRemove)
-                for i = 1:numel(toolsToRemove)
-                    % unload the tool
-                    obj.unloadTool(toolsToRemove{i});
-                end
-            end
+            matlabx.ui.axes.ImageAxesToolRegistry.setToolBox(obj, newToolBox);
         end
 
         % get installed tool names
         function ToolBelt = get.ToolBelt(obj)
-            ToolBelt = obj.ToolRegistry.keys;
+            ToolBelt = matlabx.ui.axes.ImageAxesToolRegistry.getToolBelt(obj);
         end
 
         % set installed tools (load first if necessary)
         function set.ToolBelt(obj,newToolBelt)
-            % cell array of currently installed tool names
-            oldToolBelt = obj.ToolBelt;
-            % tools in newToolBelt that are not in oldToolBelt (need to install them)
-            toolsToAdd = setdiff(newToolBelt,oldToolBelt,'stable');
-            % tools in oldToolBelt that are not in newToolBelt (need to uninstall them)
-            toolsToRemove = setdiff(oldToolBelt,newToolBelt,'stable');
-            % install all uninstalled tools in newToolBelt (load first if necessary)
-            if ~isempty(toolsToAdd)
-                for i = 1:numel(toolsToAdd)
-                    % tool is not already loaded, load it before installing
-                    if ~obj.ToolList.isKey(toolsToAdd{i})
-                        obj.loadTool(toolsToAdd{i});
-                    end
-                    % install the tool
-                    obj.installTool(toolsToAdd{i});
-                end
-            end
-            % uninstall any installed tools not in newToolBelt (do not unload)
-            if ~isempty(toolsToRemove)
-                for i = 1:numel(toolsToRemove)
-                    % uninstall the tool
-                    obj.uninstallTool(toolsToRemove{i});
-                end
-            end
+            matlabx.ui.axes.ImageAxesToolRegistry.setToolBelt(obj, newToolBelt);
         end
 
     end
@@ -3344,30 +2965,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         function I = placeholderImage()
             % return a placeholder image for startup
             I = zeros([256,256,3]); % all black truecolor array
-        end
-
-        function [ticks,labels] = getColorbarTickLabels(valClass,clim,N)
-            % get colorbar ticks and labels based on CData class and display range
-            arguments
-                valClass (1,:) char {mustBeMember(valClass,{'logical','double','single','uint16','uint8'})}
-                clim (1,2) double
-                N (:,1) = []
-            end
-        
-            if isempty(N)
-                if strcmp(valClass,'logical'); N = 2; else, N = 11; end
-            end
-        
-            ticks = linspace(0,1,N);
-
-            switch valClass
-                case 'logical'
-                    labels = arrayfun(@(v) sprintf('%i',v),ticks,'UniformOutput',false);
-                case {'double','single'}
-                    labels = arrayfun(@(v) sprintf('%.2f',v),linspace(clim(1),clim(2),N),'UniformOutput',false);
-                case {'uint16','uint8'}
-                    labels = arrayfun(@(v) sprintf('%i',v),round(linspace(clim(1),clim(2),N)),'UniformOutput',false);
-            end
         end
 
     end

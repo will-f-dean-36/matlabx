@@ -8,8 +8,8 @@ classdef Zoom < matlabx.ui.axes.AxesTool
 %       scroll wheel    increase/decrease zoom
 %
 %   Zoom is intentionally non-exclusive so it can coexist with interaction
-%   tools such as Pick or DrawRectangle. Its toggle hotkey is handled as a
-%   passive key interception so the tool can be enabled while inactive.
+%   tools such as Pick or DrawRectangle. Its toggle hotkey is contributed to
+%   the host hotkey registry when the tool is installed.
 
     properties
         ScrollEventsPerZoomStep (1,1) double {mustBeInteger, mustBePositive} = 5
@@ -29,13 +29,12 @@ classdef Zoom < matlabx.ui.axes.AxesTool
                 'AxesType',         "both", ...
                 'Icon',             matlabx.internal.Paths.icons('ZoomIcon.png'), ...
                 'Priority',         1, ...
-                'ToggleHotkey',     matlabx.keyboard.normalize('z','',{'shift','meta'}), ...
+                'ToggleHotkey',     matlabx.keyboard.hotkey("z", "Modifiers", ["shift","meta"]), ...
                 'IsExclusive',      false, ...
                 'InterceptsMove',   false, ...
                 'InterceptsDown',   true, ...
                 'InterceptsScroll', true, ...
-                'InterceptsKeyPress',    true, ...
-                'PassivelyInterceptsKeyPress', true);
+                'InterceptsKeyPress',    true);
         end
 
         function onEnabled(obj)
@@ -137,26 +136,6 @@ classdef Zoom < matlabx.ui.axes.AxesTool
                     obj.disable();
             end
 
-        end
-
-    end
-
-    %% Passive event hooks (only when Installed==true && IsPassiveInterceptor==true)
-    methods
-
-        function onPassiveKeyPress(obj,E)
-            if obj.ToggleHotkey == E.Hotkey
-                E.stop();
-            else
-                return
-            end
-
-            switch obj.Enabled
-                case false
-                    obj.enable();
-                case true
-                    obj.disable();
-            end
         end
 
     end

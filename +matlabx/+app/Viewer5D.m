@@ -15,6 +15,8 @@ classdef Viewer5D < handle
     properties (Access=private)
         % status flag for SizeChangedFcn 
         isResizingFigure (1,1) logical = false
+        % One-shot timer used to fit tight/square windows after live resize settles.
+        ResizeSettleTimer
         % UI Calibration
         UICal matlabx.ui.calibration.UICalibration
         % hotkey management
@@ -25,6 +27,8 @@ classdef Viewer5D < handle
     properties (Access=private)
         uipanelTopChromePx_ = 19
         previousFigurePosition_ = []
+        ResizeSettleDelay_ (1,1) double = 0.1
+        WindowSizeStep_ (1,1) double = 1.10
     end
 
     %% Public properties
@@ -100,22 +104,22 @@ classdef Viewer5D < handle
             % --- Log ---
             % get or init the Log
             matlabx.Log.get();
-            matlabx.Log.INFO("Starting Viewer5D...");
+            matlabx.Log.DEBUG("Starting Viewer5D...");
 
             % --- UICalibration ---
-            matlabx.Log.INFO("Calibrating UI...");
+            matlabx.Log.DEBUG("Calibrating UI...");
             try obj.setupUICalibration(); catch ME, matlabx.Log.ERROR(ME); rethrow(ME); end
 
             % --- Build GUI ---
-            matlabx.Log.INFO("Building GUI...");
+            matlabx.Log.DEBUG("Building GUI...");
             try obj.buildGUI(); catch ME, matlabx.Log.ERROR(ME); rethrow(ME); end
 
             % --- Initial UI sync ---
-            matlabx.Log.INFO("Refreshing UI...");
+            matlabx.Log.DEBUG("Refreshing UI...");
             try obj.refreshUI(); catch ME, matlabx.Log.ERROR(ME); rethrow(ME); end
 
             % --- Show figure ---
-            matlabx.Log.INFO("Opening...");
+            matlabx.Log.DEBUG("Opening...");
             obj.Fig.Visible = 'on';
 
             % attach listeners (only listening to FontSize for now)
@@ -130,6 +134,8 @@ classdef Viewer5D < handle
             % remove listeners first
             if ~isempty(obj.L), delete(obj.L(isvalid(obj.L))); end
             obj.L = event.listener.empty;
+            % stop timer callbacks that may still hold a reference to this object
+            obj.deleteResizeSettleTimer();
             % delete UI components
             if ~isempty(obj.Viewer) && isvalid(obj.Viewer), delete(obj.Viewer); end
             if ~isempty(obj.Grid)   && isvalid(obj.Grid), delete(obj.Grid); end
@@ -156,23 +162,23 @@ classdef Viewer5D < handle
 
         function buildGUI(obj)
             % --- Figure ---
-            matlabx.Log.INFO("Setting up main figure window...");
+            matlabx.Log.DEBUG("Setting up main figure window...");
             try obj.setupFigure(); catch ME, matlabx.Log.ERROR(ME); rethrow(ME); end
 
             % --- CommandRouter ---
-            matlabx.Log.INFO("Setting up CommandRouter...");
+            matlabx.Log.DEBUG("Setting up CommandRouter...");
             try obj.setupCommandRouter(); catch ME, matlabx.Log.ERROR(ME); rethrow(ME); end
 
             % --- Menubar ---
-            matlabx.Log.INFO("Setting up Menubar...");
+            matlabx.Log.DEBUG("Setting up Menubar...");
             try obj.setupMenubar(); catch ME, matlabx.Log.ERROR(ME); rethrow(ME); end
 
             % --- Grids ---
-            matlabx.Log.INFO("Setting up Grid...");
+            matlabx.Log.DEBUG("Setting up Grid...");
             try obj.setupGrids(); catch ME, matlabx.Log.ERROR(ME); rethrow(ME); end
 
             % --- Viewer ---
-            matlabx.Log.INFO("Setting up Viewer...");
+            matlabx.Log.DEBUG("Setting up Viewer...");
             try obj.setupViewer(); catch ME, matlabx.Log.ERROR(ME); rethrow(ME); end
 
             % center the GUI after defining all graphics components
@@ -187,12 +193,23 @@ classdef Viewer5D < handle
                 "Visible",              "off",...
                 "AutoResizeChildren",   "off",...
                 "Name",                 obj.Title,...
-                "SizeChangedFcn",       @(~,~) obj.refreshWindowSize());
+                "SizeChangedFcn",       @(~,~) obj.onFigureSizeChanged());
             obj.previousFigurePosition_ = [0 0 500 500];
+            obj.setupResizeSettleTimer();
         end
 
         function setupCommandRouter(obj)
             obj.CommandRouter = matlabx.ui.interaction.CommandRouter('Parent',obj.Fig);
+            obj.refreshHotkeys();
+        end
+
+        function setupResizeSettleTimer(obj)
+            obj.ResizeSettleTimer = timer(...
+                "ExecutionMode", "singleShot",...
+                "StartDelay",    obj.ResizeSettleDelay_,...
+                "BusyMode",      "drop",...
+                "Name",          "Viewer5DResizeSettleTimer",...
+                "TimerFcn",      @(~,~) obj.onResizeSettled());
         end
 
         function setupMenubar(obj)
@@ -293,24 +310,73 @@ classdef Viewer5D < handle
         end
 
         function refreshWindowSize(obj)
-        %REFRESHWINDOWSIZE Control figure 
+        %REFRESHWINDOWSIZE Apply the selected figure shape policy.
 
-            % Prevent recursive SizeChangedFcn calls
-            if obj.isResizingFigure, return; end
+            if isempty(obj.Fig) || ~isvalid(obj.Fig)
+                return
+            end
 
-            % indicate that we are resizing figure
-            obj.isResizingFigure = true; 
-            % choose resize mode based on WindowShape
+            % Programmatic Fig.Position changes fire SizeChangedFcn again. The guard
+            % keeps those follow-up events from recursively reshaping the window.
+            if obj.isResizingFigure
+                return
+            end
+
+            obj.isResizingFigure = true;
+            cleanupResizeFlag = onCleanup(@() obj.clearResizeGuard());
+
+            % Figure states managed by the window manager should not be reshaped.
+            if ~strcmp(obj.Fig.WindowState, 'normal')
+                obj.previousFigurePosition_ = obj.Fig.Position;
+                return
+            end
+
             switch obj.WindowShape
                 case 'tight'
-                    obj.fitWindowToImage();
+                    if ~isempty(obj.Image)
+                        obj.fitWindowToContentAspect(obj.Image.SizeY / obj.Image.SizeX);
+                    end
                 case 'square'
-                    obj.fitWindowToSquare();
+                    obj.fitWindowToContentAspect(1);
                 case 'normal'
                     obj.previousFigurePosition_ = obj.Fig.Position;
             end
-            % indicate that we are no longer resizing
-            obj.isResizingFigure = false;
+        end
+
+        function clearResizeGuard(obj)
+            if isvalid(obj)
+                obj.isResizingFigure = false;
+            end
+        end
+
+        function armDeferredWindowFit(obj)
+        %ARMDEFERREDWINDOWFIT Fit the figure shortly after live resize stops.
+        %
+        %   SizeChangedFcn fires continuously during a mouse drag. Restarting a
+        %   one-shot timer on each event gives the native window manager control
+        %   during the drag, then applies Viewer5D's tight/square shape policy once
+        %   the resize stream quiets down.
+
+            if isempty(obj.ResizeSettleTimer) || ~isvalid(obj.ResizeSettleTimer)
+                obj.setupResizeSettleTimer();
+            end
+
+            stop(obj.ResizeSettleTimer);
+            start(obj.ResizeSettleTimer);
+        end
+
+        function deleteResizeSettleTimer(obj)
+            if isempty(obj.ResizeSettleTimer)
+                return
+            end
+
+            T = obj.ResizeSettleTimer;
+            obj.ResizeSettleTimer = [];
+
+            if isvalid(T)
+                stop(T);
+                delete(T);
+            end
         end
 
         function refreshWindowState(obj)
@@ -360,9 +426,24 @@ classdef Viewer5D < handle
         end
 
         function refreshHotkeys(obj)
-            % % add a hotkey for each action
-            % Hotkey = matlabx.keyboard.normalize("d","d",["shift","meta"]);
-            % HotkeyFcn = @(o,k) obj.actionOnHotkey(k);
+            if isempty(obj.CommandRouter) || ~isvalid(obj.CommandRouter)
+                return
+            end
+
+            % MATLAB can report punctuation keys differently depending on the
+            % keyboard, platform, and whether the numpad is used. Register the
+            % common normalized variants so + and - feel like simple viewer
+            % shortcuts instead of a keyboard-layout guessing game.
+            increaseKeys = ["+", "add", "equal"];
+            decreaseKeys = ["-", "hyphen", "minus", "subtract"];
+
+            for key = increaseKeys
+                obj.CommandRouter.addHotkey(key, @(~,~) obj.increaseWindowSize());
+            end
+
+            for key = decreaseKeys
+                obj.CommandRouter.addHotkey(key, @(~,~) obj.decreaseWindowSize());
+            end
         end
 
         function refreshCalibration(obj)
@@ -406,235 +487,157 @@ classdef Viewer5D < handle
 
     %% Window UI Helpers
     methods (Access=private)
-        
-        % function fitWindowToImage(obj)
-        %     figPos = obj.Fig.Position;
-        %     figX = figPos(1);
-        %     figY = figPos(2);
-        %     figW = figPos(3);
-        %     figH = figPos(4);
-        % 
-        %     if figW <= 0 || figH <= 0, return; end
-        % 
-        %     % get height and width of actual image
-        %     imgH = obj.Image.SizeY;
-        %     imgW = obj.Image.SizeX;
-        % 
-        %     % height / width ratios
-        %     targetRatio = imgH / imgW;
-        %     currentRatio = figH / figW;
-        % 
-        %     % --- get new W and H for figure window ---
-        %     if currentRatio > targetRatio
-        %         % Figure is too tall for the image
-        %         newFigW = figW;
-        %         newFigH = figW * targetRatio;
-        %     else
-        %         % Figure is too wide for the image
-        %         newFigH = figH;
-        %         newFigW = figH / targetRatio;
-        %     end
-        % 
-        %     newFigH = newFigH + obj.uipanelTopChromePx_;
-        % 
-        %     % --- adjust to maintain previous window center ---
-        %     if ~isempty(obj.previousFigurePosition_)
-        %         % p = obj.previousFigurePosition_;
-        %         p = figPos;
-        %         oldCenterX = p(1)+p(3)/2;
-        %         oldCenterY = p(2)+p(4)/2;
-        % 
-        %         figX = oldCenterX-newFigW/2;
-        %         figY = oldCenterY-newFigH/2;
-        %     end
-        % 
-        %     % --- set position ---
-        % 
-        %     newPos = [figX, figY, newFigW, newFigH];
-        % 
-        %     % Avoid tiny floating-point resize loops
-        %     if any(abs(newPos - figPos) > 0.5)
-        %         obj.previousFigurePosition_ = newPos;
-        %         obj.Fig.Position = newPos;
-        %     end
-        % end
 
+        function fitWindowToContentAspect(obj, targetRatio)
+        %FITWINDOWTOCONTENTASPECT Resize figure so content area has target ratio.
+        %
+        %   targetRatio is height/width for the ImageAxes image area, excluding the
+        %   calibrated top panel chrome. This is called after live resize settles,
+        %   so it can correct the figure once without fighting the user's drag.
 
-        function fitWindowToImage(obj)
+            if ~isfinite(targetRatio) || targetRatio <= 0
+                return
+            end
+
             figPos = obj.Fig.Position;
-            figX = figPos(1);
-            figY = figPos(2);
             figW = figPos(3);
             figH = figPos(4);
 
-            if figW <= 0 || figH <= 0, return; end
+            if figW <= 0 || figH <= 0
+                return
+            end
 
-            panelTop = obj.uipanelTopChromePx_;
+            driver = obj.getResizeDriver(figPos, targetRatio);
+            newPos = obj.getAspectFitFigurePosition(figPos, targetRatio, driver);
 
-            % axes height and width
-            axH = figH-panelTop;
-            axW = figW;
-
-            % get height and width of actual image
-            imgH = obj.Image.SizeY;
-            imgW = obj.Image.SizeX;
-
-            % height / width ratios
-            targetRatio = imgH / imgW;
-            currentRatio = axH / axW;
-
-            % dimensions already correct -> return
-            if targetRatio == currentRatio, return; end
-
-            % determine whether H/W are increasing/decreasing
-            lastW = obj.previousFigurePosition_(3);
-            lastH = obj.previousFigurePosition_(4);
-
-            W_decreasing = lastW > figW;
-            W_increasing = lastW < figW;
-            W_static = lastW == figW;
-
-            H_decreasing = lastH > figH;
-            H_increasing = lastH < figH;
-            H_static = lastH == figH;
-
-            % --- get new W and H for figure window ---
-            if currentRatio > targetRatio
-                % figure too tall for image
-                if H_static && W_static
-                    newFigH = (figW * targetRatio) + panelTop;
-                    newFigW = figW;
-                elseif W_decreasing
-                    % decrease height
-                    newFigH = (figW * targetRatio) + panelTop;
-                    newFigW = figW;
-                elseif H_increasing
-                    % increase width
-                    newFigW = axH / targetRatio;
-                    newFigH = figH;
-                else
-                    obj.previousFigurePosition_ = figPos;
-                    return
-                end
+            % Avoid tiny resize loops from fractional-pixel math or platform chrome.
+            if any(abs(newPos - figPos) > 0.5)
+                obj.Fig.Position = newPos;
+                obj.previousFigurePosition_ = obj.Fig.Position;
             else
-                % figure too wide for image
-                if H_static && W_static % decrease width
-                    newFigW = axH / targetRatio;
-                    newFigH = figH;
-                elseif H_decreasing % decrease width
-                    newFigW = axH / targetRatio;
-                    newFigH = figH;
-                elseif W_increasing
-                    % increase height
-                    newFigH = (figW * targetRatio) + panelTop;
-                    newFigW = figW;
-                else
-                    obj.previousFigurePosition_ = figPos;
-                    return
-                end
+                obj.previousFigurePosition_ = figPos;
             end
-
-            % H/W cannot be less than 0
-            newFigH = max(newFigH, 0);
-            newFigW = max(newFigW, 0);
-
-            % Avoid tiny floating-point resize loops
-            if any(abs([newFigW newFigH] - figPos(3:4)) > 0.5)
-                obj.previousFigurePosition_ = [figX, figY, newFigW, newFigH];
-                obj.Fig.Position(3:4) = [newFigW newFigH];
-            end
-
         end
 
-        function fitWindowToSquare(obj)
-            figPos = obj.Fig.Position;
-            figX = figPos(1);
-            figY = figPos(2);
-            figW = figPos(3);
-            figH = figPos(4);
+        function driver = getResizeDriver(obj, figPos, targetRatio)
+        %GETRESIZEDRIVER Decide whether width or height should drive reshaping.
+        %
+        %   During manual resize, use whichever figure dimension changed more since
+        %   the last realized position. During startup or ambiguous changes, choose
+        %   the dimension that fits the requested aspect inside the current figure.
 
-            if figW <= 0 || figH <= 0, return; end
+            if isempty(obj.previousFigurePosition_) || numel(obj.previousFigurePosition_) < 4
+                driver = obj.getAspectFitDriver(figPos, targetRatio);
+                return
+            end
 
-            panelTop = obj.uipanelTopChromePx_;
+            delta = figPos(3:4) - obj.previousFigurePosition_(3:4);
 
-            % axes height and width
-            axH = figH-panelTop;
-            axW = figW;
-
-            % already square -> return
-            if axH == axW, return; end
-
-            % determine whether H/W are increasing/decreasing
-            lastW = obj.previousFigurePosition_(3);
-            lastH = obj.previousFigurePosition_(4);
-
-            W_decreasing = lastW > figW;
-            W_increasing = lastW < figW;
-            W_static = lastW == figW;
-
-            H_decreasing = lastH > figH;
-            H_increasing = lastH < figH;
-            H_static = lastH == figH;
-
-            % --- get new W and H for figure window ---
-            if axH > axW
-                if H_static && W_static
-                    newFigH = figW + panelTop;
-                    newFigW = figW;
-                elseif W_decreasing
-                    newFigH = figW + panelTop;
-                    newFigW = figW;
-                elseif H_increasing
-                    newFigW = axH;
-                    newFigH = figH;
-                else
-                    obj.previousFigurePosition_ = figPos;
-                    return
-                end
+            if max(abs(delta)) <= 0.5
+                driver = obj.getAspectFitDriver(figPos, targetRatio);
+            elseif abs(delta(1)) >= abs(delta(2))
+                driver = "width";
             else
-                if H_static && W_static
-                    newFigW = axH;
-                    newFigH = figH;
-                elseif H_decreasing
-                    newFigW = axH;
-                    newFigH = figH;
-                elseif W_increasing
-                    newFigH = figW + panelTop;
+                driver = "height";
+            end
+        end
+
+        function driver = getAspectFitDriver(obj, figPos, targetRatio)
+        %GETASPECTFITDRIVER Choose the non-growing fit for programmatic refreshes.
+            panelTop = obj.uipanelTopChromePx_;
+            contentH = max(1, figPos(4) - panelTop);
+            currentRatio = contentH / figPos(3);
+
+            if currentRatio > targetRatio
+                driver = "width";
+            else
+                driver = "height";
+            end
+        end
+
+        function newPos = getAspectFitFigurePosition(obj, figPos, targetRatio, driver)
+        %GETASPECTFITFIGUREPOSITION Project figure size onto target content aspect.
+            panelTop = obj.uipanelTopChromePx_;
+            figW = max(1, figPos(3));
+            figH = max(panelTop + 1, figPos(4));
+            contentH = max(1, figH - panelTop);
+
+            switch driver
+                case "width"
                     newFigW = figW;
-                else
-                    obj.previousFigurePosition_ = figPos;
-                    return
-                end
+                    newFigH = figW * targetRatio + panelTop;
+                case "height"
+                    newFigH = figH;
+                    newFigW = contentH / targetRatio;
             end
 
+            newPos = figPos;
+            newPos(3) = max(1, round(newFigW));
+            newPos(4) = max(panelTop + 1, round(newFigH));
+        end
 
-            % % --- get new W and H for figure window ---
-            % if W_decreasing
-            %     newFigH = figW + panelTop;
-            %     newFigW = figW;
-            % elseif H_increasing
-            %     newFigW = axH;
-            %     newFigH = figH;
-            % elseif H_decreasing
-            %     newFigW = axH;
-            %     newFigH = figH;
-            % elseif W_increasing
-            %     newFigH = figW + panelTop;
-            %     newFigW = figW;
-            % else
-            %     return
-            % end
+        function scaleWindowSize(obj, factor)
+        %SCALEWINDOWSIZE Incrementally resize the figure from keyboard shortcuts.
 
-            % H/W cannot be less than 0
-            newFigH = max(newFigH, 0);
-            newFigW = max(newFigW, 0);
-
-            % Avoid tiny floating-point resize loops
-            if any(abs([newFigW newFigH] - figPos(3:4)) > 0.5)
-                obj.previousFigurePosition_ = [figX, figY, newFigW, newFigH];
-                obj.Fig.Position(3:4) = [newFigW newFigH];
+            if isempty(obj.Fig) || ~isvalid(obj.Fig) || ~strcmp(obj.Fig.WindowState, 'normal')
+                return
             end
 
+            if ~isfinite(factor) || factor <= 0
+                return
+            end
+
+            if ~isempty(obj.ResizeSettleTimer) && isvalid(obj.ResizeSettleTimer)
+                stop(obj.ResizeSettleTimer);
+            end
+
+            figPos = obj.Fig.Position;
+            newPos = obj.getScaledFigurePosition(figPos, factor);
+            newPos = obj.centerPositionOnPreviousPosition(newPos, figPos);
+
+            if any(abs(newPos - figPos) > 0.5)
+                obj.isResizingFigure = true;
+                cleanupResizeFlag = onCleanup(@() obj.clearResizeGuard());
+                obj.Fig.Position = newPos;
+                obj.previousFigurePosition_ = obj.Fig.Position;
+            end
+        end
+
+        function newPos = getScaledFigurePosition(obj, figPos, factor)
+        %GETSCALEDFIGUREPOSITION Return an incrementally larger/smaller figure.
+
+            newPos = figPos;
+            newW = max(1, round(figPos(3) * factor));
+
+            switch obj.WindowShape
+                case 'tight'
+                    if isempty(obj.Image)
+                        newH = round(figPos(4) * factor);
+                    else
+                        targetRatio = obj.Image.SizeY / obj.Image.SizeX;
+                        newH = round(newW * targetRatio + obj.uipanelTopChromePx_);
+                    end
+                case 'square'
+                    newH = newW + obj.uipanelTopChromePx_;
+                case 'normal'
+                    newH = round(figPos(4) * factor);
+            end
+
+            newPos(3) = newW;
+            newPos(4) = max(obj.uipanelTopChromePx_ + 1, newH);
+        end
+
+        function newPos = centerPositionOnPreviousPosition(~, newPos, oldPos)
+        %CENTERPOSITIONONPREVIOUSPOSITION Keep the figure center fixed.
+        %
+        %   Used only for hotkey-initiated resizing. Live mouse resizing is allowed
+        %   to follow the operating system's native edge/corner anchoring.
+
+            centerX = oldPos(1) + oldPos(3)/2;
+            centerY = oldPos(2) + oldPos(4)/2;
+
+            newPos(1) = round(centerX - newPos(3)/2);
+            newPos(2) = round(centerY - newPos(4)/2);
         end
 
     end
@@ -642,15 +645,54 @@ classdef Viewer5D < handle
     %% Callbacks - hotkeys
     methods (Access=private)
 
-        function actionOnHotkey(obj,key)
-            if isempty(obj.Image), return; end
-            matlabx.struct.prettyPrint(key);
+        function increaseWindowSize(obj)
+            obj.scaleWindowSize(obj.WindowSizeStep_);
+        end
+
+        function decreaseWindowSize(obj)
+            obj.scaleWindowSize(1 / obj.WindowSizeStep_);
         end
 
     end
 
     %% Callbacks - Listeners
     methods (Access=private)
+
+        function onFigureSizeChanged(obj)
+        %ONFIGURESIZECHANGED Debounce user-driven figure resize events.
+
+            if isempty(obj.Fig) || ~isvalid(obj.Fig)
+                return
+            end
+
+            % Ignore SizeChangedFcn events caused by our own post-resize snap.
+            if obj.isResizingFigure
+                return
+            end
+
+            % Do not reshape while the window manager owns the figure state.
+            if ~strcmp(obj.Fig.WindowState, 'normal')
+                obj.previousFigurePosition_ = obj.Fig.Position;
+                return
+            end
+
+            switch obj.WindowShape
+                case 'normal'
+                    obj.previousFigurePosition_ = obj.Fig.Position;
+                    return
+                otherwise
+                    obj.armDeferredWindowFit();
+            end
+        end
+
+        function onResizeSettled(obj)
+        %ONRESIZESETTLED Apply tight/square fitting after resize events quiet down.
+            if ~isvalid(obj)
+                return
+            end
+
+            obj.refreshWindowSize();
+        end
 
         function onFontSizeChanged(obj)
             obj.refreshCalibration();
@@ -669,7 +711,7 @@ classdef Viewer5D < handle
             % hide figure, show file selection dialog, show figure
             obj.Fig.Visible = 'off';
             % update log
-            matlabx.Log.INFO("Selecting image file...");
+            matlabx.Log.DEBUG("Selecting image file...");
 
             try
                 % get Image5D using file dialog
