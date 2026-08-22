@@ -268,6 +268,9 @@ classdef AxesTool < handle
         function onHostAxesChanged(~,~),   end   % e.g., XLim/YLim/CLim changed
         function onHostRenderSourceChanged(~,~),  end   % rendered source plane/composite changed
 
+        % Optional context-menu contribution hook
+        function contributeContextMenu(~,~), end
+
     end
 
     %% derived getters

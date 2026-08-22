@@ -12,7 +12,8 @@ classdef Zoom < matlabx.ui.axes.AxesTool
 %   the host hotkey registry when the tool is installed.
 
     properties
-        ScrollEventsPerZoomStep (1,1) double {mustBeInteger, mustBePositive} = 5
+        ScrollEventsPerZoomStep (1,1) double {mustBeInteger, mustBePositive} = 1
+        ScrollZoomFactor (1,1) double {mustBeGreaterThan(ScrollZoomFactor,1)} = 1.3
     end
 
     properties (Access=private)
@@ -53,6 +54,108 @@ classdef Zoom < matlabx.ui.axes.AxesTool
             end
         end
 
+        function contributeContextMenu(obj, menu)
+        %CONTRIBUTECONTEXTMENU Add Zoom commands to the host context menu.
+            menu.addSubmenu( ...
+                "Zoom", ...
+                "Zoom", ...
+                "Owner", obj);
+
+            menu.addItem( ...
+                "Zoom.FollowCursor", ...
+                "Follow Cursor", ...
+                @(h,~) obj.onFollowCursorMenuSelected(h), ...
+                "Parent", "Zoom", ...
+                "Owner", obj, ...
+                "Checked", matlab.lang.OnOffSwitchState(obj.Host.FollowCursorEnabled), ...
+                "RefreshFcn", @(h) obj.refreshFollowCursorMenuItem(h));
+
+            menu.addSubmenu( ...
+                "Zoom.Level", ...
+                "Level", ...
+                "Parent", "Zoom", ...
+                "Owner", obj);
+
+            factors = obj.Host.getZoomFactors();
+            for i = 1:numel(factors)
+                factor = factors(i);
+                menu.addItem( ...
+                    "Zoom.Level." + obj.zoomFactorId(factor), ...
+                    obj.zoomFactorLabel(factor), ...
+                    @(h,~) obj.onZoomLevelMenuSelected(h, factor), ...
+                    "Parent", "Zoom.Level", ...
+                    "Owner", obj, ...
+                    "Checked", matlab.lang.OnOffSwitchState(obj.isCurrentZoomFactor(factor)), ...
+                    "UserData", factor, ...
+                    "RefreshFcn", @(h) obj.refreshZoomLevelMenuItem(h, factor));
+            end
+        end
+
+    end
+
+    %% Context menu callbacks
+    methods (Access=private)
+        function onFollowCursorMenuSelected(obj, h)
+        %ONFOLLOWCURSORMENUSELECTED Toggle cursor-follow from context menu.
+            obj.Host.toggleFollowCursorEnabled();
+            obj.refreshFollowCursorMenuItem(h);
+        end
+
+        function onZoomLevelMenuSelected(obj, h, factor)
+        %ONZOOMLEVELMENUSELECTED Enable zoom and set a supported zoom factor.
+            if ~obj.Enabled
+                obj.enable();
+            end
+
+            obj.Host.setZoomFactor(factor);
+            obj.refreshZoomLevelMenuGroup(h.Parent);
+        end
+
+        function refreshFollowCursorMenuItem(obj, h)
+        %REFRESHFOLLOWCURSORMENUITEM Sync Follow Cursor checked state.
+            if isvalid(obj.Host)
+                h.Checked = matlab.lang.OnOffSwitchState(obj.Host.FollowCursorEnabled);
+            end
+        end
+
+        function refreshZoomLevelMenuItem(obj, h, factor)
+        %REFRESHZOOMLEVELMENUITEM Sync one zoom-level checked state.
+            if isvalid(obj.Host)
+                h.Checked = matlab.lang.OnOffSwitchState(obj.isCurrentZoomFactor(factor));
+            end
+        end
+
+        function refreshZoomLevelMenuGroup(obj, levelMenu)
+        %REFRESHZOOMLEVELMENUGROUP Sync checked state for all level items.
+            items = levelMenu.Children;
+            for i = 1:numel(items)
+                factor = items(i).UserData;
+                if isnumeric(factor) && isscalar(factor)
+                    obj.refreshZoomLevelMenuItem(items(i), factor);
+                end
+            end
+        end
+
+        function tf = isCurrentZoomFactor(obj, factor)
+        %ISCURRENTZOOMFACTOR True when factor matches the host zoom factor.
+            tf = abs(obj.Host.ZoomFactor - factor) < 1e-10;
+        end
+    end
+
+    methods (Static, Access=private)
+        function label = zoomFactorLabel(factor)
+        %ZOOMFACTORLABEL Return a compact display label for a zoom factor.
+            if abs(factor - round(factor)) < 1e-10
+                label = sprintf('%gx', round(factor));
+            else
+                label = sprintf('%.3gx', factor);
+            end
+        end
+
+        function id = zoomFactorId(factor)
+        %ZOOMFACTORID Return a stable id suffix for a zoom factor.
+            id = "x" + replace(string(sprintf('%.12g', factor)), ".", "p");
+        end
     end
 
     %% Active event hooks (only when Enabled==true && IsInterceptor==true)
@@ -107,11 +210,11 @@ classdef Zoom < matlabx.ui.axes.AxesTool
 
             obj.ScrollEventCount = 0;
 
-            % Adjust zoom level based on scroll direction
+            % Adjust zoom level continuously based on scroll direction.
             if scrollDirection < 0
-                H.increaseZoom();
+                H.stepZoomContinuousAtCursor(1, obj.ScrollZoomFactor);
             elseif scrollDirection > 0
-                H.decreaseZoom();
+                H.stepZoomContinuousAtCursor(-1, obj.ScrollZoomFactor);
             end
         end
 

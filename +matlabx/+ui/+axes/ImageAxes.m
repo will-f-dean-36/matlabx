@@ -167,6 +167,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         % listeners
         L event.listener
 
+    end
+
+    properties (Access={?matlabx.ui.axes.ImageAxesToolManager}, Transient, NonCopyable)
         % manager for the host-owned context menu
         ContextMenuManager matlabx.ui.axes.ImageAxesContextMenuManager
     end
@@ -453,13 +456,16 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     % returns to the ordinary absolute cursor-follow mapping.
 
     properties (Access=private)
-        % Zoom_ stores the discrete zoom state. Levels are visible-image
-        % fractions, not magnification factors. LastCursorXY is in mainAxes image
+        % Zoom_ stores continuous zoom state. Level is the visible-image fraction,
+        % not magnification factor. PresetLevels are convenient stops for click,
+        % key, and context-menu zoom commands. LastCursorXY is in mainAxes image
         % coordinates and is used as a fallback anchor when enabling zoom with no
         % active cursor over the image.
         Zoom_ = struct( ...
-            'Idx', 1, ...
-            'Levels', [1 1/2 1/3 1/4 1/5 1/10 1/15 1/20], ...
+            'Level', 1, ...
+            'PresetLevels', [1 1/2 1/3 1/4 1/5 1/10 1/15 1/20], ...
+            'MinLevel', 1/20, ...
+            'MaxLevel', 1, ...
             'LastCursorXY', [], ...
             'Enabled', false)
 
@@ -817,6 +823,45 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.FollowCursor_.LastCursorXY = [];
         end
 
+        function XY = currentViewCenter(obj)
+            %CURRENTVIEWCENTER Return the center of the current main-axes view.
+            XY = [mean(obj.mainAxes.XLim), mean(obj.mainAxes.YLim)];
+        end
+
+        function level = clampZoomLevel(obj, level)
+            %CLAMPZOOMLEVEL Constrain a visible-image fraction to supported bounds.
+            level = min(max(level, obj.Zoom_.MinLevel), obj.Zoom_.MaxLevel);
+        end
+
+        function resetZoomViewState(obj)
+            %RESETZOOMVIEWSTATE  Restore default zoom/follow view state.
+            %
+            %   This resets the host navigation state that determines the visible
+            %   view box without enabling or disabling any tool. If the Zoom tool is
+            %   still enabled, the overview patches remain visible and reflect the
+            %   full-image view. If zoom is not enabled, the patches stay hidden.
+
+            obj.Zoom_.Level = obj.Zoom_.MaxLevel;
+            obj.Zoom_.LastCursorXY = [];
+            obj.clearFollowCursorAnchor();
+            obj.restoreDefaultLimits();
+            obj.updateViewBoxBaseCoordinates();
+
+            if obj.ZoomEnabled
+                set([obj.ViewBoxFull,obj.ViewBoxZoom], "Visible", "on");
+                obj.applyZoomLims(obj.defaultXLim, obj.defaultYLim);
+            else
+                set(obj.ViewBoxFull, ...
+                    "XData", NaN, ...
+                    "YData", NaN, ...
+                    "Visible", "off");
+                set(obj.ViewBoxZoom, ...
+                    "XData", NaN, ...
+                    "YData", NaN, ...
+                    "Visible", "off");
+            end
+        end
+
         function applyFollowCursorLims(obj,XY)
             %APPLYFOLLOWCURSORLIMS  Apply cursor-following zoom limits
             %
@@ -876,6 +921,37 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.applyZoomLims(XZoomLim,YZoomLim);
 
             % This field now always contains image/data coordinates
+            obj.Zoom_.LastCursorXY = XY;
+
+            if obj.ZoomEnabled && obj.FollowCursorEnabled
+                obj.calibrateFollowCursorAnchor(obj.cursorPositionStatic);
+            end
+        end
+
+        function applyCenterAnchoredZoomLims(obj,XY)
+            %APPLYCENTERANCHOREDZOOMLIMS Apply current ZoomLevel centered on XY.
+            %
+            %   Stored zoom anchors represent the region the user was viewing when
+            %   zoom was disabled. Treat them as desired view centers, not as live
+            %   cursor positions inside the current full-image axes limits.
+
+            sz = obj.RenderSourceSize;
+            H = sz(1);
+            W = sz(2);
+
+            viewWidth  = obj.ZoomLevel * W;
+            viewHeight = obj.ZoomLevel * H;
+
+            defXLim = [0.5, W + 0.5];
+            defYLim = [0.5, H + 0.5];
+
+            xLower = XY(1) - viewWidth/2;
+            yLower = XY(2) - viewHeight/2;
+
+            xLower = min(max(xLower,defXLim(1)), defXLim(2) - viewWidth);
+            yLower = min(max(yLower,defYLim(1)), defYLim(2) - viewHeight);
+
+            obj.applyZoomLims(xLower + [0,viewWidth], yLower + [0,viewHeight]);
             obj.Zoom_.LastCursorXY = XY;
 
             if obj.ZoomEnabled && obj.FollowCursorEnabled
@@ -1031,7 +1107,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             %   the view box is half the image width and height, corresponding to a
             %   2x visual zoom.
 
-            z = obj.Zoom_.Levels(obj.Zoom_.Idx);
+            z = obj.Zoom_.Level;
         end
 
         function f = get.ZoomFactor(obj)
@@ -1040,15 +1116,108 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             f = 1 / obj.ZoomLevel;
         end
 
+        function factors = getZoomFactors(obj)
+        %GETZOOMFACTORS Return supported preset visual zoom factors.
+            factors = 1 ./ obj.Zoom_.PresetLevels;
+        end
+
+        function setZoomFactor(obj, factor)
+        %SETZOOMFACTOR Set the current visual zoom factor.
+            obj.setZoomLevel(1 ./ factor);
+        end
+
+        function setZoomLevel(obj, level)
+        %SETZOOMLEVEL Set the current visible-image fraction.
+            level = obj.clampZoomLevel(level);
+            center = obj.currentViewCenter();
+            obj.Zoom_.Level = level;
+            obj.updateViewBoxBaseCoordinates();
+
+            if obj.ZoomEnabled
+                obj.applyCenterAnchoredZoomLims(center);
+            end
+        end
+
+        function setZoomFactorAtCursor(obj, factor)
+        %SETZOOMFACTORATCURSOR Set visual zoom factor around the cursor.
+            obj.setZoomLevelAtCursor(1 ./ factor);
+        end
+
+        function setZoomLevelAtCursor(obj, level)
+        %SETZOOMLEVELATCURSOR Set visible-image fraction around the cursor.
+            level = obj.clampZoomLevel(level);
+            oldCenter = obj.currentViewCenter();
+            oldXLim = obj.mainAxes.XLim;
+            oldYLim = obj.mainAxes.YLim;
+
+            obj.Zoom_.Level = level;
+            obj.updateViewBoxBaseCoordinates();
+
+            if ~obj.ZoomEnabled
+                return
+            end
+
+            XY = obj.cursorPosition;
+            if isempty(XY)
+                obj.applyCenterAnchoredZoomLims(oldCenter);
+            else
+                obj.applyCursorAnchoredZoomLims(XY,oldXLim,oldYLim);
+            end
+        end
+
+        function stepZoomPresetAtCursor(obj, direction)
+        %STEPZOOMPRESETATCURSOR Move to the next preset zoom factor at cursor.
+            direction = sign(direction);
+            if direction == 0
+                return
+            end
+
+            factors = sort(obj.getZoomFactors(), 'ascend');
+            currentFactor = obj.ZoomFactor;
+            tol = 1e-10;
+
+            if direction > 0
+                idx = find(factors > currentFactor + tol, 1, 'first');
+            else
+                idx = find(factors < currentFactor - tol, 1, 'last');
+            end
+
+            if isempty(idx)
+                return
+            end
+
+            obj.setZoomFactorAtCursor(factors(idx));
+        end
+
+        function stepZoomContinuousAtCursor(obj, direction, multiplier)
+        %STEPZOOMCONTINUOUSATCURSOR Apply multiplicative zoom step at cursor.
+            arguments
+                obj
+                direction (1,1) double
+                multiplier (1,1) double {mustBeGreaterThan(multiplier,1)}
+            end
+
+            direction = sign(direction);
+            if direction == 0
+                return
+            end
+
+            factor = obj.ZoomFactor .* multiplier .^ direction;
+            obj.setZoomFactorAtCursor(factor);
+        end
+
         function enableZoom(obj)
             %ENABLEZOOM  Enable zoom navigation.
             %
             %   Shows the full-image and zoomed-view miniature boxes, then applies
             %   the current ZoomLevel around the best available anchor:
             %
-            %       1. current image-space cursor position in mainAxes
-            %       2. most recent image-space zoom anchor
+            %       1. most recent image-space zoom anchor
+            %       2. current image-space cursor position in mainAxes
             %       3. image center
+            %
+            %   Stored anchors are preferred so toolbar clicks used to re-enable
+            %   zoom do not accidentally move the view box toward the toolbar.
             %
             %   If FollowCursor is already enabled, a follow-cursor anchor is
             %   calibrated afterward so the next mouse move does not jump.
@@ -1067,12 +1236,17 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             oldXLim = obj.mainAxes.XLim;
             oldYLim = obj.mainAxes.YLim;
 
-            % Prefer the current image coordinate under the cursor
-            XY = obj.cursorPosition;
-
-            % Fall back to the most recent image-space zoom anchor
-            if isempty(XY) && isfield(obj.Zoom_,'LastCursorXY')
+            % Prefer the most recent image-space zoom anchor.
+            XY = [];
+            useStoredAnchor = false;
+            if isfield(obj.Zoom_,'LastCursorXY')
                 XY = obj.Zoom_.LastCursorXY;
+                useStoredAnchor = ~isempty(XY);
+            end
+
+            % Fall back to the current image coordinate under the cursor.
+            if isempty(XY)
+                XY = obj.cursorPosition;
             end
 
             % Final fallback: center of the image
@@ -1081,7 +1255,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 XY = [(sz(2) + 1)/2, (sz(1) + 1)/2];
             end
 
-            obj.applyCursorAnchoredZoomLims(XY,oldXLim,oldYLim);
+            if useStoredAnchor
+                obj.applyCenterAnchoredZoomLims(XY);
+            else
+                obj.applyCursorAnchoredZoomLims(XY,oldXLim,oldYLim);
+            end
 
             obj.Zoom_.Enabled = true;
 
@@ -1096,6 +1274,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             if ~obj.ZoomEnabled
                 return
             end
+
+            % Remember the current view center before restoring full-image limits.
+            % Re-enabling zoom should return to the same region, not to wherever
+            % the cursor happens to be when a toolbar button is clicked.
+            obj.Zoom_.LastCursorXY = obj.currentViewCenter();
 
             % Clear and hide patches
             if isvalid(obj.ViewBoxFull)
@@ -1127,45 +1310,21 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function increaseZoom(obj)
-            %INCREASEZOOM  Step forward to the next ZoomLevel.
+            %INCREASEZOOM  Step forward to the next preset ZoomLevel.
             %
             %   The new view is anchored around the current image-space cursor
             %   position so the pixel under the cursor remains under the cursor as
             %   much as image bounds allow.
-
-            oldIdx = obj.Zoom_.Idx;
-
-            obj.Zoom_.Idx = min(...
-                obj.Zoom_.Idx + 1,...
-                numel(obj.Zoom_.Levels));
-
-            % Do nothing if already at the final zoom level
-            if obj.Zoom_.Idx == oldIdx
-                return
-            end
-
-            obj.updateViewBoxBaseCoordinates();
-            obj.zoomViewToCursor();
+            obj.stepZoomPresetAtCursor(1);
         end
 
         function decreaseZoom(obj)
-            %DECREASEZOOM  Step backward to the previous ZoomLevel.
+            %DECREASEZOOM  Step backward to the previous preset ZoomLevel.
             %
             %   The new view is anchored around the current image-space cursor
             %   position so the pixel under the cursor remains under the cursor as
             %   much as image bounds allow.
-
-            oldIdx = obj.Zoom_.Idx;
-
-            obj.Zoom_.Idx = max(obj.Zoom_.Idx - 1,1);
-
-            % Do nothing if already at the first zoom level
-            if obj.Zoom_.Idx == oldIdx
-                return
-            end
-
-            obj.updateViewBoxBaseCoordinates();
-            obj.zoomViewToCursor();
+            obj.stepZoomPresetAtCursor(-1);
         end
 
         function enableFollowCursor(obj)
@@ -2955,8 +3114,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function resetView(obj)
-        %RESETVIEW Restore default image-space limits.
-            obj.restoreDefaultLimits();
+        %RESETVIEW Restore default image-space limits and zoom view state.
+            obj.resetZoomViewState();
         end
 
     end

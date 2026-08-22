@@ -46,6 +46,7 @@ classdef ImageAxesToolManager < handle
             obj.Tools.(char(tool.Name)) = tool;
             obj.InstalledTools(char(tool.Name)) = tool;
             obj.Host.registerToolHotkeys(tool);
+            obj.contributeContextMenu(tool);
         end
 
         function unregister(obj, tool)
@@ -56,6 +57,7 @@ classdef ImageAxesToolManager < handle
             end
 
             obj.Host.HotkeyRegistry.removeOwner(tool);
+            obj.removeContextMenuContributions(tool);
             obj.removeToolbarButton(tool);
             obj.Tools = rmfield(obj.Tools, char(tool.Name));
             obj.InstalledTools.remove(char(tool.Name));
@@ -390,6 +392,25 @@ classdef ImageAxesToolManager < handle
             delete(tbButton)
             host.ToolbarButtons = rmfield(host.ToolbarButtons, tool.Name);
             host.mainAxes.Toolbar.reset;
+        end
+
+        function contributeContextMenu(obj, tool)
+        %CONTRIBUTECONTEXTMENU Let a tool add owner-scoped context-menu items.
+            if isempty(obj.Host.ContextMenuManager)
+                return
+            end
+
+            tool.contributeContextMenu(obj.Host.ContextMenuManager);
+            obj.Host.ContextMenuManager.refresh();
+        end
+
+        function removeContextMenuContributions(obj, tool)
+        %REMOVECONTEXTMENUCONTRIBUTIONS Remove menu items owned by a tool.
+            if isempty(obj.Host.ContextMenuManager)
+                return
+            end
+
+            obj.Host.ContextMenuManager.removeOwner(tool);
         end
     end
 

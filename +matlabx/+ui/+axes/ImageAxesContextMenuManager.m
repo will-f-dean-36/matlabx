@@ -33,13 +33,14 @@ classdef ImageAxesContextMenuManager < handle
         %IMAGEAXESCONTEXTMENUMANAGER Create and build the host context menu.
             obj.Host = host;
             obj.Menu = uicontextmenu(parentFigure);
+            obj.Menu.ContextMenuOpeningFcn = @(~,~) obj.refresh();
             obj.Host.ContextMenu = obj.Menu;
             obj.rebuild();
         end
 
         function rebuild(obj)
         %REBUILD Recreate the built-in context-menu contents.
-            obj.clear();
+            obj.clearBuiltins();
 
             S = struct();
 
@@ -107,10 +108,13 @@ classdef ImageAxesContextMenuManager < handle
                     end
                 end
             end
+
+            obj.refreshItems();
         end
 
         function openAt(obj, xy)
         %OPENAT Open the context menu at a figure-coordinate point.
+            obj.refresh();
             open(obj.Menu, xy(1), xy(2));
         end
 
@@ -125,50 +129,102 @@ classdef ImageAxesContextMenuManager < handle
             obj.rebuild();
         end
 
+        function h = addSubmenu(obj, id, label, opts)
+        %ADDSUBMENU Add or replace a contributed submenu.
+            arguments
+                obj
+                id (1,1) string
+                label (1,1) string
+                opts.Parent = ""
+                opts.Owner = []
+                opts.Separator matlab.lang.OnOffSwitchState = "off"
+                opts.Enabled matlab.lang.OnOffSwitchState = "on"
+                opts.Visible matlab.lang.OnOffSwitchState = "on"
+                opts.RefreshFcn = []
+            end
+
+            obj.removeItem(id);
+
+            parent = obj.getParentMenu(opts.Parent);
+            fieldName = obj.idToFieldName(id);
+            h = uimenu(parent, ...
+                "Text", label, ...
+                "Separator", opts.Separator, ...
+                "Enable", opts.Enabled, ...
+                "Visible", opts.Visible);
+
+            obj.Items.(fieldName) = obj.makeItemEntry(h, opts.Owner, opts.RefreshFcn);
+        end
+
         function h = addItem(obj, id, label, callback, opts)
-        %ADDITEM Add or replace a simple top-level context-menu item.
+        %ADDITEM Add or replace a contributed context-menu item.
         %
-        %   This helper is intentionally flat for now. More structured submenu and
-        %   group support can layer on top once tool/app menu contributions become
-        %   common enough to need it.
+        %   Parent can be empty for a top-level item or the id of another
+        %   contributed item/submenu. Owner lets a tool remove all of its menu
+        %   contributions during uninstall. RefreshFcn, when supplied, is called
+        %   during refresh() with the menu handle so checked/enabled state can
+        %   follow host/tool state.
             arguments
                 obj
                 id (1,1) string
                 label (1,1) string
                 callback (1,1) function_handle
+                opts.Parent = ""
+                opts.Owner = []
                 opts.Separator matlab.lang.OnOffSwitchState = "off"
                 opts.Checked matlab.lang.OnOffSwitchState = "off"
                 opts.Enabled matlab.lang.OnOffSwitchState = "on"
                 opts.Visible matlab.lang.OnOffSwitchState = "on"
+                opts.UserData = []
+                opts.RefreshFcn = []
             end
 
             obj.removeItem(id);
 
+            parent = obj.getParentMenu(opts.Parent);
             fieldName = obj.idToFieldName(id);
-            h = uimenu(obj.Menu, ...
+            h = uimenu(parent, ...
                 "Text", label, ...
                 "MenuSelectedFcn", callback, ...
                 "Separator", opts.Separator, ...
                 "Checked", opts.Checked, ...
                 "Enable", opts.Enabled, ...
-                "Visible", opts.Visible);
+                "Visible", opts.Visible, ...
+                "UserData", opts.UserData);
 
-            obj.Items.(fieldName) = h;
+            obj.Items.(fieldName) = obj.makeItemEntry(h, opts.Owner, opts.RefreshFcn);
         end
 
         function removeItem(obj, id)
-        %REMOVEITEM Delete a previously added top-level context-menu item.
+        %REMOVEITEM Delete a previously added contributed context-menu item.
             fieldName = obj.idToFieldName(id);
             if ~isfield(obj.Items, fieldName)
                 return
             end
 
-            h = obj.Items.(fieldName);
+            h = obj.Items.(fieldName).Handle;
             if isvalid(h)
                 delete(h)
             end
 
             obj.Items = rmfield(obj.Items, fieldName);
+        end
+
+        function removeOwner(obj, owner)
+        %REMOVEOWNER Delete every contributed item associated with an owner.
+            fieldNames = fieldnames(obj.Items);
+            remove = false(size(fieldNames));
+
+            for i = 1:numel(fieldNames)
+                entry = obj.Items.(fieldNames{i});
+                remove(i) = obj.ownersMatch(entry.Owner, owner);
+            end
+
+            for i = numel(fieldNames):-1:1
+                if remove(i)
+                    obj.removeItem(fieldNames{i});
+                end
+            end
         end
 
         function setItemEnabled(obj, id, enabled)
@@ -188,6 +244,19 @@ classdef ImageAxesContextMenuManager < handle
     end
 
     methods (Access=private)
+        function clearBuiltins(obj)
+        %CLEARBUILTINS Delete built-in menu handles without touching contributions.
+            handles = obj.collectHandles(obj.BuiltinUI);
+            for i = 1:numel(handles)
+                h = handles{i};
+                if isvalid(h)
+                    delete(h)
+                end
+            end
+
+            obj.BuiltinUI = struct();
+        end
+
         function tf = hasBuiltin(obj, name)
         %HASBUILTIN True when a named built-in item should be shown.
             tf = any(obj.BuiltinItems_ == name);
@@ -267,10 +336,40 @@ classdef ImageAxesContextMenuManager < handle
                 return
             end
 
-            h = obj.Items.(fieldName);
+            h = obj.Items.(fieldName).Handle;
             if isvalid(h)
                 h.(propertyName) = value;
             end
+        end
+
+        function refreshItems(obj)
+        %REFRESHITEMS Run refresh callbacks for contributed menu items.
+            fieldNames = fieldnames(obj.Items);
+            for i = 1:numel(fieldNames)
+                entry = obj.Items.(fieldNames{i});
+                h = entry.Handle;
+                if ~isvalid(h) || isempty(entry.RefreshFcn)
+                    continue
+                end
+
+                entry.RefreshFcn(h);
+            end
+        end
+
+        function parent = getParentMenu(obj, parentId)
+        %GETPARENTMENU Return the root menu or a contributed parent item.
+            if isempty(parentId) || strlength(string(parentId)) == 0
+                parent = obj.Menu;
+                return
+            end
+
+            fieldName = obj.idToFieldName(parentId);
+            if ~isfield(obj.Items, fieldName)
+                error('ImageAxesContextMenuManager:MissingParent', ...
+                    'Context menu parent "%s" does not exist.', string(parentId))
+            end
+
+            parent = obj.Items.(fieldName).Handle;
         end
     end
 
@@ -301,6 +400,46 @@ classdef ImageAxesContextMenuManager < handle
     end
 
     methods (Static, Access=private)
+        function entry = makeItemEntry(handle, owner, refreshFcn)
+        %MAKEITEMENTRY Package a contributed item handle and metadata.
+            entry = struct( ...
+                "Handle", handle, ...
+                "Owner", owner, ...
+                "RefreshFcn", refreshFcn);
+        end
+
+        function handles = collectHandles(S)
+        %COLLECTHANDLES Return handle values stored inside a struct.
+            handles = {};
+            if isempty(S) || ~isstruct(S)
+                return
+            end
+
+            values = struct2cell(S);
+            for i = 1:numel(values)
+                value = values{i};
+                if isa(value, 'handle')
+                    handles{end+1} = value; %#ok<AGROW>
+                end
+            end
+        end
+
+        function tf = ownersMatch(a, b)
+        %OWNERSMATCH True when two owner tokens refer to the same contributor.
+            if isempty(a) && isempty(b)
+                tf = true;
+                return
+            end
+
+            if isa(a, 'handle') || isa(b, 'handle')
+                tf = isa(a, 'handle') && isa(b, 'handle') && isvalid(a) && ...
+                    isvalid(b) && a == b;
+                return
+            end
+
+            tf = isequal(a, b);
+        end
+
         function fieldName = idToFieldName(id)
         %IDTOFIELDNAME Convert a stable string item id into a struct field name.
             fieldName = matlab.lang.makeValidName(char(id));
