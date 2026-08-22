@@ -79,6 +79,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         Name (1,1) string = ""
     end
 
+    properties (Dependent, AbortSet)
+        % ImageAxes built-in context menu items to show.
+        ContextMenuItems
+    end
+
     % Graphics passthroughs
     properties (Dependent)
         ImageVisible
@@ -162,8 +167,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         % listeners
         L event.listener
 
-        % structs of extra UI handles that do not have a named property
-        ContextMenuUI struct
+        % manager for the host-owned context menu
+        ContextMenuManager matlabx.ui.axes.ImageAxesContextMenuManager
     end
 
     % tool-accessible
@@ -183,6 +188,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     properties (Access=private, AbortSet)
         FontSize_ (1,1) double = 12
         uipanelOverheadPx_ (1,1) double = 19
+        ContextMenuItems_ (1,:) string = ["ResetView","Image"]
     end
 
 
@@ -199,11 +205,13 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     properties (Access=private, Transient, NonCopyable)
         contrastTool (:,1) matlabx.app.SliderGroupDialog
         metadataWindow matlabx.app.TextWindow
+        imagePropertiesWindow matlabx.app.TextWindow
     end
 
     properties (Access=private)
         contrastToolOpen (1,1) logical = false
         metadataWindowOpen (1,1) logical = false
+        imagePropertiesWindowOpen (1,1) logical = false
     end
 
     %% Derived properties (accessible to tools)
@@ -412,24 +420,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function setupContextMenu(obj)
-
-            obj.ContextMenu = uicontextmenu(obj.ParentFig);
-
-            S = struct();
-
-            S.ColorMode = uimenu(obj.ContextMenu,"Text","Color Mode...");
-
-            S.ColorMode_colors = uimenu(S.ColorMode,"Text","colors",...
-                "MenuSelectedFcn",@(o,e) obj.setComponentColorMode("colors"),"Checked","on");
-            S.ColorMode_luts = uimenu(S.ColorMode,"Text","luts",...
-                "MenuSelectedFcn",@(o,e) obj.setComponentColorMode("luts"),"Checked","off");
-
-            S.Info = uimenu(obj.ContextMenu,"Text","Info...", ...
-                "MenuSelectedFcn",@(~,~) obj.openMetadataWindow());
-
-
-            obj.ContextMenuUI = S;
-
+            obj.ContextMenuManager = matlabx.ui.axes.ImageAxesContextMenuManager(obj, obj.ParentFig);
+            obj.ContextMenuManager.setBuiltinItems(obj.ContextMenuItems_);
         end
 
     end
@@ -1578,13 +1570,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function refreshContextMenu(obj)
-            % ComponentColorMode
-            val = obj.ComponentColorMode;
-            obj.ContextMenuUI.ColorMode_colors.Checked = strcmp(val,"colors");
-            obj.ContextMenuUI.ColorMode_luts.Checked = strcmp(val,"luts");
-
-
-
+            obj.ContextMenuManager.refresh();
         end
 
 
@@ -2399,6 +2385,17 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         % MaxRenderedResolution
         function v = get.MaxRenderedResolution(obj), v = obj.hImage.MaxRenderedResolution; end
         function set.MaxRenderedResolution(obj,val), obj.hImage.MaxRenderedResolution = val; end
+        % ContextMenuItems
+        function items = get.ContextMenuItems(obj)
+            items = obj.ContextMenuItems_;
+        end
+        function set.ContextMenuItems(obj, items)
+            items = matlabx.ui.axes.ImageAxesContextMenuManager.validateBuiltinItems(items);
+            obj.ContextMenuItems_ = items;
+            if ~isempty(obj.ContextMenuManager)
+                obj.ContextMenuManager.setBuiltinItems(items);
+            end
+        end
 
         % FontSize
         function set.FontSize(obj,val)
@@ -2529,9 +2526,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
 
-            if strcmp(E.SelectionType,'alt')
+            if E.MouseChord == "contextclick"
                 XY = E.CurrentPointFigure;
-                open(obj.ContextMenu,XY(1),XY(2));
+                obj.ContextMenuManager.openAt(XY);
             end
         end
 
@@ -2590,10 +2587,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             % get highest priority Interceptor for event kind
             t = obj.getPriorityInterceptor(E.Kind);
-            % forward event to the tool
+
+            % Forward the event to the active interceptor, but do not mark it
+            % consumed merely because a tool saw it. Tools should call E.stop()
+            % only when they actually claim the event; this lets host defaults
+            % such as bare contextclick menus still run while non-exclusive tools
+            % like Zoom are enabled.
             if ~isempty(t)
                 t.("on"+E.Kind)(E);
-                E.StopPropagation = true;
             end
         end
 
@@ -2923,6 +2924,27 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.metadataWindowOpen = false;
         end
 
+        % --- ImagePropertiesWindow ---
+        function openImagePropertiesWindow(obj)
+            if obj.imagePropertiesWindowOpen
+                return
+            end
+
+            properties = obj.getImagePropertiesSummary();
+            propertyLines = cellstr(matlabx.struct.prettyPrint(properties));
+
+            obj.imagePropertiesWindow = matlabx.app.TextWindow( ...
+                "Title","Image Properties", ...
+                "Text",propertyLines, ...
+                "ClosedFcn",@(~,~) obj.onImagePropertiesWindowClosed());
+
+            obj.imagePropertiesWindowOpen = true;
+        end
+
+        function onImagePropertiesWindowClosed(obj)
+            obj.imagePropertiesWindowOpen = false;
+        end
+
     end
 
     %% Context menu callbacks
@@ -2932,11 +2954,93 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.ComponentColorMode = mode;
         end
 
+        function resetView(obj)
+        %RESETVIEW Restore default image-space limits.
+            obj.restoreDefaultLimits();
+        end
 
+    end
 
+    %% Context menu support
+    methods (Access=?matlabx.ui.axes.ImageAxesContextMenuManager)
+        function tf = currentComponentCanHaveColor(obj)
+        %CURRENTCOMPONENTCANHAVECOLOR True for scalar, non-logical components.
+            if isempty(obj.ComponentDisplay_) || obj.C < 1 || obj.C > obj.NumComponents
+                tf = false;
+                return
+            end
 
+            comp = obj.ImageData_.Components(obj.C);
+            tf = strcmp(comp.Kind, 'scalar') && ~strcmp(comp.Class, 'logical');
+        end
 
+        function name = currentComponentColorName(obj)
+        %CURRENTCOMPONENTCOLORNAME Return the current component's color name.
+            if isempty(obj.ComponentDisplay_) || obj.C < 1 || obj.C > obj.NumComponents
+                name = "";
+                return
+            end
 
+            name = obj.ComponentDisplay_(obj.C).ColorName;
+        end
+
+        function S = getImagePropertiesSummary(obj)
+        %GETIMAGEPROPERTIESSUMMARY Return a compact ImageData/view summary.
+            imageData = obj.ImageData_;
+
+            S = struct();
+            S.ImageDataClass = string(class(imageData));
+            S.SourceClass = string(class(imageData.Source));
+            S.IsLoaded = imageData.IsLoaded;
+            S.IsFileBacked = imageData.IsFileBacked;
+            S.Size = struct( ...
+                "Y", imageData.SizeY, ...
+                "X", imageData.SizeX, ...
+                "C", imageData.NumComponents, ...
+                "Z", imageData.SizeZ, ...
+                "T", imageData.SizeT);
+            S.ComponentsAreChannels = imageData.ComponentsAreChannels;
+            S.MultiComponentKind = string(imageData.MultiComponentKind);
+            S.CanMergeComponents = imageData.CanMergeComponents;
+            S.View = struct( ...
+                "C", obj.C, ...
+                "Z", obj.Z, ...
+                "T", obj.T, ...
+                "ShowComposite", string(obj.ShowComposite), ...
+                "ComponentColorMode", string(obj.ComponentColorMode), ...
+                "CLimMode", string(obj.CLimMode));
+            S.RenderSource = struct( ...
+                "Kind", string(obj.RenderSourceKind), ...
+                "Class", string(obj.RenderSourceClass), ...
+                "Size", obj.RenderSourceSize);
+
+            components = repmat(struct( ...
+                "Index", [], ...
+                "Name", "", ...
+                "Kind", "", ...
+                "Class", "", ...
+                "Size", [], ...
+                "DataRange", [], ...
+                "CLim", [], ...
+                "ColorName", "", ...
+                "HasLUT", false), 1, imageData.NumComponents);
+
+            for i = 1:imageData.NumComponents
+                comp = imageData.Components(i);
+                displayState = obj.ComponentDisplay_(i);
+                components(i).Index = i;
+                components(i).Name = comp.Name;
+                components(i).Kind = comp.Kind;
+                components(i).Class = comp.Class;
+                components(i).Size = comp.Size;
+                components(i).DataRange = comp.DataRange;
+                components(i).CLim = displayState.CLim;
+                components(i).ColorName = displayState.ColorName;
+                components(i).HasLUT = ~isempty(displayState.Colormap);
+            end
+
+            S.Components = components;
+        end
     end
 
     %% Debugging helpers
@@ -3017,6 +3121,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 end
             end
 
+        end
+
+        function names = getContextMenuItemNames()
+            %GETCONTEXTMENUITEMNAMES Return names of available built-in context items.
+            names = cellstr(matlabx.ui.axes.ImageAxesContextMenuManager.availableBuiltinItems());
         end
 
         function names = getColorNames()
@@ -3142,6 +3251,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             % metadataWindow
             if ~isempty(obj.metadataWindow), delete(obj.metadataWindow(isvalid(obj.metadataWindow))); end
+            % imagePropertiesWindow
+            if ~isempty(obj.imagePropertiesWindow)
+                delete(obj.imagePropertiesWindow(isvalid(obj.imagePropertiesWindow)));
+            end
 
             % ViewBox
             delete(obj.ViewBoxFull(isvalid(obj.ViewBoxFull)));

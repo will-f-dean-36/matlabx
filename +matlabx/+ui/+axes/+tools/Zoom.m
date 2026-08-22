@@ -2,9 +2,9 @@ classdef Zoom < matlabx.ui.axes.AxesTool
 %ZOOM Zoom/cursor-follow navigation tool for matlabx.ui.axes.ImageAxes.
 %
 %   When enabled:
-%       left-click      increase zoom
-%       right-click     decrease zoom
-%       shift-click     toggle cursor-follow navigation
+%       meta-click           increase zoom
+%       meta-contextclick    decrease zoom
+%       shift-extendclick    toggle cursor-follow navigation
 %       scroll wheel    increase/decrease zoom
 %
 %   Zoom is intentionally non-exclusive so it can coexist with interaction
@@ -67,13 +67,16 @@ classdef Zoom < matlabx.ui.axes.AxesTool
                 return
             end
 
-            switch E.SelectionType
-                case 'normal'
+            switch E.MouseChord
+                case "meta+click"
                     H.increaseZoom();
-                case 'alt'
+                    E.stop();
+                case "meta+contextclick"
                     H.decreaseZoom();
-                case 'extend'
+                    E.stop();
+                case "shift+extendclick"
                     obj.Host.toggleFollowCursorEnabled();
+                    E.stop();
             end
 
         end
