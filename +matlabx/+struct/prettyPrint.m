@@ -5,18 +5,20 @@ function txt = prettyPrint(S, opts)
 %   PRETTYPRINT(S) with no output prints to the command window.
 %
 %   Options:
-%       OutputType  - "char" (default) or "string"
-%       NameAlign   - "left" (default) or "right"
-%       IndentSize  - spaces per nesting level (default 4)
+%       OutputType       - "char" (default) or "string"
+%       NameAlign        - "left" (default) or "right"
+%       IndentSize       - spaces per nesting level (default 4)
+%       StringArrayStyle - "inline" (default) or "lines"
 
     arguments
         S (1,1) struct
         opts.OutputType (1,1) string {mustBeMember(opts.OutputType, ["char","string"])} = "char"
         opts.NameAlign  (1,1) string {mustBeMember(opts.NameAlign,  ["left","right"])} = "left"
         opts.IndentSize (1,1) double {mustBeInteger, mustBeNonnegative} = 4
+        opts.StringArrayStyle (1,1) string {mustBeMember(opts.StringArrayStyle, ["inline","lines"])} = "inline"
     end
 
-    lines = buildLines(S, opts.NameAlign, opts.IndentSize);
+    lines = buildLines(S, opts.NameAlign, opts.IndentSize, opts.StringArrayStyle);
     txtChar = strjoin(lines, newline);
 
     if opts.OutputType == "string"
@@ -30,7 +32,7 @@ function txt = prettyPrint(S, opts)
     end
 end
 
-function lines = buildLines(S, nameAlign, indentSize)
+function lines = buildLines(S, nameAlign, indentSize, stringArrayStyle)
 
     fn = fieldnames(S);
 
@@ -60,7 +62,7 @@ function lines = buildLines(S, nameAlign, indentSize)
     for k = 1:numel(leafNames)
         name = leafNames{k};
         value = S.(name);
-        valStr = valueToChar(value);
+        valLines = valueToLines(value, stringArrayStyle);
 
         switch nameAlign
             case "left"
@@ -69,7 +71,14 @@ function lines = buildLines(S, nameAlign, indentSize)
                 nameFmt = sprintf('%*s', maxLen, name);
         end
 
-        lines{end+1} = sprintf('%s: %s', nameFmt, valStr);
+        if isscalar(valLines)
+            lines{end+1} = sprintf('%s: %s', nameFmt, valLines{1}); %#ok<AGROW>
+        else
+            lines{end+1} = name; %#ok<AGROW>
+            pad = repmat(' ', 1, indentSize);
+            valLines = cellfun(@(s) [pad s], valLines, 'UniformOutput', false);
+            lines = [lines, valLines]; %#ok<AGROW>
+        end
     end
 
     % Second pass: nested structs
@@ -77,14 +86,28 @@ function lines = buildLines(S, nameAlign, indentSize)
         name = headerNames{k};
         value = S.(name);
 
-        lines{end+1} = name;
+        lines{end+1} = name; %#ok<AGROW>
 
-        subLines = buildLines(value, nameAlign, indentSize);
+        subLines = buildLines(value, nameAlign, indentSize, stringArrayStyle);
         pad = repmat(' ', 1, indentSize);
         subLines = cellfun(@(s) [pad s], subLines, 'UniformOutput', false);
 
-        lines = [lines, subLines];
+        lines = [lines, subLines]; %#ok<AGROW>
     end
+end
+
+function lines = valueToLines(v, stringArrayStyle)
+
+    if isstring(v) && ~isscalar(v) && stringArrayStyle == "lines"
+        values = cellstr(v(:).');
+        lines = cellfun(@(s) ['- ' s], values, 'UniformOutput', false);
+        if isempty(lines)
+            lines = {'[]'};
+        end
+        return
+    end
+
+    lines = {valueToChar(v)};
 end
 
 function out = valueToChar(v)

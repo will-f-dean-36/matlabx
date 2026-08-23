@@ -1,5 +1,5 @@
-classdef Pick < matlabx.ui.axes.AxesTool
-% matlabx.ui.axes.tools.Pick - optimistic box creation on click
+classdef Box < matlabx.ui.axes.AxesTool
+% matlabx.ui.axes.tools.Box - optimistic box creation on click
 
     %% Draggable box management
 
@@ -48,9 +48,9 @@ classdef Pick < matlabx.ui.axes.AxesTool
 
     %% Lifecycle toggles
     methods
-        function obj = Pick(host)
-            obj@matlabx.ui.axes.AxesTool(host, "Pick",...
-                'Tooltip','Pick regions',...
+        function obj = Box(host)
+            obj@matlabx.ui.axes.AxesTool(host, "Box",...
+                'Tooltip','Box regions',...
                 'AxesType',"image",...
                 'Icon',matlabx.internal.Paths.icons('AddRectangleIcon.png'),...
                 'Priority',10,...
@@ -79,6 +79,94 @@ classdef Pick < matlabx.ui.axes.AxesTool
             obj.clearBoxes();
         end
 
+        function contributeContextMenu(obj, menu)
+        %CONTRIBUTECONTEXTMENU Add Box commands to the host context menu.
+            menu.addSubmenu( ...
+                "Box", ...
+                "Box", ...
+                "Owner", obj);
+
+            menu.addItem( ...
+                "Box.Help", ...
+                "Help...", ...
+                @(~,~) obj.Host.openToolHelpWindow(obj), ...
+                "Parent", "Box", ...
+                "Owner", obj);
+
+            menu.addItem( ...
+                "Box.ClearSelection", ...
+                "Clear Selection", ...
+                @(~,~) obj.clearBoxSelection(Emit=true), ...
+                "Parent", "Box", ...
+                "Owner", obj, ...
+                "Separator", "on", ...
+                "Enabled", matlab.lang.OnOffSwitchState(obj.hasSelectedBoxes()), ...
+                "RefreshFcn", @(h) obj.refreshRequiresSelection(h));
+
+            menu.addItem( ...
+                "Box.SelectAll", ...
+                "Select All", ...
+                @(~,~) obj.selectAllBoxes(), ...
+                "Parent", "Box", ...
+                "Owner", obj, ...
+                "Enabled", matlab.lang.OnOffSwitchState(obj.hasAnyBoxes()), ...
+                "RefreshFcn", @(h) obj.refreshRequiresBoxes(h));
+
+            menu.addItem( ...
+                "Box.DeleteSelected", ...
+                "Delete Selected", ...
+                @(~,~) obj.deleteSelectedBoxes(), ...
+                "Parent", "Box", ...
+                "Owner", obj, ...
+                "Separator", "on", ...
+                "Enabled", matlab.lang.OnOffSwitchState(obj.hasSelectedBoxes()), ...
+                "RefreshFcn", @(h) obj.refreshRequiresSelection(h));
+
+            menu.addItem( ...
+                "Box.DeleteAll", ...
+                "Delete All", ...
+                @(~,~) obj.deleteAllBoxes(), ...
+                "Parent", "Box", ...
+                "Owner", obj, ...
+                "Enabled", matlab.lang.OnOffSwitchState(obj.hasAnyBoxes()), ...
+                "RefreshFcn", @(h) obj.refreshRequiresBoxes(h));
+        end
+
+    end
+
+    %% Help
+    methods
+        function summary = getHelpSummary(~)
+        %GETHELPSUMMARY Return a one-line Box description.
+            summary = "Create, activate, select, move, and delete square box regions.";
+        end
+
+        function usage = getUsageHelp(~)
+        %GETUSAGEHELP Return short Box usage notes.
+            usage = [ ...
+                "Enable Box and click the image to create a new box."; ...
+                "Click an existing box to activate it and prime drag movement."; ...
+                "Use selection commands from the Box context menu for batch actions."];
+        end
+
+        function B = getBindingHelp(obj)
+        %GETBINDINGHELP Return Box click binding descriptions.
+            B = struct( ...
+                "ToggleTool", obj.ToggleHotkey, ...
+                "CreateBox", "click image background while Box is enabled", ...
+                "ActivateAndDrag", "click box, then drag", ...
+                "ToggleSelection", "shift+extendclick box", ...
+                "Deactivate", "alt+click box", ...
+                "DeleteBox", "control+contextclick box");
+        end
+
+        function notes = getNotesHelp(~)
+        %GETNOTESHELP Return additional Box behavior notes.
+            notes = [ ...
+                "Active and selected are separate states."; ...
+                "Only the active box is dragged; selected boxes are used for batch menu actions."; ...
+                "Right-click context menus are reserved for ImageAxes and tool commands."];
+        end
     end
 
     %% Active event hooks (only when Enabled==true && IsInterceptor==true)
@@ -178,7 +266,7 @@ classdef Pick < matlabx.ui.axes.AxesTool
     end
 
 
-    %% Private Helpers (Pick)
+    %% Private Helpers (Box)
     methods (Access=private)
 
         function id = normalizeId_(~, id)
@@ -221,6 +309,26 @@ classdef Pick < matlabx.ui.axes.AxesTool
         function TF = hasBox(obj,id)
             id = obj.normalizeId_(id);
             TF = strlength(id) > 0 && ismember(id,obj.BoxIds);
+        end
+
+        function tf = hasAnyBoxes(obj)
+            tf = any(isvalid(obj.BoxROI));
+        end
+
+        function tf = hasSelectedBoxes(obj)
+            tf = ~isempty(obj.SelectedBoxIds);
+        end
+
+        function refreshRequiresBoxes(obj, h)
+            if isvalid(obj)
+                h.Enable = matlab.lang.OnOffSwitchState(obj.hasAnyBoxes());
+            end
+        end
+
+        function refreshRequiresSelection(obj, h)
+            if isvalid(obj)
+                h.Enable = matlab.lang.OnOffSwitchState(obj.hasSelectedBoxes());
+            end
         end
 
         function deleteBoxById(obj, id)
@@ -606,9 +714,41 @@ classdef Pick < matlabx.ui.axes.AxesTool
             ids = obj.SelectedBoxIds;
         end
 
-        function clearBoxSelection(obj)
+        function clearBoxSelection(obj, opts)
+            arguments
+                obj
+                opts.Emit (1,1) logical = false
+            end
+
             obj.SelectedBoxIds = string.empty(1,0);
             obj.applySelectionHighlights();
+
+            if opts.Emit
+                obj.emitSelectionChanged();
+            end
+        end
+
+        function selectAllBoxes(obj, opts)
+            arguments
+                obj
+                opts.Emit (1,1) logical = true
+            end
+
+            obj.setSelectedBoxIDs(obj.BoxIds, Emit=opts.Emit);
+        end
+
+        function deleteSelectedBoxes(obj)
+            ids = obj.SelectedBoxIds;
+            for i = 1:numel(ids)
+                obj.deleteBoxById(ids(i));
+            end
+        end
+
+        function deleteAllBoxes(obj)
+            ids = obj.BoxIds;
+            for i = numel(ids):-1:1
+                obj.deleteBoxById(ids(i));
+            end
         end
 
         function setActiveBoxID(obj,id)

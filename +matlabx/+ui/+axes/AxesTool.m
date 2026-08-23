@@ -42,6 +42,13 @@ classdef AxesTool < handle
 %
 %       ToggleHotkey = matlabx.keyboard.hotkey("z", "Modifiers", ["shift","meta"])
 %
+%   Tool help
+%   ---------
+%   getHelpInfo() returns a small struct used by host UI such as context-menu
+%   Help commands. Subclasses can override getHelpSummary(), getUsageHelp(),
+%   getBindingHelp(), and getNotesHelp() to document their interactive behavior
+%   without requiring a fully declarative binding system.
+%
 %   Host notifications
 %   ------------------
 %   Host notifications are opt-in. For example, pass
@@ -270,6 +277,43 @@ classdef AxesTool < handle
 
         % Optional context-menu contribution hook
         function contributeContextMenu(~,~), end
+
+        function S = getHelpInfo(obj)
+            %GETHELPINFO Return user-facing help information for this tool.
+            S = struct( ...
+                "Name", obj.Name, ...
+                "Class", string(class(obj)), ...
+                "Style", string(obj.Style), ...
+                "Summary", obj.getHelpSummary(), ...
+                "Usage", obj.getUsageHelp(), ...
+                "Bindings", obj.getBindingHelp(), ...
+                "Notes", obj.getNotesHelp());
+        end
+
+        function summary = getHelpSummary(obj)
+            %GETHELPSUMMARY Return a one-line description for getHelpInfo.
+            summary = string(obj.Tooltip);
+        end
+
+        function usage = getUsageHelp(~)
+            %GETUSAGEHELP Return short usage notes for getHelpInfo.
+            usage = strings(1,0);
+        end
+
+        function B = getBindingHelp(obj)
+            %GETBINDINGHELP Return click/key binding descriptions for getHelpInfo.
+            toggleHotkey = obj.ToggleHotkey;
+            if strlength(toggleHotkey) == 0
+                toggleHotkey = "none";
+            end
+
+            B = struct("ToggleTool", toggleHotkey);
+        end
+
+        function notes = getNotesHelp(~)
+            %GETNOTESHELP Return optional additional notes for getHelpInfo.
+            notes = strings(1,0);
+        end
 
     end
 

@@ -49,8 +49,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 %   Tools is intentionally asymmetric. Assign a string array or cellstr to
 %   choose installed tools. Read Tools to access the installed tool objects:
 %
-%       ax.Tools = ["Zoom","Pick","DrawRectangle"]
-%       ax.Tools.Pick.BoxSize = 40
+%       ax.Tools = ["Zoom","Box","DrawRectangle"]
+%       ax.Tools.Box.BoxSize = 40
 
 
     %% Tools
@@ -82,6 +82,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     properties (Dependent, AbortSet)
         % ImageAxes built-in context menu items to show.
         ContextMenuItems
+        ViewportBoxVisible (1,1) matlab.lang.OnOffSwitchState
     end
 
     % Graphics passthroughs
@@ -160,8 +161,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         BottomLabel (1,1) matlab.graphics.primitive.Text
         Colorbar matlab.graphics.illustration.ColorBar
         sizingGrid matlab.ui.container.GridLayout
-        ViewBoxFull (1,1) matlab.graphics.primitive.Patch
-        ViewBoxZoom (1,1) matlab.graphics.primitive.Patch
+        ViewportBoxFull (1,1) matlab.graphics.primitive.Patch
+        ViewportBox (1,1) matlab.graphics.primitive.Patch
 
 
         % listeners
@@ -191,7 +192,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     properties (Access=private, AbortSet)
         FontSize_ (1,1) double = 12
         uipanelOverheadPx_ (1,1) double = 19
-        ContextMenuItems_ (1,:) string = ["ResetView","Image"]
+        ContextMenuItems_ (1,:) string = ["Status","ResetView","Image","Overlays"]
+        ViewportBoxVisible_ (1,1) matlab.lang.OnOffSwitchState = "off"
     end
 
 
@@ -209,12 +211,16 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         contrastTool (:,1) matlabx.app.SliderGroupDialog
         metadataWindow matlabx.app.TextWindow
         imagePropertiesWindow matlabx.app.TextWindow
+        statusWindow matlabx.app.TextWindow
+        toolHelpWindow matlabx.app.TextWindow
     end
 
     properties (Access=private)
         contrastToolOpen (1,1) logical = false
         metadataWindowOpen (1,1) logical = false
         imagePropertiesWindowOpen (1,1) logical = false
+        statusWindowOpen (1,1) logical = false
+        toolHelpWindowOpen (1,1) logical = false
     end
 
     %% Derived properties (accessible to tools)
@@ -369,27 +375,29 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 'HorizontalAlignment','left',...
                 'VerticalAlignment','bottom');
 
-            % set up ViewBox patches
-            obj.ViewBoxFull = patch(obj.staticAxes, ...
+            % set up ViewportBox patches
+            obj.ViewportBoxFull = patch(obj.staticAxes, ...
                 'XData',NaN, ...
                 'YData',NaN, ...
-                'EdgeColor',obj.ViewBoxEdgeColor, ...
-                'FaceColor',obj.ViewBoxFaceColor, ...
-                'FaceAlpha',obj.ViewBoxFaceAlpha, ...
+                'EdgeColor',obj.ViewportBoxEdgeColor, ...
+                'FaceColor',obj.ViewportBoxFaceColor, ...
+                'FaceAlpha',obj.ViewportBoxFaceAlpha, ...
                 'HitTest','on', ...
                 'PickableParts','all', ...
-                'LineWidth', obj.ViewBoxLineWidth, ...
-                'Tag','ViewBoxFull');
-            obj.ViewBoxZoom = patch(obj.staticAxes, ...
+                'LineWidth', obj.ViewportBoxLineWidth, ...
+                'Visible','off', ...
+                'Tag','ViewportBoxFull');
+            obj.ViewportBox = patch(obj.staticAxes, ...
                 'XData',NaN, ...
                 'YData',NaN, ...
-                'EdgeColor',obj.ViewBoxEdgeColor, ...
-                'FaceColor',obj.ViewBoxFaceColor, ...
-                'FaceAlpha',obj.ViewBoxFaceAlpha, ...
+                'EdgeColor',obj.ViewportBoxEdgeColor, ...
+                'FaceColor',obj.ViewportBoxFaceColor, ...
+                'FaceAlpha',obj.ViewportBoxFaceAlpha, ...
                 'HitTest','on', ...
                 'PickableParts','all', ...
-                'LineWidth', obj.ViewBoxLineWidth, ...
-                'Tag','ViewBoxZoom');           
+                'LineWidth', obj.ViewportBoxLineWidth, ...
+                'Visible','off', ...
+                'Tag','ViewportBox');
 
             % set up ContextMenu
             obj.setupContextMenu();
@@ -445,7 +453,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     %
     % Cursor-follow navigation uses staticAxes, whose limits stay fixed to the
     % full image. The cursor position in staticAxes is normalized and mapped to
-    % the available travel of the zoomed view box. FollowCursorLims define the
+    % the available travel of the zoomed viewport box. FollowCursorLims define the
     % active normalized control interval. Positions outside that interval act as
     % dead zones and pin the view to the corresponding image edge.
     %
@@ -456,17 +464,17 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     % returns to the ordinary absolute cursor-follow mapping.
 
     properties (Access=private)
-        % Zoom_ stores continuous zoom state. Level is the visible-image fraction,
-        % not magnification factor. PresetLevels are convenient stops for click,
-        % key, and context-menu zoom commands. LastCursorXY is in mainAxes image
-        % coordinates and is used as a fallback anchor when enabling zoom with no
-        % active cursor over the image.
+        % Zoom_ stores zoom interaction state. The visible viewport is the source
+        % of truth for ZoomLevel/ZoomFactor; PresetFactors are only convenient
+        % stops for click, key, and context-menu zoom commands. LastCursorXY is in
+        % mainAxes image coordinates and is used as a fallback anchor when enabling
+        % zoom with no active cursor over the image.
         Zoom_ = struct( ...
-            'Level', 1, ...
-            'PresetLevels', [1 1/2 1/3 1/4 1/5 1/10 1/15 1/20], ...
-            'MinLevel', 1/20, ...
-            'MaxLevel', 1, ...
+            'PresetFactors', [1 2 3 4 5 10 15 20], ...
+            'MinFactor', 1, ...
+            'MaxFactor', 20, ...
             'LastCursorXY', [], ...
+            'LastFactor', 1, ...
             'Enabled', false)
 
         % FollowCursor_ stores cursor-follow state. Lims are normalized staticAxes
@@ -480,19 +488,20 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             'AnchorLower', [], ...
             'LastCursorXY', [])
 
-        % ViewBoxBase_ stores miniature overview geometry on staticAxes. XFull/YFull
-        % draw the full-image box. XZoomBase/YZoomBase draw a zero-offset zoom box
-        % sized for the current ZoomLevel; applyZoomLims shifts that base according
-        % to the actual view lower limits.
-        ViewBoxBase_ = struct( ...
+        % ViewportBoxGeometry_ stores miniature overview geometry on staticAxes.
+        % XFull/YFull draw the full-image frame. XViewportBase/YViewportBase draw
+        % a zero-offset viewport box sized for the current ZoomLevel;
+        % applyViewportLimits shifts that base according to the actual view lower
+        % limits.
+        ViewportBoxGeometry_ = struct( ...
             'Top', [], ...
             'Left', [], ...
             'XBase', [], ...
             'YBase', [], ...
             'XFull', [], ...
             'YFull', [], ...
-            'XZoomBase', [], ...
-            'YZoomBase', [])
+            'XViewportBase', [], ...
+            'YViewportBase', [])
     end
 
     properties (Dependent)
@@ -504,16 +513,16 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         FollowCursorLims
     end
 
-    % ViewBox appearance
+    % ViewportBox appearance
     properties
-        ViewBoxSize = 0.1
-        ViewBoxEdgeColor = [0 0 0]
-        ViewBoxFaceColor = [1 1 1]
-        ViewBoxFaceAlpha = 0.25
-        ViewBoxLineWidth = 1
+        ViewportBoxScale = 0.1
+        ViewportBoxEdgeColor = [0 0 0]
+        ViewportBoxFaceColor = [1 1 1]
+        ViewportBoxFaceAlpha = 0.25
+        ViewportBoxLineWidth = 1
 
-        ViewBoxTop = 0.01
-        ViewBoxLeft = 0.01
+        ViewportBoxTop = 0.01
+        ViewportBoxLeft = 0.01
     end
 
     % Private zoom / cursor-follow helpers
@@ -592,11 +601,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             YLim = lower(2) + [0,viewHeight];
         end
 
-        function [XLim,YLim] = getCursorAnchoredZoomLims(obj,XY,oldXLim,oldYLim)
+        function [XLim,YLim] = getCursorAnchoredZoomLims(obj,XY,oldXLim,oldYLim,factor)
             %GETCURSORANCHOREDZOOMLIMS  Calculate cursor-anchored zoom limits
             %
             %   [XLim,YLim] = getCursorAnchoredZoomLims(obj,XY,oldXLim,oldYLim)
-            %   returns axes limits for the current ZoomLevel such that image
+            %   returns axes limits for the target zoom factor such that image
             %   coordinate XY remains under the same relative cursor position as it
             %   occupied in oldXLim/oldYLim. This is the click/scroll zoom behavior:
             %
@@ -612,20 +621,22 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 XY (1,2) double
                 oldXLim (1,2) double
                 oldYLim (1,2) double
+                factor (1,1) double = obj.ZoomFactor
             end
 
             % Image dimensions
             sz = obj.RenderSourceSize;
             H = sz(1);
             W = sz(2);
+            factor = obj.clampZoomFactor(factor);
 
             % Full image limits
             defXLim = [0.5, W + 0.5];
             defYLim = [0.5, H + 0.5];
 
             % New visible dimensions
-            newWidth  = obj.ZoomLevel * W;
-            newHeight = obj.ZoomLevel * H;
+            newWidth  = W / factor;
+            newHeight = H / factor;
 
             % Cursor position within the current visible window
             xFrac = (XY(1) - oldXLim(1)) / diff(oldXLim);
@@ -655,7 +666,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             %GETFOLLOWCURSORLOWERLIMIT  Map static cursor position to view lower limit
             %
             %   lower = getFollowCursorLowerLimit(obj,XY) returns the lower-left
-            %   image coordinate of the zoomed view box implied by the current
+            %   image coordinate of the zoomed viewport box implied by the current
             %   static-axes cursor coordinate XY.
             %
             %   Without an active anchor, this is the absolute mapping:
@@ -776,7 +787,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             %   that maps the current static-axes cursor location to the current
             %   mainAxes lower limits. This lets FollowCursor be disabled, the mouse
             %   moved elsewhere, and FollowCursor re-enabled without immediately
-            %   snapping the view box to the absolute cursor-follow mapping.
+            %   snapping the viewport box to the absolute cursor-follow mapping.
             %
             %   The anchor is per-axis and may later release independently in
             %   getFollowCursorLowerLimit after reaching the corresponding follow
@@ -825,49 +836,122 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function XY = currentViewCenter(obj)
             %CURRENTVIEWCENTER Return the center of the current main-axes view.
+            if isempty(obj.mainAxes) || ~isvalid(obj.mainAxes)
+                sz = obj.RenderSourceSize;
+                XY = [(sz(2) + 1)/2, (sz(1) + 1)/2];
+                return
+            end
+
             XY = [mean(obj.mainAxes.XLim), mean(obj.mainAxes.YLim)];
         end
 
-        function level = clampZoomLevel(obj, level)
-            %CLAMPZOOMLEVEL Constrain a visible-image fraction to supported bounds.
-            level = min(max(level, obj.Zoom_.MinLevel), obj.Zoom_.MaxLevel);
+        function factor = clampZoomFactor(obj, factor)
+            %CLAMPZOOMFACTOR Constrain a visual zoom factor to supported bounds.
+            factor = min(max(factor, obj.Zoom_.MinFactor), obj.Zoom_.MaxFactor);
+        end
+
+        function level = zoomFactorToLevel(obj, factor)
+            %ZOOMFACTORTOLEVEL Convert visual zoom factor to visible fraction.
+            level = 1 ./ obj.clampZoomFactor(factor);
+        end
+
+        function factor = zoomLevelToFactor(obj, level)
+            %ZOOMLEVELTOFACTOR Convert visible fraction to visual zoom factor.
+            factor = obj.clampZoomFactor(1 ./ level);
+        end
+
+        function factor = zoomFactorFromViewportSize(obj, viewportSize)
+            %ZOOMFACTORFROMVIEWPORTSIZE Return aspect-locked factor for a size request.
+            sz = obj.RenderSourceSize;
+            imageSize = [sz(2), sz(1)];
+            viewportSize = max(double(viewportSize), eps);
+            factor = max(imageSize ./ viewportSize);
+            factor = obj.clampZoomFactor(factor);
+        end
+
+        function [XLim,YLim] = getCenterAnchoredViewportLimits(obj, center, factor)
+            %GETCENTERANCHOREDVIEWPORTLIMITS Return aspect-locked limits.
+            sz = obj.RenderSourceSize;
+            H = sz(1);
+            W = sz(2);
+
+            factor = obj.clampZoomFactor(factor);
+            viewWidth = W / factor;
+            viewHeight = H / factor;
+
+            defXLim = [0.5, W + 0.5];
+            defYLim = [0.5, H + 0.5];
+
+            xLower = center(1) - viewWidth/2;
+            yLower = center(2) - viewHeight/2;
+
+            xLower = min(max(xLower,defXLim(1)), defXLim(2) - viewWidth);
+            yLower = min(max(yLower,defYLim(1)), defYLim(2) - viewHeight);
+
+            XLim = xLower + [0,viewWidth];
+            YLim = yLower + [0,viewHeight];
+        end
+
+        function applyViewportLimits(obj,XLim,YLim)
+            %APPLYVIEWPORTLIMITS Apply already-normalized image-space limits.
+            %
+            %   This is the final low-level sink for view changes. Public viewport
+            %   setters normalize requests before they get here, so this method can
+            %   stay small and simply push limits into the graphics objects.
+            set(obj.mainAxes,...
+                'XLim',XLim,...
+                'YLim',YLim);
+
+            obj.updateViewportBoxGeometry();
+
+            XViewportBase = obj.ViewportBoxGeometry_.XViewportBase;
+            YViewportBase = obj.ViewportBoxGeometry_.YViewportBase;
+
+            set(obj.ViewportBox,...
+                "XData",XViewportBase + (XLim(1) - 0.5)*obj.ViewportBoxScale,...
+                "YData",YViewportBase + (YLim(1) - 0.5)*obj.ViewportBoxScale);
+
+            obj.updateViewportBoxVisibility();
+        end
+
+        function updateViewportBoxVisibility(obj)
+            %UPDATEVIEWPORTBOXVISIBILITY Apply ImageAxes viewport-box visibility policy.
+            %
+            %   ViewportBoxVisible is the sole ImageAxes-owned visibility switch. Tools
+            %   that want temporary visibility, such as Zoom, should save/restore
+            %   this property rather than relying on an implicit effective state.
+
+            if isempty(obj.ViewportBoxFull) || ~isvalid(obj.ViewportBoxFull) || ...
+                    isempty(obj.ViewportBox) || ~isvalid(obj.ViewportBox)
+                return
+            end
+
+            obj.ViewportBoxFull.Visible = obj.ViewportBoxVisible;
+            obj.ViewportBox.Visible = obj.ViewportBoxVisible;
         end
 
         function resetZoomViewState(obj)
             %RESETZOOMVIEWSTATE  Restore default zoom/follow view state.
             %
             %   This resets the host navigation state that determines the visible
-            %   view box without enabling or disabling any tool. If the Zoom tool is
+            %   viewport box without enabling or disabling any tool. If the Zoom tool is
             %   still enabled, the overview patches remain visible and reflect the
             %   full-image view. If zoom is not enabled, the patches stay hidden.
 
-            obj.Zoom_.Level = obj.Zoom_.MaxLevel;
             obj.Zoom_.LastCursorXY = [];
+            obj.Zoom_.LastFactor = 1;
             obj.clearFollowCursorAnchor();
-            obj.restoreDefaultLimits();
-            obj.updateViewBoxBaseCoordinates();
+            obj.resetViewport();
 
-            if obj.ZoomEnabled
-                set([obj.ViewBoxFull,obj.ViewBoxZoom], "Visible", "on");
-                obj.applyZoomLims(obj.defaultXLim, obj.defaultYLim);
-            else
-                set(obj.ViewBoxFull, ...
-                    "XData", NaN, ...
-                    "YData", NaN, ...
-                    "Visible", "off");
-                set(obj.ViewBoxZoom, ...
-                    "XData", NaN, ...
-                    "YData", NaN, ...
-                    "Visible", "off");
-            end
+            obj.updateViewportBoxVisibility();
         end
 
         function applyFollowCursorLims(obj,XY)
             %APPLYFOLLOWCURSORLIMS  Apply cursor-following zoom limits
             %
-            %   applyFollowCursorLims(obj,XY) computes the zoomed view-box limits
+            %   applyFollowCursorLims(obj,XY) computes the zoomed viewport-box limits
             %   implied by static-axes cursor coordinate XY, applies them to mainAxes,
-            %   updates the miniature view box, and logs the mapping when debug output
+            %   updates the miniature viewport box, and logs the mapping when debug output
             %   is enabled.
             %
             %   XY must be expressed in full-sized static-axes coordinates, not in
@@ -881,14 +965,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
 
-            [XZoomLim,YZoomLim] = obj.getFollowCursorLims(XY);
-            obj.applyZoomLims(XZoomLim,YZoomLim);
+            [XViewportLim,YViewportLim] = obj.getFollowCursorLims(XY);
+            obj.applyZoomLims(XViewportLim,YViewportLim);
 
             % This field now always contains static-axes coordinates
             obj.FollowCursor_.LastCursorXY = XY;
         end
 
-        function applyCursorAnchoredZoomLims(obj,XY,oldXLim,oldYLim)
+        function applyCursorAnchoredZoomLims(obj,XY,oldXLim,oldYLim,factor)
             %APPLYCURSORANCHOREDZOOMLIMS  Apply a zoom step around image coordinate XY
             %
             %   applyCursorAnchoredZoomLims(obj,XY,oldXLim,oldYLim) applies the
@@ -915,44 +999,39 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 oldYLim = obj.mainAxes.YLim;
             end
 
-            [XZoomLim,YZoomLim] = ...
-                obj.getCursorAnchoredZoomLims(XY,oldXLim,oldYLim);
+            if nargin < 5 || isempty(factor)
+                factor = obj.ZoomFactor;
+            end
 
-            obj.applyZoomLims(XZoomLim,YZoomLim);
+            [XViewportLim,YViewportLim] = ...
+                obj.getCursorAnchoredZoomLims(XY,oldXLim,oldYLim,factor);
+
+            obj.applyZoomLims(XViewportLim,YViewportLim);
 
             % This field now always contains image/data coordinates
             obj.Zoom_.LastCursorXY = XY;
+            obj.Zoom_.LastFactor = obj.ZoomFactor;
 
             if obj.ZoomEnabled && obj.FollowCursorEnabled
                 obj.calibrateFollowCursorAnchor(obj.cursorPositionStatic);
             end
         end
 
-        function applyCenterAnchoredZoomLims(obj,XY)
-            %APPLYCENTERANCHOREDZOOMLIMS Apply current ZoomLevel centered on XY.
+        function applyCenterAnchoredZoomLims(obj,XY,factor)
+            %APPLYCENTERANCHOREDZOOMLIMS Apply zoom factor centered on XY.
             %
             %   Stored zoom anchors represent the region the user was viewing when
             %   zoom was disabled. Treat them as desired view centers, not as live
             %   cursor positions inside the current full-image axes limits.
 
-            sz = obj.RenderSourceSize;
-            H = sz(1);
-            W = sz(2);
+            if nargin < 3 || isempty(factor)
+                factor = obj.ZoomFactor;
+            end
 
-            viewWidth  = obj.ZoomLevel * W;
-            viewHeight = obj.ZoomLevel * H;
-
-            defXLim = [0.5, W + 0.5];
-            defYLim = [0.5, H + 0.5];
-
-            xLower = XY(1) - viewWidth/2;
-            yLower = XY(2) - viewHeight/2;
-
-            xLower = min(max(xLower,defXLim(1)), defXLim(2) - viewWidth);
-            yLower = min(max(yLower,defYLim(1)), defYLim(2) - viewHeight);
-
-            obj.applyZoomLims(xLower + [0,viewWidth], yLower + [0,viewHeight]);
+            [xLimits,yLimits] = obj.getCenterAnchoredViewportLimits(XY,factor);
+            obj.applyViewportLimits(xLimits,yLimits);
             obj.Zoom_.LastCursorXY = XY;
+            obj.Zoom_.LastFactor = obj.ZoomFactor;
 
             if obj.ZoomEnabled && obj.FollowCursorEnabled
                 obj.calibrateFollowCursorAnchor(obj.cursorPositionStatic);
@@ -960,38 +1039,20 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function applyZoomLims(obj,XLim,YLim)
-            %APPLYZOOMLIMS  Apply axes limits and synchronize the zoom view box.
+            %APPLYZOOMLIMS  Compatibility alias for applying viewport limits.
             %
-            %   applyZoomLims(obj,XLim,YLim) is the final common sink for both
-            %   cursor-anchored zoom and cursor-follow motion. It updates mainAxes
-            %   limits, then shifts the miniature ViewBoxZoom patch so the overview
-            %   reflects the same lower-left image coordinate.
-            %
-            %   XLim/YLim are pixel-centered image limits, where the full image is:
-            %
-            %       XLim = [0.5, W + 0.5]
-            %       YLim = [0.5, H + 0.5]
-
-            set(obj.mainAxes,...
-                'XLim',XLim,...
-                'YLim',YLim);
-
-            % Update inner view box
-            XZoomBase = obj.ViewBoxBase_.XZoomBase;
-            YZoomBase = obj.ViewBoxBase_.YZoomBase;
-
-            set(obj.ViewBoxZoom,...
-                "XData",XZoomBase + (XLim(1) - 0.5)*obj.ViewBoxSize,...
-                "YData",YZoomBase + (YLim(1) - 0.5)*obj.ViewBoxSize);
+            %   Older zoom helpers still call applyZoomLims. Keep the name as a
+            %   narrow internal bridge while viewport terminology becomes primary.
+            obj.applyViewportLimits(XLim,YLim);
         end
 
-        function updateViewBoxBaseCoordinates(obj)
-            %UPDATEVIEWBOXBASECOORDINATES  Update miniature overview geometry.
+        function updateViewportBoxGeometry(obj)
+            %UPDATEVIEWPORTBOXGEOMETRY Update miniature viewport-box geometry.
             %
             %   Recomputes the staticAxes patch coordinates used for the full-image
-            %   overview box and the current-size zoom box. The zoom box stored here
-            %   is intentionally zero-offset relative to the image; applyZoomLims
-            %   translates it based on XLim(1)/YLim(1).
+            %   frame and the current-size viewport box. The viewport box stored
+            %   here is intentionally zero-offset relative to the image;
+            %   applyViewportLimits translates it based on XLim(1)/YLim(1).
             %
             %   This must be called when the rendered image size or ZoomLevel changes.
 
@@ -1001,25 +1062,25 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             S = struct();
 
-            S.Top  = (obj.ViewBoxTop  * H) + 0.5;
-            S.Left = (obj.ViewBoxLeft * W) + 0.5;
+            S.Top  = (obj.ViewportBoxTop  * H) + 0.5;
+            S.Left = (obj.ViewportBoxLeft * W) + 0.5;
 
-            S.XBase = [0,0,W,W] .* obj.ViewBoxSize;
-            S.YBase = [0,H,H,0] .* obj.ViewBoxSize;
+            S.XBase = [0,0,W,W] .* obj.ViewportBoxScale;
+            S.YBase = [0,H,H,0] .* obj.ViewportBoxScale;
 
             S.XFull = S.XBase + S.Left;
             S.YFull = S.YBase + S.Top;
 
             zoomLevel = obj.ZoomLevel;
 
-            S.XZoomBase = S.XBase .* zoomLevel + S.Left;
-            S.YZoomBase = S.YBase .* zoomLevel + S.Top;
+            S.XViewportBase = S.XBase .* zoomLevel + S.Left;
+            S.YViewportBase = S.YBase .* zoomLevel + S.Top;
 
             % Update coordinates struct
-            obj.ViewBoxBase_ = S;
+            obj.ViewportBoxGeometry_ = S;
 
             % Always update full-size box when coordinates change
-            set(obj.ViewBoxFull,...
+            set(obj.ViewportBoxFull,...
                 "XData",S.XFull,...
                 "YData",S.YFull);
         end
@@ -1030,11 +1091,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     methods
 
         function z = get.ZoomEnabled(obj)
-            %ZOOMENABLED  True when mainAxes displays a zoomed view box.
+            %ZOOMENABLED  True when mainAxes displays a zoomed viewport box.
             %
-            %   Setting ZoomEnabled=true shows the miniature view boxes and applies
+            %   Setting ZoomEnabled=true shows the miniature viewport boxes and applies
             %   the current ZoomLevel around the cursor when possible. Setting it
-            %   false hides view boxes and restores full-image limits.
+            %   false hides viewport boxes and restores full-image limits.
 
             z = obj.Zoom_.Enabled;
         end
@@ -1075,9 +1136,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             %   FollowCursorLims is a two-element vector [a b] in normalized
             %   staticAxes coordinates. For each axis:
             %
-            %       cursor norm <= a  -> view box pinned to top/left edge
-            %       cursor norm >= b  -> view box pinned to bottom/right edge
-            %       a < norm < b      -> view box interpolates through image travel
+            %       cursor norm <= a  -> viewport box pinned to top/left edge
+            %       cursor norm >= b  -> viewport box pinned to bottom/right edge
+            %       a < norm < b      -> viewport box interpolates through image travel
             %
             %   Wider intervals such as [0.10 0.90] produce a gentler control feel
             %   and make anchor release less noticeable. Narrower intervals make the
@@ -1104,38 +1165,137 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             %ZOOMLEVEL  Fraction of the full image visible in the zoomed view.
             %
             %   ZoomLevel==1 means the full image is visible. ZoomLevel==0.5 means
-            %   the view box is half the image width and height, corresponding to a
+            %   the viewport box is half the image width and height, corresponding to a
             %   2x visual zoom.
 
-            z = obj.Zoom_.Level;
+            sz = obj.RenderSourceSize;
+            if isempty(sz) || numel(sz) < 2 || any(sz(1:2) <= 0)
+                z = 1;
+                return
+            end
+
+            if isempty(obj.mainAxes) || ~isvalid(obj.mainAxes)
+                z = 1;
+                return
+            end
+
+            xLevel = diff(obj.mainAxes.XLim) / sz(2);
+            yLevel = diff(obj.mainAxes.YLim) / sz(1);
+
+            % The viewport is aspect-locked, so these should match. Use the larger
+            % visible fraction to be conservative if MATLAB reports tiny numerical
+            % differences after limit updates.
+            z = max([xLevel,yLevel]);
+            z = min(max(z, 1 / obj.Zoom_.MaxFactor), 1 / obj.Zoom_.MinFactor);
         end
 
         function f = get.ZoomFactor(obj)
             %ZOOMFACTOR  Visual magnification factor, equal to 1/ZoomLevel.
 
-            f = 1 / obj.ZoomLevel;
+            f = obj.clampZoomFactor(1 / obj.ZoomLevel);
         end
 
         function factors = getZoomFactors(obj)
         %GETZOOMFACTORS Return supported preset visual zoom factors.
-            factors = 1 ./ obj.Zoom_.PresetLevels;
+            factors = obj.Zoom_.PresetFactors;
+        end
+
+        function S = getViewport(obj)
+        %GETVIEWPORT Return current aspect-locked viewport state.
+        %
+        %   S = ax.getViewport() returns a struct with image-space XLim/YLim,
+        %   Center, Size, ZoomLevel, and ZoomFactor. The returned limits are the
+        %   authoritative view state used by both ImageAxes and the Zoom tool.
+
+            xlim = obj.mainAxes.XLim;
+            ylim = obj.mainAxes.YLim;
+
+            S = struct( ...
+                "XLim", xlim, ...
+                "YLim", ylim, ...
+                "Center", [mean(xlim), mean(ylim)], ...
+                "Size", [diff(xlim), diff(ylim)], ...
+                "ZoomLevel", obj.ZoomLevel, ...
+                "ZoomFactor", obj.ZoomFactor);
+        end
+
+        function setViewportLimits(obj,xlim,ylim)
+        %SETVIEWPORTLIMITS Set viewport from requested image-space limits.
+        %
+        %   ax.setViewportLimits(xlim,ylim) treats the requested limits as a target
+        %   region but still preserves ImageAxes' image aspect ratio. If the
+        %   requested width and height do not match the image aspect ratio, the
+        %   resulting viewport is the largest aspect-correct view that fits inside
+        %   that requested region, centered on the requested region.
+
+            center = [mean(xlim), mean(ylim)];
+            requestedSize = [diff(xlim), diff(ylim)];
+            obj.setViewportCenterAndSize(center,requestedSize);
+        end
+
+        function setViewportCenter(obj,center)
+        %SETVIEWPORTCENTER Move the current viewport to a new center.
+
+            obj.setViewportCenterAndZoomFactor(center,obj.ZoomFactor);
+        end
+
+        function setViewportSize(obj,viewportSize)
+        %SETVIEWPORTSIZE Set viewport size while preserving current center.
+        %
+        %   viewportSize is [width height] in image pixels. Non-aspect-matched
+        %   requests are normalized using the same policy as setViewportLimits.
+
+            obj.setViewportCenterAndSize(obj.currentViewCenter(),viewportSize);
+        end
+
+        function setViewportCenterAndSize(obj,center,viewportSize)
+        %SETVIEWPORTCENTERANDSIZE Set viewport center and requested size.
+
+            factor = obj.zoomFactorFromViewportSize(viewportSize);
+            obj.setViewportCenterAndZoomFactor(center,factor);
+        end
+
+        function setViewportCenterAndZoomFactor(obj,center,factor)
+        %SETVIEWPORTCENTERANDZOOMFACTOR Set viewport center and magnification.
+
+            [xLimits,yLimits] = obj.getCenterAnchoredViewportLimits(center,factor);
+            obj.applyViewportLimits(xLimits,yLimits);
+
+            obj.Zoom_.LastCursorXY = [mean(xLimits), mean(yLimits)];
+            obj.Zoom_.LastFactor = obj.ZoomFactor;
+        end
+
+        function resetViewport(obj,opts)
+        %RESETVIEWPORT Restore full-image viewport limits.
+        %
+        %   resetViewport() is a public view reset, so it clears the saved zoom
+        %   anchor/factor. Internal callers that are temporarily showing the full
+        %   image, such as disableZoom, can preserve that state.
+
+            arguments
+                obj
+                opts.PreserveZoomState (1,1) logical = false
+            end
+
+            if ~opts.PreserveZoomState
+                obj.Zoom_.LastCursorXY = [];
+                obj.Zoom_.LastFactor = 1;
+                obj.clearFollowCursorAnchor();
+            end
+
+            obj.staticAxes.XLim = obj.defaultXLim;
+            obj.staticAxes.YLim = obj.defaultYLim;
+            obj.applyViewportLimits(obj.defaultXLim,obj.defaultYLim);
         end
 
         function setZoomFactor(obj, factor)
         %SETZOOMFACTOR Set the current visual zoom factor.
-            obj.setZoomLevel(1 ./ factor);
+            obj.setViewportCenterAndZoomFactor(obj.currentViewCenter(),factor);
         end
 
         function setZoomLevel(obj, level)
         %SETZOOMLEVEL Set the current visible-image fraction.
-            level = obj.clampZoomLevel(level);
-            center = obj.currentViewCenter();
-            obj.Zoom_.Level = level;
-            obj.updateViewBoxBaseCoordinates();
-
-            if obj.ZoomEnabled
-                obj.applyCenterAnchoredZoomLims(center);
-            end
+            obj.setZoomFactor(1 ./ level);
         end
 
         function setZoomFactorAtCursor(obj, factor)
@@ -1145,23 +1305,21 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function setZoomLevelAtCursor(obj, level)
         %SETZOOMLEVELATCURSOR Set visible-image fraction around the cursor.
-            level = obj.clampZoomLevel(level);
+            factor = obj.zoomLevelToFactor(level);
             oldCenter = obj.currentViewCenter();
             oldXLim = obj.mainAxes.XLim;
             oldYLim = obj.mainAxes.YLim;
 
-            obj.Zoom_.Level = level;
-            obj.updateViewBoxBaseCoordinates();
-
             if ~obj.ZoomEnabled
+                obj.setViewportCenterAndZoomFactor(oldCenter,factor);
                 return
             end
 
             XY = obj.cursorPosition;
             if isempty(XY)
-                obj.applyCenterAnchoredZoomLims(oldCenter);
+                obj.applyCenterAnchoredZoomLims(oldCenter,factor);
             else
-                obj.applyCursorAnchoredZoomLims(XY,oldXLim,oldYLim);
+                obj.applyCursorAnchoredZoomLims(XY,oldXLim,oldYLim,factor);
             end
         end
 
@@ -1217,7 +1375,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             %       3. image center
             %
             %   Stored anchors are preferred so toolbar clicks used to re-enable
-            %   zoom do not accidentally move the view box toward the toolbar.
+            %   zoom do not accidentally move the viewport box toward the toolbar.
             %
             %   If FollowCursor is already enabled, a follow-cursor anchor is
             %   calibrated afterward so the next mouse move does not jump.
@@ -1226,15 +1384,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
 
-            % Update view-box base coordinates for the current zoom level
-            obj.updateViewBoxBaseCoordinates();
-
-            % Show view boxes
-            set([obj.ViewBoxFull,obj.ViewBoxZoom],...
-                "Visible","on");
+            obj.Zoom_.Enabled = true;
 
             oldXLim = obj.mainAxes.XLim;
             oldYLim = obj.mainAxes.YLim;
+            targetFactor = obj.ZoomFactor;
 
             % Prefer the most recent image-space zoom anchor.
             XY = [];
@@ -1242,6 +1396,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             if isfield(obj.Zoom_,'LastCursorXY')
                 XY = obj.Zoom_.LastCursorXY;
                 useStoredAnchor = ~isempty(XY);
+            end
+
+            if useStoredAnchor && isfield(obj.Zoom_,'LastFactor') && ...
+                    ~isempty(obj.Zoom_.LastFactor)
+                targetFactor = obj.Zoom_.LastFactor;
             end
 
             % Fall back to the current image coordinate under the cursor.
@@ -1256,12 +1415,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
 
             if useStoredAnchor
-                obj.applyCenterAnchoredZoomLims(XY);
+                obj.applyCenterAnchoredZoomLims(XY,targetFactor);
             else
-                obj.applyCursorAnchoredZoomLims(XY,oldXLim,oldYLim);
+                obj.applyCursorAnchoredZoomLims(XY,oldXLim,oldYLim,targetFactor);
             end
-
-            obj.Zoom_.Enabled = true;
 
             if obj.FollowCursorEnabled
                 obj.calibrateFollowCursorAnchor(obj.cursorPositionStatic);
@@ -1279,24 +1436,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % Re-enabling zoom should return to the same region, not to wherever
             % the cursor happens to be when a toolbar button is clicked.
             obj.Zoom_.LastCursorXY = obj.currentViewCenter();
+            obj.Zoom_.LastFactor = obj.ZoomFactor;
 
-            % Clear and hide patches
-            if isvalid(obj.ViewBoxFull)
-                set(obj.ViewBoxFull,...
-                    "XData",NaN,...
-                    "YData",NaN,...
-                    "Visible","off");
-            end
-
-            if isvalid(obj.ViewBoxZoom)
-                set(obj.ViewBoxZoom,...
-                    "XData",NaN,...
-                    "YData",NaN,...
-                    "Visible","off");
-            end
-
-            % Restore limits
-            obj.restoreDefaultLimits();
+            % Restore full-image limits while preserving the stored zoom anchor.
+            obj.resetViewport(PreserveZoomState=true);
 
             obj.clearFollowCursorAnchor();
 
@@ -1549,6 +1692,62 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             if includeSizeDiagnostics
                 S.SizeDiagnostics = obj.getSizeDiagnostics();
             end
+        end
+
+        function S = getToolStatusSummary(obj)
+            %GETTOOLSTATUSSUMMARY Return installed tool names grouped by style.
+            toolStruct = obj.Tools;
+            toolNames = string(fieldnames(toolStruct));
+
+            stateTools = struct();
+            pushTools = strings(1,0);
+
+            for i = 1:numel(toolNames)
+                name = toolNames(i);
+                tool = toolStruct.(char(name));
+
+                if isempty(tool) || ~isvalid(tool)
+                    continue
+                end
+
+                switch string(tool.Style)
+                    case "state"
+                        fieldName = matlab.lang.makeValidName(char(name));
+                        stateTools.(fieldName) = string(matlab.lang.OnOffSwitchState(tool.Enabled));
+                    case "push"
+                        pushTools(end+1) = name; %#ok<AGROW>
+                end
+            end
+
+            S = struct( ...
+                "Installed", toolNames(:).', ...
+                "StateTools", stateTools, ...
+                "PushTools", pushTools);
+        end
+
+        function S = getLinkStatusSummary(obj)
+            %GETLINKSTATUSSUMMARY Return compact axes-linking state.
+            peerNames = strings(1,0);
+            if obj.hasLinks
+                for i = 1:numel(obj.linkedAxes)
+                    peer = obj.linkedAxes(i);
+                    if isempty(peer) || ~isvalid(peer)
+                        continue
+                    end
+
+                    if strlength(peer.Name) > 0
+                        peerNames(end+1) = peer.Name; %#ok<AGROW>
+                    else
+                        peerNames(end+1) = string(class(peer)); %#ok<AGROW>
+                    end
+                end
+            end
+
+            S = struct( ...
+                "HasLinks", obj.hasLinks, ...
+                "LinkedPeerCount", numel(peerNames), ...
+                "LinkedPeers", peerNames, ...
+                "LinkedProperties", string(obj.linkedProps));
         end
 
         function updateBottomLabelText(obj)
@@ -2404,10 +2603,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 newXLim = xLower + [0,viewWidth];
                 newYLim = yLower + [0,viewHeight];
         
-                % refreshView may have updated image-dependent geometry, so apply
-                % the restored limits only after it completes.
-                obj.updateViewBoxBaseCoordinates();
-                obj.applyZoomLims(newXLim,newYLim);
+                % refreshDisplay may have updated image-dependent geometry, so
+                % restore the view afterward. Use the public viewport path so the
+                % preserved region is normalized to the new image aspect ratio.
+                obj.setViewportLimits(newXLim,newYLim);
         
             elseif sizeChanged
                 % No active zoomed view to preserve. Keep the stored anchor valid,
@@ -2465,16 +2664,59 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function restoreDefaultLimits(obj)
-            obj.staticAxes.XLim = obj.defaultXLim;  
-            obj.staticAxes.YLim = obj.defaultYLim;
-            obj.mainAxes.XLim = obj.defaultXLim;  
-            obj.mainAxes.YLim = obj.defaultYLim;
+            obj.resetViewport();
         end
 
     end
 
     %% Derived getters and setters
     methods
+
+        function S = getStatusSummary(obj)
+        %GETSTATUSSUMMARY Return compact ImageAxes operational status.
+        %
+        %   S = ax.getStatusSummary() returns a user-facing/debug-friendly struct
+        %   describing the axes identity, current image/view state, installed
+        %   tools, link status, and visible display aids.
+
+            viewport = obj.getViewport();
+
+            S = struct();
+            S.Name = obj.Name;
+            S.Class = string(class(obj));
+            S.Image = struct( ...
+                "ImageDataClass", string(class(obj.ImageData_)), ...
+                "Size", struct( ...
+                    "Y", obj.ImageData_.SizeY, ...
+                    "X", obj.ImageData_.SizeX, ...
+                    "C", obj.ImageData_.NumComponents, ...
+                    "Z", obj.ImageData_.SizeZ, ...
+                    "T", obj.ImageData_.SizeT), ...
+                "RenderSourceKind", string(obj.RenderSourceKind), ...
+                "RenderSourceClass", string(obj.RenderSourceClass), ...
+                "RenderSourceSize", obj.RenderSourceSize);
+            S.View = struct( ...
+                "C", obj.C, ...
+                "Z", obj.Z, ...
+                "T", obj.T, ...
+                "ShowComposite", string(obj.ShowComposite), ...
+                "CLimMode", string(obj.CLimMode), ...
+                "ComponentColorMode", string(obj.ComponentColorMode));
+            S.Viewport = struct( ...
+                "Center", viewport.Center, ...
+                "Size", viewport.Size, ...
+                "XLim", viewport.XLim, ...
+                "YLim", viewport.YLim, ...
+                "ZoomFactor", viewport.ZoomFactor, ...
+                "ZoomLevel", viewport.ZoomLevel);
+            S.Display = struct( ...
+                "ColorbarVisible", string(obj.ColorbarVisible), ...
+                "ViewportBoxVisible", string(obj.ViewportBoxVisible), ...
+                "MaxRenderedResolution", obj.MaxRenderedResolution, ...
+                "FontSize", obj.FontSize);
+            S.Tools = obj.getToolStatusSummary();
+            S.Links = obj.getLinkStatusSummary();
+        end
 
         function S = printSizeDiagnostics(obj)
         %PRINTSIZEDIAGNOSTICS Print temporary ImageAxes layout diagnostics.
@@ -2486,7 +2728,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             S = obj.getSizeDiagnostics();
 
             if nargout == 0
-                matlabx.struct.prettyPrint(S);
+                matlabx.struct.prettyPrint(S, StringArrayStyle="lines");
             end
         end
 
@@ -2555,6 +2797,15 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 obj.ContextMenuManager.setBuiltinItems(items);
             end
         end
+        % ViewportBoxVisible
+        function val = get.ViewportBoxVisible(obj)
+            val = obj.ViewportBoxVisible_;
+        end
+        function set.ViewportBoxVisible(obj,val)
+            obj.ViewportBoxVisible_ = val;
+            obj.updateViewportBoxVisibility();
+            obj.refreshContextMenu();
+        end
 
         % FontSize
         function set.FontSize(obj,val)
@@ -2605,7 +2856,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
 
 
-            % set axes limits and view box before routing to tools
+            % set axes limits and viewport box before routing to tools
             if obj.ZoomEnabled && obj.FollowCursorEnabled
                 obj.followCursor();
             end
@@ -2974,11 +3225,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         %
         %   Assignment configures which tools are installed:
         %
-        %       ax.Tools = ["Zoom","Pick"]
+        %       ax.Tools = ["Zoom","Box"]
         %
         %   Reading the property returns the installed tool handles:
         %
-        %       ax.Tools.Pick.BoxSize = 25
+        %       ax.Tools.Box.BoxSize = 25
             obj.ToolManager.setInstalledNames(toolNames);
         end
 
@@ -3090,7 +3341,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
 
             properties = obj.getImagePropertiesSummary();
-            propertyLines = cellstr(matlabx.struct.prettyPrint(properties));
+            propertyLines = cellstr(matlabx.struct.prettyPrint( ...
+                properties, StringArrayStyle="lines"));
 
             obj.imagePropertiesWindow = matlabx.app.TextWindow( ...
                 "Title","Image Properties", ...
@@ -3102,6 +3354,61 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function onImagePropertiesWindowClosed(obj)
             obj.imagePropertiesWindowOpen = false;
+        end
+
+        % --- StatusWindow ---
+        function openStatusWindow(obj)
+            if obj.statusWindowOpen
+                return
+            end
+
+            status = obj.getStatusSummary();
+            statusLines = cellstr(matlabx.struct.prettyPrint( ...
+                status, StringArrayStyle="lines"));
+
+            obj.statusWindow = matlabx.app.TextWindow( ...
+                "Title","ImageAxes Status", ...
+                "Text",statusLines, ...
+                "ClosedFcn",@(~,~) obj.onStatusWindowClosed());
+
+            obj.statusWindowOpen = true;
+        end
+
+        function onStatusWindowClosed(obj)
+            obj.statusWindowOpen = false;
+        end
+
+        % --- ToolHelpWindow ---
+        function openToolHelpWindow(obj, tool)
+            %OPENTOOLHELPWINDOW Open a help report for an installed tool.
+            if obj.toolHelpWindowOpen
+                return
+            end
+
+            if ischar(tool) || (isstring(tool) && isscalar(tool))
+                tool = obj.getInstalledTool(tool);
+            end
+
+            if isempty(tool) || ~isvalid(tool)
+                warning("ImageAxes:InvalidToolHelp", ...
+                    "Cannot open tool help because the requested tool is not installed.")
+                return
+            end
+
+            helpInfo = tool.getHelpInfo();
+            helpLines = cellstr(matlabx.struct.prettyPrint( ...
+                helpInfo, StringArrayStyle="lines"));
+
+            obj.toolHelpWindow = matlabx.app.TextWindow( ...
+                "Title",char(tool.Name + " Help"), ...
+                "Text",helpLines, ...
+                "ClosedFcn",@(~,~) obj.onToolHelpWindowClosed());
+
+            obj.toolHelpWindowOpen = true;
+        end
+
+        function onToolHelpWindowClosed(obj)
+            obj.toolHelpWindowOpen = false;
         end
 
     end
@@ -3116,6 +3423,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         function resetView(obj)
         %RESETVIEW Restore default image-space limits and zoom view state.
             obj.resetZoomViewState();
+        end
+
+        function toggleViewportBoxVisible(obj)
+        %TOGGLEVIEWPORTBOXVISIBLE Toggle persistent viewport-box overlay visibility.
+            obj.ViewportBoxVisible = matlab.lang.OnOffSwitchState(obj.ViewportBoxVisible == "off");
         end
 
     end
@@ -3225,7 +3537,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             S = obj.getDebugStatus(opts.IncludeSizeDiagnostics);
 
             if nargout == 0
-                matlabx.struct.prettyPrint(S);
+                matlabx.struct.prettyPrint(S, StringArrayStyle="lines");
             end
 
             if opts.Stop
@@ -3415,9 +3727,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 delete(obj.imagePropertiesWindow(isvalid(obj.imagePropertiesWindow)));
             end
 
-            % ViewBox
-            delete(obj.ViewBoxFull(isvalid(obj.ViewBoxFull)));
-            delete(obj.ViewBoxZoom(isvalid(obj.ViewBoxZoom)));
+            % ViewportBox
+            delete(obj.ViewportBoxFull(isvalid(obj.ViewportBoxFull)));
+            delete(obj.ViewportBox(isvalid(obj.ViewportBox)));
 
             % Unregister from hub (safe if figure already gone)
             try

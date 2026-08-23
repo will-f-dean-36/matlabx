@@ -8,7 +8,7 @@ classdef Zoom < matlabx.ui.axes.AxesTool
 %       scroll wheel    increase/decrease zoom
 %
 %   Zoom is intentionally non-exclusive so it can coexist with interaction
-%   tools such as Pick or DrawRectangle. Its toggle hotkey is contributed to
+%   tools such as Box or DrawRectangle. Its toggle hotkey is contributed to
 %   the host hotkey registry when the tool is installed.
 
     properties
@@ -19,6 +19,7 @@ classdef Zoom < matlabx.ui.axes.AxesTool
     properties (Access=private)
         ScrollEventCount (1,1) double {mustBeNonnegative, mustBeInteger} = 0
         LastScrollDirection (1,1) double {mustBeMember(LastScrollDirection,[-1,0,1])} = 0
+        PreviousViewportBoxVisible (1,1) matlab.lang.OnOffSwitchState = "off"
     end
 
     %% Lifecycle
@@ -42,6 +43,12 @@ classdef Zoom < matlabx.ui.axes.AxesTool
         %ONENABLED  Enable Zoom when toolbar button is enabled.
             obj.ScrollEventCount = 0;
             obj.LastScrollDirection = 0;
+
+            % The viewport box is ImageAxes-owned state. Zoom temporarily turns it
+            % on while active, then restores the user's previous preference when it
+            % is disabled.
+            obj.PreviousViewportBoxVisible = obj.Host.ViewportBoxVisible;
+            obj.Host.ViewportBoxVisible = "on";
             obj.Host.enableZoom();
         end
 
@@ -51,6 +58,7 @@ classdef Zoom < matlabx.ui.axes.AxesTool
             obj.LastScrollDirection = 0;
             if isvalid(obj.Host)
                 obj.Host.disableZoom();
+                obj.Host.ViewportBoxVisible = obj.PreviousViewportBoxVisible;
             end
         end
 
@@ -62,11 +70,19 @@ classdef Zoom < matlabx.ui.axes.AxesTool
                 "Owner", obj);
 
             menu.addItem( ...
+                "Zoom.Help", ...
+                "Help...", ...
+                @(~,~) obj.Host.openToolHelpWindow(obj), ...
+                "Parent", "Zoom", ...
+                "Owner", obj);
+
+            menu.addItem( ...
                 "Zoom.FollowCursor", ...
                 "Follow Cursor", ...
                 @(h,~) obj.onFollowCursorMenuSelected(h), ...
                 "Parent", "Zoom", ...
                 "Owner", obj, ...
+                "Separator", "on", ...
                 "Checked", matlab.lang.OnOffSwitchState(obj.Host.FollowCursorEnabled), ...
                 "RefreshFcn", @(h) obj.refreshFollowCursorMenuItem(h));
 
@@ -91,6 +107,40 @@ classdef Zoom < matlabx.ui.axes.AxesTool
             end
         end
 
+    end
+
+    %% Help
+    methods
+        function summary = getHelpSummary(~)
+        %GETHELPSUMMARY Return a one-line Zoom description.
+            summary = "Zoom and cursor-follow navigation for ImageAxes.";
+        end
+
+        function usage = getUsageHelp(~)
+        %GETUSAGEHELP Return short Zoom usage notes.
+            usage = [ ...
+                "Enable Zoom to inspect a smaller viewport of the image."; ...
+                "Scroll, modifier-click, or use zoom hotkeys to change magnification around the cursor."; ...
+                "Follow Cursor pans the zoomed viewport as the cursor moves across the image."];
+        end
+
+        function B = getBindingHelp(obj)
+        %GETBINDINGHELP Return Zoom click/key binding descriptions.
+            B = struct( ...
+                "ToggleTool", obj.ToggleHotkey, ...
+                "ZoomInAtCursor", "meta+click, mouse-wheel up, meta+equal", ...
+                "ZoomOutAtCursor", "meta+contextclick, mouse-wheel down, meta+hyphen", ...
+                "ToggleFollowCursor", "shift+extendclick", ...
+                "DisableZoom", "escape");
+        end
+
+        function notes = getNotesHelp(~)
+        %GETNOTESHELP Return additional Zoom behavior notes.
+            notes = [ ...
+                "Context-menu level changes and programmatic zoom-factor changes are center-anchored."; ...
+                "Click, key, and scroll zoom changes are cursor-anchored when the cursor is over the image."; ...
+                "Zoom temporarily shows the ImageAxes viewport box, then restores the prior ViewportBoxVisible setting when disabled."];
+        end
     end
 
     %% Context menu callbacks

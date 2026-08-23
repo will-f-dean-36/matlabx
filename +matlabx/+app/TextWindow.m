@@ -14,6 +14,10 @@ classdef TextWindow < handle
         TextArea matlab.ui.control.TextArea
     end
 
+    properties (Access=private)
+        ClosedNotified (1,1) logical = false
+    end
+
     methods
 
         function obj = TextWindow(opts)
@@ -29,6 +33,7 @@ classdef TextWindow < handle
             obj.Title = opts.Title;
             obj.Text = opts.Text;
             obj.FontName = opts.FontName;
+            obj.ClosedFcn = opts.ClosedFcn;
 
             if ~isempty(opts.Position)
                 obj.Position = opts.Position; 
@@ -73,12 +78,31 @@ classdef TextWindow < handle
     methods (Access=private)
 
         function onCloseFigure(obj)
-            % Trigger the closed callback if set
-            if ~isempty(obj.ClosedFcn)
-                obj.ClosedFcn();
-            end
+            obj.notifyClosed();
             % delete self
             delete(obj.Fig);
+        end
+
+        function notifyClosed(obj)
+            %NOTIFYCLOSED Fire ClosedFcn once, regardless of close/delete path.
+            if obj.ClosedNotified
+                return
+            end
+
+            obj.ClosedNotified = true;
+
+            if isempty(obj.ClosedFcn)
+                return
+            end
+
+            n = nargin(obj.ClosedFcn);
+            if n == 0
+                obj.ClosedFcn();
+            elseif n == 1
+                obj.ClosedFcn(obj);
+            else
+                obj.ClosedFcn(obj, []);
+            end
         end
 
     end
@@ -86,6 +110,7 @@ classdef TextWindow < handle
     methods
 
         function delete(obj)
+            obj.notifyClosed();
             % delete components and figure
             if ~isempty(obj.TextArea), delete(obj.TextArea(isvalid(obj.TextArea))); end
             if ~isempty(obj.Grid), delete(obj.Grid(isvalid(obj.Grid))); end

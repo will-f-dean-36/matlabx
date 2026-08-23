@@ -7,8 +7,10 @@ classdef ImageAxesContextMenuManager < handle
 %   later without pushing more menu bookkeeping into ImageAxes.
 %
 %   The built-in menu policy is intentionally modest:
+%       * Status command for a compact operational report.
 %       * Reset View command.
 %       * Image submenu grouping image/data/display commands.
+%       * Overlays submenu grouping visual aids drawn over/around the image.
 %       * Image Properties and Metadata commands.
 %       * Color Mode and Component Color submenus.
 %       * addItem/removeItem helpers for future simple contributions.
@@ -25,7 +27,7 @@ classdef ImageAxesContextMenuManager < handle
     properties (Access=private)
         BuiltinUI struct = struct()
         Items struct = struct()
-        BuiltinItems_ (1,:) string = ["ResetView","Image"]
+        BuiltinItems_ (1,:) string = ["Status","ResetView","Image","Overlays"]
     end
 
     methods
@@ -44,12 +46,20 @@ classdef ImageAxesContextMenuManager < handle
 
             S = struct();
 
+            if obj.hasBuiltin("Status")
+                S = obj.buildStatusMenu(S, obj.Menu);
+            end
+
             if obj.hasBuiltin("ResetView")
                 S = obj.buildResetViewMenu(S, obj.Menu);
             end
 
             if obj.hasBuiltin("Image")
                 S = obj.buildImageMenu(S);
+            end
+
+            if obj.hasBuiltin("Overlays")
+                S = obj.buildOverlaysMenu(S);
             end
 
             if obj.hasBuiltin("ImageProperties") && ~obj.hasBuiltin("Image")
@@ -66,6 +76,10 @@ classdef ImageAxesContextMenuManager < handle
 
             if obj.hasBuiltin("ColorMode") && ~obj.hasBuiltin("Image")
                 S = obj.buildColorModeMenu(S, obj.Menu);
+            end
+
+            if obj.hasBuiltin("ViewportBox") && ~obj.hasBuiltin("Overlays")
+                S = obj.buildViewportBoxMenu(S, obj.Menu);
             end
 
             obj.BuiltinUI = S;
@@ -107,6 +121,10 @@ classdef ImageAxesContextMenuManager < handle
                             matlab.lang.OnOffSwitchState(canHaveColor && currentName == colorNames(i));
                     end
                 end
+            end
+
+            if isfield(obj.BuiltinUI, "ViewportBox")
+                obj.BuiltinUI.ViewportBox.Checked = obj.Host.ViewportBoxVisible;
             end
 
             obj.refreshItems();
@@ -269,6 +287,13 @@ classdef ImageAxesContextMenuManager < handle
                 "MenuSelectedFcn", @(~,~) obj.Host.resetView());
         end
 
+        function S = buildStatusMenu(obj, S, parent)
+        %BUILDSTATUSMENU Add a compact ImageAxes status report command.
+            S.Status = uimenu(parent, ...
+                "Text", "Status...", ...
+                "MenuSelectedFcn", @(~,~) obj.Host.openStatusWindow());
+        end
+
         function S = buildImageMenu(obj, S)
         %BUILDIMAGEMENU Add grouped image/data/display commands.
             S.Image = uimenu(obj.Menu, "Text", "Image");
@@ -276,6 +301,12 @@ classdef ImageAxesContextMenuManager < handle
             S = obj.buildMetadataMenu(S, S.Image);
             S = obj.buildComponentColorMenu(S, S.Image, "on");
             S = obj.buildColorModeMenu(S, S.Image);
+        end
+
+        function S = buildOverlaysMenu(obj, S)
+        %BUILDOVERLAYSMENU Add grouped image overlay/display-aid commands.
+            S.Overlays = uimenu(obj.Menu, "Text", "Overlays");
+            S = obj.buildViewportBoxMenu(S, S.Overlays);
         end
 
         function S = buildImagePropertiesMenu(obj, S, parent)
@@ -303,6 +334,14 @@ classdef ImageAxesContextMenuManager < handle
                 "Text", "luts", ...
                 "MenuSelectedFcn", @(~,~) obj.Host.setComponentColorMode("luts"), ...
                 "Checked", "off");
+        end
+
+        function S = buildViewportBoxMenu(obj, S, parent)
+        %BUILDVIEWPORTBOXMENU Add a toggle for the persistent viewport overlay.
+            S.ViewportBox = uimenu(parent, ...
+                "Text", "Viewport Box", ...
+                "MenuSelectedFcn", @(~,~) obj.Host.toggleViewportBoxVisible(), ...
+                "Checked", obj.Host.ViewportBoxVisible);
         end
 
         function S = buildComponentColorMenu(obj, S, parent, separator)
@@ -376,7 +415,8 @@ classdef ImageAxesContextMenuManager < handle
     methods (Static)
         function items = availableBuiltinItems()
         %AVAILABLEBUILTINITEMS Return valid ImageAxes built-in context item names.
-            items = ["ResetView","Image","ImageProperties","Metadata","ComponentColor","ColorMode"];
+            items = ["Status","ResetView","Image","ImageProperties","Metadata", ...
+                "ComponentColor","ColorMode","Overlays","ViewportBox"];
         end
 
         function items = validateBuiltinItems(items)
