@@ -58,6 +58,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     properties (Dependent)
         % Assign names to install tools; read back installed tool objects.
         Tools
+        % Overlay manager for image-space annotations and visual aids.
+        Overlays
     end
 
     properties (Access={?matlabx.ui.axes.ImageAxesToolManager})
@@ -173,6 +175,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     properties (Access={?matlabx.ui.axes.ImageAxesToolManager}, Transient, NonCopyable)
         % manager for the host-owned context menu
         ContextMenuManager matlabx.ui.axes.ImageAxesContextMenuManager
+        % manager for host-owned overlays
+        OverlayManager matlabx.ui.axes.ImageAxesOverlayManager
     end
 
     % tool-accessible
@@ -340,7 +344,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % setup and store colorbar
             obj.Colorbar = colorbar(obj.mainAxes,"east","Visible","off","PickableParts","none","HitTest","off");
 
-            % initialize tool lifecycle/hotkey managers
+            % initialize overlay/tool lifecycle/hotkey managers
+            obj.OverlayManager = matlabx.ui.axes.ImageAxesOverlayManager(obj);
             obj.ToolManager = matlabx.ui.axes.ImageAxesToolManager(obj);
             obj.HotkeyRegistry = matlabx.ui.axes.ImageAxesHotkeyRegistry();
 
@@ -2621,6 +2626,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 oldData,newData);
         
             notify(obj,'RenderSourceChanged',evtData);
+
+            if ~isempty(obj.OverlayManager)
+                obj.OverlayManager.refreshVisibility();
+            end
         end
 
         function updateDisplayMapping(obj)
@@ -3233,6 +3242,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.ToolManager.setInstalledNames(toolNames);
         end
 
+        function manager = get.Overlays(obj)
+        %GET.OVERLAYS Return the ImageAxes overlay manager.
+            manager = obj.OverlayManager;
+        end
+
     end
 
     %% Popup window management
@@ -3730,6 +3744,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % ViewportBox
             delete(obj.ViewportBoxFull(isvalid(obj.ViewportBoxFull)));
             delete(obj.ViewportBox(isvalid(obj.ViewportBox)));
+
+            % overlays
+            if ~isempty(obj.OverlayManager) && isvalid(obj.OverlayManager)
+                obj.OverlayManager.clear();
+            end
 
             % Unregister from hub (safe if figure already gone)
             try

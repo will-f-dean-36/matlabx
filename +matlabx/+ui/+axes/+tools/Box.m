@@ -1,11 +1,16 @@
 classdef Box < matlabx.ui.axes.AxesTool
-% matlabx.ui.axes.tools.Box - optimistic box creation on click
+%BOX Optimistic box-region interaction tool for ImageAxes.
+%
+%   The Box tool is an interaction controller. It interprets mouse gestures,
+%   creates overlays.Box instances through the host OverlayManager, manages drag
+%   mode, and emits Box-specific compatibility callbacks. Overlay lifetime and
+%   active/hover/selection state are owned by ImageAxesOverlayManager.
 
     %% Draggable box management
 
     %% Private UI/Graphics
     properties (Access = private, Transient, NonCopyable)
-        BoxROI (:,1) matlabx.ui.axes.overlays.ROIBox
+        BoxROI (:,1) matlabx.ui.axes.overlays.Box
     end
 
     % Callbacks
@@ -29,11 +34,8 @@ classdef Box < matlabx.ui.axes.AxesTool
 
     % Identity
     properties (Access=private)
-        % track box IDs in parallel with ROI handles
+        % track box IDs in parallel with overlay handles
         BoxIds (1,:) string = string.empty(1,0)
-        ActiveBoxId (1,1) string = ""
-        ActiveHoverId (1,1) string = ""
-        SelectedBoxIds (1,:) string = string.empty(1,0)
     end
 
     % Box Settings/Info
@@ -49,6 +51,7 @@ classdef Box < matlabx.ui.axes.AxesTool
     %% Lifecycle toggles
     methods
         function obj = Box(host)
+        %BOX Create the Box tool for one ImageAxes host.
             obj@matlabx.ui.axes.AxesTool(host, "Box",...
                 'Tooltip','Box regions',...
                 'AxesType',"image",...
@@ -60,19 +63,19 @@ classdef Box < matlabx.ui.axes.AxesTool
                 'PassivelyInterceptsMove',true,...
                 'PassivelyInterceptsUp',true);
 
-            % ROIBox array (empty to start)
-            obj.BoxROI = matlabx.ui.axes.overlays.ROIBox.empty();
+            % Box overlay array (empty to start)
+            obj.BoxROI = matlabx.ui.axes.overlays.Box.empty();
 
         end
-        % Called AFTER installed from Host, use for any extra required startup actions
         function onInstall(obj)
+        %ONINSTALL Register tool-owned modes after installation.
             obj.addMode('PrimedForDrag');
             obj.addMode('DragBox');
             obj.addMode('HoverBox');
         end
 
-        % Called AFTER uninstalled from Host, use for any extra required cleanup actions
         function onUninstall(obj)
+        %ONUNINSTALL Remove modes and overlays owned by this tool.
             obj.removeMode('PrimedForDrag');
             obj.removeMode('DragBox');
             obj.removeMode('HoverBox');
@@ -173,6 +176,7 @@ classdef Box < matlabx.ui.axes.AxesTool
     methods
 
         function onDown(obj, E)
+        %ONDOWN Create a new box on plain image click while enabled.
 
             if E.MouseChord ~= "click"
                 return
@@ -205,16 +209,19 @@ classdef Box < matlabx.ui.axes.AxesTool
     methods
 
         function onPassiveDown(obj,E)
+        %ONPASSIVEDOWN Handle clicks on existing Box overlays.
             obj.printStatus(sprintf('%s.onPassiveDown()', obj.Name));
 
-            % ROIBox clicks handled by patch (drag/delete)
-            if isprop(E.Target,'ID') && obj.hasBox(E.Target.ID)
-                obj.boxClickedById(E.Target.ID,E);
+            % Box overlay clicks handled by overlay lookup (drag/delete)
+            overlay = obj.Host.Overlays.overlayForTarget(E.Target);
+            if isa(overlay, 'matlabx.ui.axes.overlays.Box') && obj.hasBox(overlay.ID)
+                obj.boxClickedById(overlay.ID,E);
                 E.stop();
             end
         end
 
         function onPassiveMove(obj,E)
+        %ONPASSIVEMOVE Update hover or drag state for existing boxes.
 
             % if we are primed for drag (button down on box with no cursor movement)
             if obj.Mode.PrimedForDrag
@@ -230,18 +237,20 @@ classdef Box < matlabx.ui.axes.AxesTool
                 return
             end
 
-            % cursor target is ROIBox patch
-            if isa(E.Target,'matlab.graphics.primitive.Patch') && strcmp(get(E.Target,'Tag'),'ROIBox')
-                % turn HoverHighlight mode 'on' on the box (get idx from custom patch property, ID)
-                obj.startHoverById(E.Target.ID);
+            % cursor target is a Box overlay graphic
+            overlay = obj.Host.Overlays.overlayForTarget(E.Target);
+            if isa(overlay, 'matlabx.ui.axes.overlays.Box') && obj.hasBox(overlay.ID)
+                % turn Hovered mode on for the box
+                obj.startHoverById(overlay.ID);
             else % cursor target is anything else
-                % turn off HoverHighlight mode for box corresponding to ActiveHoverId, if it exists
+                % turn off hovered state for the currently hovered box, if it exists
                 obj.stopHover();
             end
 
         end
 
         function onPassiveUp(obj,~)
+        %ONPASSIVEUP Commit or cancel box drag state on mouse release.
 
             if obj.Mode.PrimedForDrag
                 % no longer primed for drag
@@ -260,6 +269,7 @@ classdef Box < matlabx.ui.axes.AxesTool
     methods
 
         function n = get.nBoxes(obj)
+        %GET.NBOXES Return number of valid Box overlays owned by this tool.
             if isempty(obj.BoxROI), n = 0; else, n = sum(isvalid(obj.BoxROI)); end
         end
 
@@ -270,6 +280,7 @@ classdef Box < matlabx.ui.axes.AxesTool
     methods (Access=private)
 
         function id = normalizeId_(~, id)
+        %NORMALIZEID_ Convert input to a scalar string ID.
             id = string(id);
 
             if isempty(id)
@@ -280,6 +291,7 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function idx = idxOfId(obj, id)
+        %IDXOFID Return local BoxROI index for an ID.
             id = obj.normalizeId_(id);
             if strlength(id) == 0
                 idx = [];
@@ -290,14 +302,17 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function idx = activeBoxIdx(obj)
-            idx = obj.idxOfId(obj.ActiveBoxId);
+        %ACTIVEBOXIDX Return local index of manager-active Box overlay.
+            idx = obj.idxOfId(obj.activeBoxId());
         end
 
         function idx = activeHoverIdx(obj)
-            idx = obj.idxOfId(obj.ActiveHoverId);
+        %ACTIVEHOVERIDX Return local index of manager-hovered Box overlay.
+            idx = obj.idxOfId(obj.activeHoverId());
         end
 
         function TF = isValidBoxIdx(obj, idx)
+        %ISVALIDBOXIDX True when idx addresses a valid local Box overlay.
             TF = ~isempty(idx) ...
                 && isscalar(idx) ...
                 && idx>=1 ...
@@ -305,33 +320,60 @@ classdef Box < matlabx.ui.axes.AxesTool
                 && isvalid(obj.BoxROI(idx));
         end
 
-        % check if this tool owns box indicated by id
         function TF = hasBox(obj,id)
+        %HASBOX True when this tool owns a box with ID.
             id = obj.normalizeId_(id);
             TF = strlength(id) > 0 && ismember(id,obj.BoxIds);
         end
 
+        function id = activeBoxId(obj)
+        %ACTIVEBOXID Return active Box ID filtered to overlays owned by this tool.
+            id = obj.Host.Overlays.getActiveID(Type="Box");
+            if ~obj.hasBox(id)
+                id = "";
+            end
+        end
+
+        function id = activeHoverId(obj)
+        %ACTIVEHOVERID Return hovered Box ID filtered to overlays owned by this tool.
+            id = obj.Host.Overlays.getHoverID(Type="Box");
+            if ~obj.hasBox(id)
+                id = "";
+            end
+        end
+
+        function ids = selectedBoxIds(obj)
+        %SELECTEDBOXIDS Return selected Box IDs filtered to overlays owned by this tool.
+            ids = obj.Host.Overlays.getSelectedIDs(Type="Box");
+            ids = ids(ismember(ids, obj.BoxIds));
+        end
+
         function tf = hasAnyBoxes(obj)
+        %HASANYBOXES True when this tool owns at least one valid box.
             tf = any(isvalid(obj.BoxROI));
         end
 
         function tf = hasSelectedBoxes(obj)
-            tf = ~isempty(obj.SelectedBoxIds);
+        %HASSELECTEDBOXES True when this tool owns selected boxes.
+            tf = ~isempty(obj.selectedBoxIds());
         end
 
         function refreshRequiresBoxes(obj, h)
+        %REFRESHREQUIRESBOXES Enable menu item only when boxes exist.
             if isvalid(obj)
                 h.Enable = matlab.lang.OnOffSwitchState(obj.hasAnyBoxes());
             end
         end
 
         function refreshRequiresSelection(obj, h)
+        %REFRESHREQUIRESSELECTION Enable menu item only when selection exists.
             if isvalid(obj)
                 h.Enable = matlab.lang.OnOffSwitchState(obj.hasSelectedBoxes());
             end
         end
 
         function deleteBoxById(obj, id)
+        %DELETEBOXBYID Delete a box and emit BoxDeletedFcn.
             id = obj.normalizeId_(id);
             idx = obj.idxOfId(id);
             if ~obj.isValidBoxIdx(idx), return; end
@@ -344,42 +386,37 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function deleteBoxByIdx(obj, idx)
+        %DELETEBOXBYIDX Delete a local box without emitting BoxDeletedFcn.
             if ~obj.isValidBoxIdx(idx)
                 return
             end
 
             id = obj.BoxIds(idx);
+            wasActive = obj.activeBoxId() == id;
 
-            % reset ActiveHoverId if necessary
-            if obj.ActiveHoverId == id
+            % Keep the tool-owned hover/drag modes coherent before deletion.
+            if obj.activeHoverId() == id
                 obj.setMode('HoverBox',false);
-                obj.ActiveHoverId = "";
             end
 
-            % remove from selection first
-            obj.SelectedBoxIds(obj.SelectedBoxIds == id) = [];
-
-
-            % reset ActiveBoxId if necessary
-            if obj.ActiveBoxId == id
-                obj.ActiveBoxId = "";
-                obj.emitActiveChanged("");
-            end
-
-            % delete
-            delete(obj.BoxROI(idx));
+            % The overlay manager owns active/hover/selected state. Removing the
+            % overlay clears any manager state that points at this ID.
+            obj.Host.Overlays.remove(id);
             obj.BoxROI(idx) = [];
             obj.BoxCenters(idx,:) = [];
             obj.BoxIds(idx) = [];
 
-            %obj.applySelectionHighlights();
+            if wasActive
+                obj.emitActiveChanged("");
+            end
 
-            % notify
+            % Preserve the existing compatibility callback behavior.
             obj.emitSelectionChanged();
 
         end
 
         function boxClickedById(obj, id, E)
+        %BOXCLICKEDBYID Apply Box click grammar to an existing box.
             id = obj.normalizeId_(id);
             if ~obj.hasBox(id), return; end
 
@@ -401,70 +438,51 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function primeDrag(obj)
-            if obj.Enabled && strlength(obj.ActiveBoxId) > 0
+        %PRIMEDRAG Mark active box as ready to drag on the next move event.
+            if obj.Enabled && strlength(obj.activeBoxId()) > 0
                 obj.setMode('PrimedForDrag', true);
             end
         end
 
 
         function setActive(obj, id)
+        %SETACTIVE Make a box active and emit BoxActivatedFcn.
             id = obj.normalizeId_(id);
             if ~obj.isValidBoxIdx(obj.idxOfId(id)), return; end
 
-            obj.ActiveBoxId = id;
-        
-            obj.applySelectionHighlights();
+            obj.Host.Overlays.setActive(id);
             obj.emitActiveChanged(id);
 
         end
 
         function deactivateActive(obj)
-            if strlength(obj.ActiveBoxId) == 0
+        %DEACTIVATEACTIVE Clear active box state and emit empty activation.
+            if strlength(obj.activeBoxId()) == 0
                 return
             end
 
-            obj.ActiveBoxId = "";
             obj.setMode('PrimedForDrag', false);
             obj.setMode('DragBox', false);
-            obj.applySelectionHighlights();
+            obj.Host.Overlays.clearActive();
             obj.emitActiveChanged("");
         end
 
         function emitActiveChanged(obj, id)
+        %EMITACTIVECHANGED Emit BoxActivatedFcn if configured.
             if ~isempty(obj.BoxActivatedFcn)
                 obj.BoxActivatedFcn(obj, struct('ID', obj.normalizeId_(id)));
             end
         end
 
-        function setSelection(obj, id, opts)
-            arguments
-                obj
-                id
-                opts.Emit (1,1) logical = false
-            end
-
-            obj.SelectedBoxIds = id;
-
-            obj.applySelectionHighlights();
-
-            if opts.Emit
-                obj.emitSelectionChanged();
-            end
-        end
-
-
         function addToSelection(obj, id, opts)
+        %ADDTOSELECTION Select one box and optionally emit callback.
             arguments
                 obj
                 id
                 opts.Emit (1,1) logical = false
             end
 
-            if ~ismember(id, obj.SelectedBoxIds)
-                obj.SelectedBoxIds(end+1) = id;
-            end
-
-            obj.applySelectionHighlights();
+            obj.Host.Overlays.select(id);
 
             if opts.Emit
                 obj.emitSelectionChanged();
@@ -472,14 +490,14 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function removeFromSelection(obj, id, opts)
+        %REMOVEFROMSELECTION Deselect one box and optionally emit callback.
             arguments
                 obj
                 id
                 opts.Emit (1,1) logical = false
             end
 
-            obj.SelectedBoxIds(obj.SelectedBoxIds == id) = [];
-            obj.applySelectionHighlights();
+            obj.Host.Overlays.deselect(id);
 
             if opts.Emit
                 obj.emitSelectionChanged();
@@ -487,52 +505,28 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function toggleSelection(obj, id, opts)
+        %TOGGLESELECTION Toggle one box in the selected set.
             arguments
                 obj
                 id
                 opts.Emit (1,1) logical = false
             end
 
-            if ismember(id, obj.SelectedBoxIds)
+            if ismember(id, obj.selectedBoxIds())
                 obj.removeFromSelection(id, 'Emit', opts.Emit);
             else
                 obj.addToSelection(id, 'Emit', opts.Emit);
             end
         end
 
-        function applySelectionHighlights(obj)
-            % clear all selection and active highlights
-            if isempty(obj.BoxROI), return; end
-            for k = 1:numel(obj.BoxROI)
-                if isvalid(obj.BoxROI(k))
-                    set(obj.BoxROI(k),'SelectionHighlight','off','ActiveHighlight','off');
-                end
-            end
-
-            % apply active highlight
-            activeIdx = obj.activeBoxIdx();
-            if obj.isValidBoxIdx(activeIdx)
-                obj.BoxROI(activeIdx).ActiveHighlight = 'on';
-            end
-
-            % apply selected highlights
-            if isempty(obj.SelectedBoxIds), return; end
-            for i = 1:numel(obj.SelectedBoxIds)
-                idx = obj.idxOfId(obj.SelectedBoxIds(i));
-                if obj.isValidBoxIdx(idx)
-                    obj.BoxROI(idx).SelectionHighlight = 'on';
-                end
-            end
-
-        end
-
         function emitSelectionChanged(obj)
+        %EMITSELECTIONCHANGED Emit selected Box IDs if callback is configured.
             if isempty(obj.BoxSelectionChangedFcn), return; end
-            obj.BoxSelectionChangedFcn(obj, struct('IDs', obj.SelectedBoxIds));
+            obj.BoxSelectionChangedFcn(obj, struct('IDs', obj.selectedBoxIds()));
         end
 
-        % executes on mouse move when DragBox Mode is on
         function dragBox(obj, idx)
+        %DRAGBOX Move a box preview to the current cursor position.
             XY = obj.Host.cursorPosition;
             % exit if pixel is empty or box idx is invalid
             if isempty(XY) || ~obj.isValidBoxIdx(idx), return; end
@@ -550,8 +544,8 @@ classdef Box < matlabx.ui.axes.AxesTool
             end
         end
 
-        % executes on mouse move when PrimedForDrag Mode is on
         function startDraggingBox(obj,idx)
+        %STARTDRAGGINGBOX Transition from primed to dragging state.
             % we are no longer PrimedForDrag
             obj.setMode('PrimedForDrag',false);
             if ~obj.isValidBoxIdx(idx)
@@ -568,8 +562,8 @@ classdef Box < matlabx.ui.axes.AxesTool
             obj.Host.updateFromTool();
         end
 
-        % executes on mouse up when DragBox Mode is on
         function stopDraggingBox(obj, idx)
+        %STOPDRAGGINGBOX Commit final drag position and emit callback.
             if obj.isValidBoxIdx(idx)
                 obj.dragBox(idx); % snap to final position before stopping drag
                 if ~isempty(obj.BoxMoveCommittedFcn)
@@ -582,44 +576,30 @@ classdef Box < matlabx.ui.axes.AxesTool
             obj.Host.updateFromTool();
         end
 
-        % set HoverHighlight mode to 'on' for box specified by id
         function startHoverById(obj, id)
+        %STARTHOVERBYID Mark a box as hovered through the overlay manager.
             id = obj.normalizeId_(id);
             idx = obj.idxOfId(id);
             % idx is empty, return
             if ~obj.isValidBoxIdx(idx), return; end
             % we are already hovering on this box, return
-            if id == obj.ActiveHoverId, return; end
-            % if another box was being hovered on
-            hoverIdx = obj.activeHoverIdx();
-            if obj.isValidBoxIdx(hoverIdx)
-                % turn its hover status off
-                obj.BoxROI(hoverIdx).HoverHighlight = 'off';
-            end
-            % turn hover on for the box specified by idx
-            obj.BoxROI(idx).HoverHighlight = 'on';
-            % set that id as the ActiveHoverId
-            obj.ActiveHoverId = id;
-            % set Host HoverMox mode to true
+            if id == obj.activeHoverId(), return; end
+
+            % The manager flips Hovered off on the previous overlay and on for
+            % this one; the overlay updates its own appearance.
+            obj.Host.Overlays.setHover(id);
             obj.setMode('HoverBox', true);
         end
 
-        % set HoverHighlight mode to 'off' for box indicated by ActiveHoverId, if any
         function stopHover(obj)
+        %STOPHOVER Clear hovered Box state through the overlay manager.
             % if HoverBox Mode is already off, return
             if ~obj.Mode.HoverBox, return; end
-            % if ActiveHoverId is empty, return
-            if strlength(obj.ActiveHoverId) == 0, return; end
+            % if hovered ID is empty, return
+            if strlength(obj.activeHoverId()) == 0, return; end
 
-            % set HoverHighlight off on current active box (if valid)
-            hoverIdx = obj.activeHoverIdx();
-            if obj.isValidBoxIdx(hoverIdx)
-                obj.BoxROI(hoverIdx).HoverHighlight = 'off';
-            end
-
-            % set ActiveHoverId as empty
-            obj.ActiveHoverId = "";
-            % set HoverBox Mode to off
+            % The manager clears Hovered on the current overlay.
+            obj.Host.Overlays.clearHover();
             obj.setMode('HoverBox', false);
         end
 
@@ -628,6 +608,7 @@ classdef Box < matlabx.ui.axes.AxesTool
     methods (Hidden=true)
 
         function [cX,cY] = clampCenter(obj, C, boxSize)
+        %CLAMPCENTER Clamp requested box center to image bounds.
             W = obj.Host.ImageWidth;
             H = obj.Host.ImageHeight;
             C = matlabx.image.roi.clampBoxToImage(C,boxSize,[W, H]);
@@ -643,6 +624,7 @@ classdef Box < matlabx.ui.axes.AxesTool
     methods
 
         function addBox(obj, id, center_px, boxSize, opts)
+        %ADDBOX Create a Box overlay owned by this tool.
             arguments
                 obj
                 id
@@ -660,9 +642,7 @@ classdef Box < matlabx.ui.axes.AxesTool
             [cx,cy] = obj.clampCenter(center_px, boxSize);
             next = obj.nBoxes + 1;
 
-            hostAxes = obj.Host.getAxes();
-
-            obj.BoxROI(next) = matlabx.ui.axes.overlays.ROIBox(hostAxes, ...
+            obj.BoxROI(next) = obj.Host.Overlays.add("Box", ...
                 "Center",[cx cy], ...
                 "BoxSize", boxSize, ...
                 "ID", string(id), ...
@@ -676,23 +656,25 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function removeBox(obj, id)
+        %REMOVEBOX Remove one box by ID.
             idx = obj.idxOfId(id); if isempty(idx), return; end
             obj.deleteBoxByIdx(idx);
         end
 
         function clearBoxes(obj)
-            if ~isempty(obj.BoxROI)
-                bx = obj.BoxROI(isvalid(obj.BoxROI)); if ~isempty(bx), delete(bx); end
+        %CLEARBOXES Remove all boxes owned by this tool.
+            ids = obj.BoxIds;
+            for i = numel(ids):-1:1
+                obj.Host.Overlays.remove(ids(i));
             end
-            obj.BoxROI = matlabx.ui.axes.overlays.ROIBox.empty();
+
+            obj.BoxROI = matlabx.ui.axes.overlays.Box.empty();
             obj.BoxCenters = zeros(0,2);
             obj.BoxIds = string.empty(1,0);
-            obj.ActiveBoxId = "";
-            obj.ActiveHoverId = "";
-            obj.SelectedBoxIds = string.empty(1,0);
         end
 
         function setSelectedBoxIDs(obj, ids, opts)
+        %SETSELECTEDBOXIDS Replace selected Box IDs.
             arguments
                 obj
                 ids
@@ -701,9 +683,7 @@ classdef Box < matlabx.ui.axes.AxesTool
 
             ids = string(ids);
             ids = ids(ismember(ids, obj.BoxIds));
-            obj.SelectedBoxIds = ids(:).';
-
-            obj.applySelectionHighlights();
+            obj.Host.Overlays.setSelected(ids(:).', Type="Box");
         
             if opts.Emit
                 obj.emitSelectionChanged();
@@ -711,17 +691,18 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function ids = getSelectedBoxIDs(obj)
-            ids = obj.SelectedBoxIds;
+        %GETSELECTEDBOXIDS Return selected Box IDs.
+            ids = obj.selectedBoxIds();
         end
 
         function clearBoxSelection(obj, opts)
+        %CLEARBOXSELECTION Clear selected boxes.
             arguments
                 obj
                 opts.Emit (1,1) logical = false
             end
 
-            obj.SelectedBoxIds = string.empty(1,0);
-            obj.applySelectionHighlights();
+            obj.Host.Overlays.clearSelection(Type="Box");
 
             if opts.Emit
                 obj.emitSelectionChanged();
@@ -729,6 +710,7 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function selectAllBoxes(obj, opts)
+        %SELECTALLBOXES Select all boxes owned by this tool.
             arguments
                 obj
                 opts.Emit (1,1) logical = true
@@ -738,13 +720,15 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function deleteSelectedBoxes(obj)
-            ids = obj.SelectedBoxIds;
+        %DELETESELECTEDBOXES Delete selected boxes owned by this tool.
+            ids = obj.selectedBoxIds();
             for i = 1:numel(ids)
                 obj.deleteBoxById(ids(i));
             end
         end
 
         function deleteAllBoxes(obj)
+        %DELETEALLBOXES Delete all boxes owned by this tool.
             ids = obj.BoxIds;
             for i = numel(ids):-1:1
                 obj.deleteBoxById(ids(i));
@@ -752,6 +736,7 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function setActiveBoxID(obj,id)
+        %SETACTIVEBOXID Public setter for active box ID.
             id = obj.normalizeId_(id);
             if strlength(id) == 0
                 obj.deactivateActive();
@@ -761,6 +746,7 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function setBoxLabelByID(obj, id, label)
+        %SETBOXLABELBYID Set label text for one box.
             idx = obj.idxOfId(id);
             if isempty(idx), return; end
             if idx>=1 && idx<=numel(obj.BoxROI) && isvalid(obj.BoxROI(idx))
@@ -769,6 +755,7 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function setBoxColorByID(obj, id, color)
+        %SETBOXCOLORBYID Set edge and face color for one box.
             idx = obj.idxOfId(id);
             if isempty(idx), return; end
             if idx>=1 && idx<=numel(obj.BoxROI) && isvalid(obj.BoxROI(idx))
@@ -777,6 +764,7 @@ classdef Box < matlabx.ui.axes.AxesTool
         end
 
         function setBoxesColorByIDs(obj, ids, color)
+        %SETBOXESCOLORBYIDS Set edge and face color for multiple boxes.
             ids = string(ids);
             for i = 1:numel(ids)
                 obj.setBoxColorByID(ids(i), color);
@@ -789,6 +777,7 @@ classdef Box < matlabx.ui.axes.AxesTool
     methods
 
         function pointer = getPreferredPointer(obj)
+        %GETPREFERREDPOINTER Return pointer requested by current Box state.
             if obj.Mode.DragBox
                 pointer = 'fleur';
             elseif obj.Mode.HoverBox
@@ -807,12 +796,10 @@ classdef Box < matlabx.ui.axes.AxesTool
 
         % called at the beginning of superclass delete()
         function teardown(obj)
-            % Delete ROIBox objects (if any)
+        %TEARDOWN Delete Box overlays during tool destruction.
+            % Delete box overlays owned by this tool.
             try
-                if ~isempty(obj.BoxROI)
-                    bx = obj.BoxROI(isvalid(obj.BoxROI));
-                    if ~isempty(bx), delete(bx); end
-                end
+                obj.clearBoxes();
             catch
             end
         end
