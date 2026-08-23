@@ -1,26 +1,25 @@
 # matlabx
 
-matlabx is a MATLAB framework for building richer apps and analysis tools. It is being developed primarily to extend MATLAB's app-building and graphics ecosystem with better, more flexible image display and interaction, while also collecting reusable utilities, custom UI components, configuration helpers, and complete apps built on top of those pieces.
+matlabx is a MATLAB framework for building richer apps, image viewers, and analysis tools. It is being developed primarily to extend MATLAB's app-building and graphics ecosystem with better image display, more flexible interaction, reusable UI components, and small complete apps built from those pieces.
 
-The project is under active development. APIs may move as the package gets sharper.
+The project is under active development. APIs may still move as the package gets sharper.
 
 > Note: matlabx is an independent project and is not affiliated with or endorsed by MathWorks.
 
 ## What It Offers
 
-- Interactive image display components, centered around `matlabx.ui.axes.ImageAxes`
-- Pluggable axes tools such as zoom, colorbar, colormap selection, region picking, and rectangle drawing
+- `matlabx.ui.axes.ImageAxes`, an `Image5D`-backed image display component for MATLAB apps
+- Multi-component, Z-stack, and time-series image handling through `matlabx.image.Image5D`
+- Bio-Formats-backed image loading for many microscopy and proprietary image formats
+- Pluggable axes tools such as zoom, colorbar, colormap selection, box regions, and rectangle drawing
+- Figure-level event routing with normalized mouse, scroll, key, drag, hover, modifier, and hotkey state
 - Custom UI containers and controls not currently available as MATLAB built-ins
-- Figure-level event routing for custom mouse, scroll, key, drag, and hover interactions
-- Small apps built from these components, including `matlabx.app.Viewer5D`, `matlabx.app.ParamsDialog`, slider dialogs, and quick image viewing helpers
-- Image data abstractions such as `matlabx.image.Image5D`
-- Logging, settings, machine-state persistence, colors, file/path helpers, keyboard helpers, and other general utilities
+- Small apps and dialogs including `matlabx.app.Viewer5D`, `matlabx.app.ParamsDialog`, `matlabx.app.TextWindow`, and quick image viewers
+- Logging, settings, machine-state persistence, UI calibration, colors, file/path helpers, keyboard helpers, and general utilities
 
 ## Package Map
 
-The package is organized around public roles:
-
-- `matlabx.ui.axes`: axes-backed visual components, axes tools, overlays, and events
+- `matlabx.ui.axes`: axes-backed visual components, tools, context-menu helpers, and display collaborators
 - `matlabx.ui.container`: custom container-style components
 - `matlabx.ui.control`: custom value/input controls
 - `matlabx.ui.interaction`: event hubs, command routing, and interaction plumbing
@@ -52,7 +51,7 @@ That setup routine:
 - runs UI calibration
 - saves the MATLAB path
 
-If you want a lighter manual setup, you can run pieces individually:
+For a lighter manual setup, run pieces individually:
 
 ```matlab
 matlabx.setup.searchPath()
@@ -84,18 +83,289 @@ Use `ImageAxes` directly in a UI:
 fig = uifigure;
 ax = matlabx.ui.axes.ImageAxes(fig, ...
     "CData", imread("rice.png"), ...
-    "ToolBelt", {'Zoom', 'Colorbar', 'ChooseColormap'});
+    "Tools", {'Zoom', 'Colorbar', 'ChooseColormap'});
 ```
 
-Create a range slider control:
+Create a demo multi-component image:
+
+```matlab
+I = matlabx.image.Image5D.demo(512, 256, 3, 10, 10, 'uint16');
+[ax, fig] = matlabx.app.quickshow(I, "ComponentColorMode", "colors");
+```
+
+## Image5D
+
+`matlabx.image.Image5D` is the image-data normalization layer used by `ImageAxes` and `Viewer5D`. It gives apps a common way to work with images that may come from ordinary MATLAB arrays, component arrays, or file-backed sources.
+
+Create an in-memory image from one or more components:
+
+```matlab
+I1 = imread("channel1.tif");
+I2 = imread("channel2.tif");
+I = matlabx.image.Image5D.fromComponents({I1, I2}, ...
+    "Names", ["DAPI", "Actin"]);
+```
+
+Load a file through Bio-Formats:
+
+```matlab
+I = matlabx.image.Image5D.fromFile("experiment.czi", ...
+    "SeriesIndex", 1, ...
+    "LoadOnCreate", true);
+```
+
+Use a file picker for Bio-Formats-supported images:
+
+```matlab
+I = matlabx.image.Image5D.fromFileDialog("LoadOnCreate", true);
+```
+
+Useful image metadata and shape properties include:
+
+```matlab
+I.Size
+I.NumComponents
+I.SizeZ
+I.SizeT
+I.Components
+I.AllMetadata
+```
+
+`Image5D` uses components as the primary abstraction. When the components are compatible scalar channels, `ImageAxes` can display individual components or a merged color composite.
+
+## ImageAxes
+
+`matlabx.ui.axes.ImageAxes` is the main reusable image-display component. It is a `matlab.ui.componentcontainer.ComponentContainer` that displays the selected `C/Z/T` plane or composite from an `Image5D` object, manages contrast and component display state, hosts tools, and routes normalized figure events to those tools.
+
+Basic construction:
+
+```matlab
+fig = uifigure;
+I = matlabx.image.Image5D.demo();
+
+ax = matlabx.ui.axes.ImageAxes(fig, ...
+    "ImageData", I, ...
+    "Tools", {'Zoom', 'Colorbar', 'ChooseColormap'}, ...
+    "Units", "normalized", ...
+    "Position", [0 0 1 1]);
+```
+
+Navigate through dimensions:
+
+```matlab
+ax.C = 2;
+ax.Z = 5;
+ax.T = 3;
+ax.ShowComposite = "on";
+```
+
+Set current-component display properties:
+
+```matlab
+ax.C = 1;
+ax.CLim = [100 2000];
+ax.Colormap = gray(256);
+```
+
+For targeted per-component edits, prefer the helper methods:
+
+```matlab
+ax.setComponentCLim([100 2000]);          % current component
+ax.setComponentCLim([100 2000], [1 3]);   % components 1 and 3
+ax.setComponentColor("cyan", 1);
+ax.setComponentColormap(hot(256), 2);
+```
+
+The full-state properties are useful for restoring saved display state or synchronizing axes. They update stored values without automatically changing `ComponentColorMode`:
+
+```matlab
+ax.ComponentCLims = {[0 500], [0 800], [0 1200]};
+ax.ComponentColors = {'cyan', 'magenta', 'yellow'};
+ax.ComponentColormaps{2} = hot(256);
+ax.ComponentColorMode = 'colors';  % or 'luts'
+```
+
+Viewport/navigation API:
+
+```matlab
+S = ax.getViewport();
+ax.setViewportCenter([128 256]);
+ax.setViewportSize([128 256]);
+ax.setZoomFactor(0.5);
+ax.resetViewport();
+```
+
+`ImageAxes` maintains the image aspect ratio when setting viewport size or limits. The visible viewport and zoom factor are two views of the same underlying navigation state: changing one updates the other. Programmatic viewport changes are center-anchored; interactive zoom gestures are cursor-anchored when possible.
+
+Useful status and diagnostics:
+
+```matlab
+ax.openStatusWindow()
+status = ax.getStatusSummary();
+ax.debug("IncludeSizeDiagnostics", true)
+```
+
+## ImageAxes Tools
+
+Tools are installed by assigning names to `ax.Tools`. Reading `ax.Tools` returns the installed tool objects:
+
+```matlab
+ax.Tools = ["Zoom", "Box", "DrawRectangle"];
+ax.Tools.Box.BoxSize = 40;
+```
+
+Available tool names can be queried:
+
+```matlab
+matlabx.ui.axes.ImageAxes.getToolNames()
+matlabx.ui.axes.ImageAxes.getDefaultTools()
+```
+
+Current first-party tools include:
+
+- `Zoom`: zooming, cursor-follow navigation, zoom-level menu, and viewport-box display while active
+- `Colorbar`: colorbar display support
+- `ChooseColormap`: colormap selection
+- `Box`: square box region creation, activation, selection, movement, and deletion
+- `DrawRectangle`: one-shot rotated rectangle drawing and measurement annotations
+
+Tool subclasses inherit from `matlabx.ui.axes.AxesTool`. A custom tool usually:
+
+- calls the `AxesTool` constructor with a name, style, icon, hotkey, and routing flags
+- overrides lifecycle hooks such as `onInstall`, `onEnabled`, `onDisabled`, or `onPush`
+- implements event hooks such as `onDown`, `onMove`, `onScroll`, or passive variants
+- optionally contributes context-menu items with `contributeContextMenu`
+- optionally contributes help text with `getHelpSummary`, `getUsageHelp`, `getBindingHelp`, and `getNotesHelp`
+
+Minimal custom tool sketch:
+
+```matlab
+classdef MyTool < matlabx.ui.axes.AxesTool
+    methods
+        function obj = MyTool(host)
+            obj@matlabx.ui.axes.AxesTool(host, "MyTool", ...
+                "Style", "state", ...
+                "AxesType", "image", ...
+                "ToggleHotkey", matlabx.keyboard.hotkey("m"), ...
+                "InterceptsDown", true);
+        end
+
+        function onDown(obj, E)
+            if E.MouseChord == "click"
+                xy = obj.Host.mainAxes.CurrentPoint(1, 1:2);
+                disp(xy)
+                E.stop()
+            end
+        end
+    end
+end
+```
+
+Tool hotkeys should be declared with `matlabx.keyboard.hotkey` so tool authors do not need to memorize normalized hotkey string syntax:
+
+```matlab
+matlabx.keyboard.hotkey("z", "Modifiers", ["shift", "meta"])
+```
+
+## ImageAxes Context Menus
+
+`ImageAxes` owns a context-menu manager that builds a small set of built-in menus and lets tools contribute their own commands. The default menu includes:
+
+- `Status...`
+- `Reset View`
+- `Image > Properties...`
+- `Image > Metadata...`
+- `Image > Color Mode`
+- `Image > Component Color`
+- `Overlays > Viewport Box`
+- tool menus such as `Zoom > Level` and `Box > Select All`
+
+Choose which built-ins are available with `ContextMenuItems`:
+
+```matlab
+ax.ContextMenuItems = ["Status", "ResetView", "Image", "Overlays"];
+matlabx.ui.axes.ImageAxes.getContextMenuItemNames()
+```
+
+You can also expose individual built-ins without their parent group:
+
+```matlab
+ax.ContextMenuItems = ["ResetView", "ComponentColor", "ViewportBox"];
+```
+
+## Custom Event Routing
+
+MATLAB figure callbacks are powerful, but a growing app can quickly run into conflicts when several components and tools all want mouse, scroll, key, and drag behavior. `matlabx.ui.interaction.FigureEventHub` installs one set of figure-level callbacks and routes normalized `HubEvent` objects to registered components.
+
+The hub handles:
+
+- mouse down, move, up, scroll, key press, and key release events
+- priority-based claiming when multiple components match the same event
+- optional drag capture so a component keeps receiving move/up events during a drag
+- preserved pre-existing callbacks as low-priority listeners
+- modifier-state tracking for mouse gestures
+- shortcut-style modifier cleanup to avoid stale keys after menu accelerators, dialogs, or interrupted UI interaction
+
+`HubEvent` centralizes event normalization. Useful fields include:
+
+- `Kind`: `"Down"`, `"Move"`, `"Up"`, `"Scroll"`, `"KeyPress"`, or `"KeyRelease"`
+- `Target`, `CurrentAxes`, `CurrentObject`, and `CurrentPointFigure`
+- `SelectionType`: raw MATLAB click type
+- `MouseAction`: normalized action such as `"click"`, `"contextclick"`, `"extendclick"`, `"move"`, `"up"`, or `"scroll"`
+- `MouseChord`: modifiers plus action, such as `"meta+click"` or `"shift+extendclick"`
+- `Key`, `Character`, `Modifier`, `ModifierState`, and normalized `Hotkey`
+- `LastKey`, `LastHotkey`, and `LastKeyTimestamp`
+- `VerticalScrollCount`
+- `Handled` and `StopPropagation`
+
+Print an event for debugging:
+
+```matlab
+E.print()
+S = E.toStruct();
+```
+
+Registering a component directly:
+
+```matlab
+hub = matlabx.ui.interaction.FigureEventHub.ensure(fig);
+id = hub.register(myComponent, ...
+    "Priority", 10, ...
+    "CaptureDuringDrag", true);
+```
+
+The registered object implements `matches` and event hooks. `ImageAxes` uses this pattern internally, then routes claimed events to installed tools.
+
+```matlab
+function tf = matches(obj, target, kind, E)
+    tf = isequal(ancestor(target, "axes"), obj.Axes);
+end
+
+function onDown(obj, E)
+    if E.MouseChord == "control+contextclick"
+        obj.deleteThingUnderCursor(E)
+        E.stop()
+    end
+end
+```
+
+This makes interactions possible that are awkward with raw MATLAB figure callbacks, such as simultaneous support for normal click, context click, shift-click selection, control-context-click deletion, modifier-click zoom, scroll zoom, drag capture, and tool-specific hotkeys.
+
+## UI Controls
+
+`matlabx.ui.control.Slider` supports both range and scalar slider behavior. It can show or hide edit fields at construction time.
+
+Create a range slider:
 
 ```matlab
 fig = uifigure;
 g = uigridlayout(fig, [1 1]);
+
 s = matlabx.ui.control.Slider(g, ...
     "Title", "Intensity", ...
     "Limits", [0 255], ...
-    "Value", [20 180]);
+    "Value", [20 180], ...
+    "ShowFill", "on");
 ```
 
 Create a simple one-thumb slider without edit fields:
@@ -167,8 +437,7 @@ log.setFileSink(fullfile(tempdir, "matlabx.log"), true);
 log.PrintToCommandWindow = false;
 ```
 
-Logging policy lives in `matlabx.config.Logging` and can be applied through
-the facade:
+Logging policy lives in `matlabx.config.Logging` and can be applied through the facade:
 
 ```matlab
 matlabx.Log.configure("Level", "INFO", "Detail", "normal")
@@ -176,11 +445,7 @@ matlabx.Log.configure("CommandWindowLevel", "INFO", "FileLevel", "DEBUG", "FileD
 matlabx.Log.configure("SourceDetail", "full")
 ```
 
-`Level` is the minimum emitted level: `DEBUG`, `INFO`, `WARN`, or `ERROR`.
-`Detail` controls formatted output only; structured entries still retain full
-data. `SourceDetail` controls compact versus full auto-detected source names.
-`ShowDebugOutput` is kept for older settings, but new code should use
-`Level="DEBUG"`.
+`Level` is the minimum emitted level: `DEBUG`, `INFO`, `WARN`, or `ERROR`. `Detail` controls formatted output only; structured entries still retain full data. `SourceDetail` controls compact versus full auto-detected source names. `ShowDebugOutput` is kept for older settings, but new code should use `Level="DEBUG"`.
 
 ## Settings And Machine State
 
@@ -246,17 +511,23 @@ machineStateFile = matlabx.internal.Paths.machineStateFile();
 ## Tips
 
 - Prefer package-qualified names in library code, for example `matlabx.ui.axes.ImageAxes`.
+- Prefer `ImageData` over `CData` in new `ImageAxes` code. `CData` remains a convenience/compatibility input for raw MATLAB image arrays.
 - Use `matlabx.app.quickshow` for fast inspection and `matlabx.app.Viewer5D` when working with `Image5D`.
-- `ImageAxes` tools live under `matlabx.ui.axes.tools`; tools declare `AxesType` as `"image"`, `"plot"`, or `"both"`.
+- Use `matlabx.keyboard.hotkey` for tool hotkey declarations and compare against normalized `HubEvent.Hotkey` or `HubEvent.MouseChord`.
 - Use `matlabx.ui.interaction.FigureEventHub` and `CommandRouter` when an app needs coordinated figure-level mouse/key behavior.
 - Use `matlabx.config.Settings` for user preferences and `matlabx.config.MachineState` for machine-specific cached state.
+- Use `matlabx.struct.prettyPrint(S, "StringArrayStyle", "lines")` for readable status/help structs that contain string arrays.
 
 ## Roadmap
 
 Near-term directions include:
 
+- First-class ImageAxes overlay system with defaults such as box, point, line, and polygon overlays
+- A clean public pattern for custom overlay subclasses
+- Tool-contributed context menus and help docs with less hardcoding over time
 - More custom UI containers, controls, and layout managers
 - A customizable data-plotting axes component with the same pluggable tool model as `ImageAxes`
 - More example apps built from the reusable UI pieces
 - More image-analysis functions for processing, measurement, masks, ROIs, and workflows around `Image5D`
+- Serialization/restoration of ImageAxes view and display state
 - More polish around setup, documentation, demos, and compatibility checks
