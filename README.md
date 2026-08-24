@@ -13,8 +13,10 @@ The project is under active development. APIs may still move as the package gets
 - Bio-Formats-backed image loading for many microscopy and proprietary image formats
 - Pluggable axes tools such as zoom, colorbar, colormap selection, box regions, and rectangle drawing
 - Figure-level event routing with normalized mouse, scroll, key, drag, hover, modifier, and hotkey state
+- First-pass overlay system for image-space graphics such as boxes, lines, point sets, and cluster visualizations
+- Point detection, point clustering, and an early tuning app for puncta/feature clustering workflows
 - Custom UI containers and controls not currently available as MATLAB built-ins
-- Small apps and dialogs including `matlabx.app.Viewer5D`, `matlabx.app.ParamsDialog`, `matlabx.app.TextWindow`, and quick image viewers
+- Small apps and dialogs including `matlabx.app.Viewer5D`, `matlabx.app.PointClusterTuner`, `matlabx.app.ParamsDialog`, `matlabx.app.TextWindow`, and quick image viewers
 - Logging, settings, machine-state persistence, UI calibration, colors, file/path helpers, keyboard helpers, and general utilities
 
 ## Package Map
@@ -25,6 +27,7 @@ The project is under active development. APIs may still move as the package gets
 - `matlabx.ui.interaction`: event hubs, command routing, and interaction plumbing
 - `matlabx.ui.calibration`: screen and UI measurement helpers
 - `matlabx.app`: complete apps and dialogs
+- `matlabx.analysis.cluster`: point-clustering models, refinement helpers, and cluster metrics
 - `matlabx.image`: image data models, IO, processing, masks, ROIs, and measurement helpers
 - `matlabx.config`: user settings and machine-local state
 - `matlabx.logging`: structured logging
@@ -77,6 +80,12 @@ I = matlabx.image.Image5D.fromComponents({imread("rice.png")});
 viewer = matlabx.app.Viewer5D(I);
 ```
 
+Open the point-clustering tuning app:
+
+```matlab
+app = matlabx.app.PointClusterTuner();
+```
+
 Use `ImageAxes` directly in a UI:
 
 ```matlab
@@ -89,7 +98,7 @@ ax = matlabx.ui.axes.ImageAxes(fig, ...
 Create a demo multi-component image:
 
 ```matlab
-I = matlabx.image.Image5D.demo(512, 256, 3, 10, 10, 'uint16');
+I = matlabx.image.Image5D.demo(256, 256, 3, 10, 10, 'uint16');
 [ax, fig] = matlabx.app.quickshow(I, "ComponentColorMode", "colors");
 ```
 
@@ -227,6 +236,7 @@ Current first-party tools include:
 - `Colorbar`: colorbar display support
 - `ChooseColormap`: colormap selection
 - `Box`: square box region creation, activation, selection, movement, and deletion
+- `Line`: line drawing, endpoint editing, midpoint translation, selection, and deletion
 - `DrawRectangle`: one-shot rotated rectangle drawing and measurement annotations
 
 Tool subclasses inherit from `matlabx.ui.axes.AxesTool`. A custom tool usually:
@@ -291,6 +301,137 @@ You can also expose individual built-ins without their parent group:
 
 ```matlab
 ax.ContextMenuItems = ["ResetView", "ComponentColor", "ViewportBox"];
+```
+
+## ImageAxes Overlays
+
+`ImageAxes` owns an overlay manager available as `ax.Overlays`. Overlays are graphics objects tied to image coordinates and C/Z/T applicability. The manager owns overlay lifetime and shared state such as active, hovered, and selected IDs; tools and apps decide what user interactions mean.
+
+Add a point overlay:
+
+```matlab
+points = matlabx.image.measure.detectPoints(I, "Method", "log");
+
+ov = ax.Overlays.add("PointSet", ...
+    "Points", points, ...
+    "Marker", "o", ...
+    "MarkerEdgeColor", [0 0 0], ...
+    "MarkerFaceColor", [1 1 1]);
+```
+
+Add a box or line overlay:
+
+```matlab
+box = ax.Overlays.add("Box", ...
+    "Center", [128 128], ...
+    "BoxSize", 40, ...
+    "Label", "ROI 1");
+
+ln = ax.Overlays.add("Line", ...
+    "Endpoints", [50 50; 200 120], ...
+    "LineColor", [1 1 0]);
+```
+
+Visualize cluster-analysis output:
+
+```matlab
+C = matlabx.analysis.cluster.PointClusters(points, ...
+    "MinPointsPerCluster", 5);
+
+clusterOverlay = ax.Overlays.add("PointClusters", ...
+    "ClusterData", C, ...
+    "ShowHulls", "on", ...
+    "ShowCentroids", "on");
+```
+
+Overlay IDs are string identifiers. If the caller does not provide one, overlays generate their own ID:
+
+```matlab
+ids = ax.Overlays.ids();
+ax.Overlays.setActive(ids(1));
+ax.Overlays.setSelected(ids(1:3));
+ax.Overlays.remove(ids(1));
+```
+
+First-party overlays currently include:
+
+- `matlabx.ui.axes.overlays.Box`
+- `matlabx.ui.axes.overlays.Line`
+- `matlabx.ui.axes.overlays.PointSet`
+- `matlabx.ui.axes.overlays.PointClusters`
+
+The overlay base class is intentionally small. Custom overlays inherit from `matlabx.ui.axes.ImageAxesOverlay`, own their own graphics handles, implement `updateGeometry` and `updateAppearance`, and call `registerGraphics` for hit-test ownership and manager lookup.
+
+## Point Detection And Clustering
+
+`matlabx.image.measure.detectPoints` is a common dispatcher for candidate point detection. It returns an `N x 2` `[x y]` coordinate array and an `info` struct with method-specific diagnostics.
+
+```matlab
+[points, info] = matlabx.image.measure.detectPoints(I, ...
+    "Method", "log", ...
+    "Sigma", 1.5, ...
+    "MinDistance", 3);
+```
+
+Supported methods include:
+
+- `"regionalMaxima"`: reconstruction/open-close puncta detector implemented by `detectPuncta`
+- `"extendedMaxima"`: `imextendedmax`-based detector with an `H` prominence threshold
+- `"surf"`: SURF feature detector wrapper around `detectSURFFeatures`
+- `"log"`: Laplacian-of-Gaussian blob response plus local maxima
+- `"dog"`: Difference-of-Gaussians blob response plus local maxima
+
+Method-specific helpers are available when a direct call is clearer:
+
+```matlab
+points = matlabx.image.measure.detectPuncta(I, "DiskRadius", 2);
+points = matlabx.image.measure.detectLogPuncta(I, "Sigma", 1.5);
+points = matlabx.image.measure.detectDogPuncta(I, "Sigma1", 1, "Sigma2", 2);
+points = matlabx.image.measure.detectExtendedMaximaPuncta(I, "H", 0.05);
+points = matlabx.image.measure.detectSurfPoints(I, "MetricThreshold", 50);
+```
+
+Lower-level processing helpers include:
+
+```matlab
+Rlog = matlabx.image.process.laplacianOfGaussian(I, "Sigma", 1.5);
+Rdog = matlabx.image.process.differenceOfGaussians(I, "Sigma1", 1, "Sigma2", 2);
+[points, mask, values] = matlabx.image.measure.findLocalMaxima(Rlog);
+```
+
+Cluster detected points with `matlabx.analysis.cluster.PointClusters`:
+
+```matlab
+C = matlabx.analysis.cluster.PointClusters(points, ...
+    "ClusterMethod", "dbscan", ...
+    "MinPointsPerCluster", 5);
+
+metrics = C.exportClusterMetrics();
+```
+
+The constructor performs initial clustering only. Later cleanup is explicit:
+
+```matlab
+removedPoints = C.refinePoints("Method", 'nnDistance', "SigmaFactor", 2.5);
+C.recluster("ClusterMethod", 'dbscan');
+removedClusters = C.filterByProperty('Eccentricity', [0 0.9]);
+```
+
+Useful outputs include:
+
+```matlab
+C.Summary
+C.StageNames
+C.getStageSnapshot("Initial")
+C.getHistoryTable()
+C.RemovedPointLog
+C.RemovedClusterLog
+```
+
+The early tuning app wires the detector, clustering model, overlays, and metrics table together:
+
+```matlab
+app = matlabx.app.PointClusterTuner(I);
 ```
 
 ## Custom Event Routing
@@ -522,12 +663,13 @@ machineStateFile = matlabx.internal.Paths.machineStateFile();
 
 Near-term directions include:
 
-- First-class ImageAxes overlay system with defaults such as box, point, line, and polygon overlays
-- A clean public pattern for custom overlay subclasses
+- Continued maturation of the ImageAxes overlay system, including more default overlay types such as polygon/patch overlays
+- A clearer public pattern and examples for custom overlay subclasses
 - Tool-contributed context menus and help docs with less hardcoding over time
 - More custom UI containers, controls, and layout managers
 - A customizable data-plotting axes component with the same pluggable tool model as `ImageAxes`
-- More example apps built from the reusable UI pieces
+- More example apps built from the reusable UI pieces, including continued refinement of `PointClusterTuner`
 - More image-analysis functions for processing, measurement, masks, ROIs, and workflows around `Image5D`
+- More point-detection, clustering, and post-clustering cleanup workflows once the tuning model settles
 - Serialization/restoration of ImageAxes view and display state
 - More polish around setup, documentation, demos, and compatibility checks
