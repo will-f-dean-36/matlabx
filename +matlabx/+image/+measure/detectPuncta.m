@@ -1,4 +1,19 @@
-function [points,mask] = findPuncta(I,opts)
+function [points,mask] = detectPuncta(I,opts)
+%DETECTPUNCTA Detect puncta candidates with reconstruction and regional maxima.
+%
+%   P = matlabx.image.measure.detectPuncta(I) detects puncta-like regional
+%   maxima in the 2-D image I and returns an N-by-2 array of [x y]
+%   coordinates.
+%
+%   [P,MASK] = matlabx.image.measure.detectPuncta(...) also returns a binary
+%   mask with true pixels at the detected candidate locations.
+%
+%   This detector is intentionally simple: it rescales the image, performs
+%   open-close by reconstruction with a disk structuring element, and then
+%   extracts connected regional maxima centroids. For a common entry point
+%   that can also run SURF-based detection, see
+%   matlabx.image.measure.detectPoints.
+
     arguments
         % image to process
         I (:,:)
@@ -28,11 +43,19 @@ function [points,mask] = findPuncta(I,opts)
     % extract centroids of regional maxima mask
     CC = bwconncomp(I_reg_max);
     props = regionprops(CC, I_reg_max, 'Centroid');
-    points = cat(1, props.Centroid);
+    if isempty(props)
+        points = zeros(0,2);
+    else
+        points = cat(1, props.Centroid);
+    end
 
 
     % --- make puncta seed mask --- 
-    mask = matlabx.image.mask.fromPoints(points,sz);
+    if isempty(points)
+        mask = false(sz);
+    else
+        mask = matlabx.image.mask.fromPoints(points,sz);
+    end
 
 
     % --- show plots ---
