@@ -8,25 +8,17 @@ classdef PointClusters < handle
 %   distance-based statistics.
 %
 %   C = matlabx.analysis.cluster.PointClusters(POINTS,Name,Value) configures
-%   the initial clustering and optional automatic refinement pipeline.
+%   the initial clustering method and initial clustering parameters.
 %
 %   Typical workflow:
 %
 %       C = matlabx.analysis.cluster.PointClusters(points, ...
-%           "MinPointsPerCluster", 5, ...
-%           "Recluster", false);
+%           "MinPointsPerCluster", 5);
 %
 %       removedPoints = C.refinePoints("Method","nnDistance");
 %       C.recluster();
 %       removedClusters = C.filterByProperty("Eccentricity",[0 0.9]);
 %       metrics = C.exportClusterMetrics();
-%
-%   Automatic workflow:
-%
-%       C = matlabx.analysis.cluster.PointClusters(points, ...
-%           "RefinePoints", true, ...
-%           "Recluster", true, ...
-%           "RefineClusters", true);
 %
 %   Inputs and clustering:
 %       OriginalPoints
@@ -98,10 +90,6 @@ classdef PointClusters < handle
     end
 
     properties
-        RefinePoints (1,1) logical = false
-        Recluster (1,1) logical = false
-        RefineClusters (1,1) logical = false
-
         MinPointsPerCluster (1,1) double = 3
         MaxClusterConvexHullArea (1,1) double = Inf
         MaxEccentricity (1,1) double = 0.98
@@ -132,16 +120,13 @@ classdef PointClusters < handle
 
     methods
         function obj = PointClusters(coords,opts)
-        %POINTCLUSTERS Construct and optionally run the clustering pipeline.
+        %POINTCLUSTERS Construct and run initial clustering only.
             arguments
                 coords (:,2) double = zeros(0,2)
 
                 opts.ClusterMethod (1,:) char {mustBeMember(opts.ClusterMethod,{'dbscan','kmeans'})} = 'dbscan'
                 opts.Verbose (1,1) logical = false
 
-                opts.RefinePoints (1,1) logical = false
-                opts.Recluster (1,1) logical = true
-                opts.RefineClusters (1,1) logical = false
                 opts.MinPointsPerCluster (1,1) double = 3
                 opts.MaxClusterConvexHullArea (1,1) double = Inf
                 opts.MaxEccentricity (1,1) double = 1
@@ -153,9 +138,6 @@ classdef PointClusters < handle
             % Store policy options so later explicit method calls can reuse the
             % same defaults chosen at construction time.
             obj.Verbose = opts.Verbose;
-            obj.RefinePoints = opts.RefinePoints;
-            obj.Recluster = opts.Recluster;
-            obj.RefineClusters = opts.RefineClusters;
             obj.MinPointsPerCluster = opts.MinPointsPerCluster;
             obj.MaxClusterConvexHullArea = opts.MaxClusterConvexHullArea;
             obj.MaxEccentricity = opts.MaxEccentricity;
@@ -171,18 +153,6 @@ classdef PointClusters < handle
             obj.OriginalPoints = coords;
             obj.recordSnapshot("Original");
             obj.cluster("ClusterMethod",opts.ClusterMethod);
-
-            if obj.RefinePoints
-                obj.refinePoints();
-            end
-
-            if obj.Recluster
-                obj.recluster("ClusterMethod",opts.ClusterMethod);
-            end
-
-            if obj.RefineClusters
-                obj.refineClusters();
-            end
         end
     end
 

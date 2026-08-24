@@ -99,6 +99,7 @@ classdef PointClusterTuner < handle
             obj.setupViewer();
             obj.setupSummary();
             obj.refreshMethodControls();
+            obj.updateViewerColumnWidth();
         end
 
         function setupFigure(obj)
@@ -109,6 +110,7 @@ classdef PointClusterTuner < handle
                 "Position", [100 100 1350 820], ...
                 "Visible", "off", ...
                 "AutoResizeChildren", "off", ...
+                "SizeChangedFcn", @(~,~) obj.updateViewerColumnWidth(), ...
                 "CloseRequestFcn", @(~,~) delete(obj));
 
             if isprop(obj.Fig, "Theme")
@@ -119,7 +121,7 @@ classdef PointClusterTuner < handle
         function setupGrids(obj)
         %SETUPGRIDS Create the top-level three-column layout.
             obj.MainGrid = uigridlayout(obj.Fig, [1 3], ...
-                "ColumnWidth", {obj.ControlW, "1x", 380}, ...
+                "ColumnWidth", {obj.ControlW, 600, "1x"}, ...
                 "RowHeight", {"1x"}, ...
                 "ColumnSpacing", obj.Padding, ...
                 "RowSpacing", 0, ...
@@ -287,36 +289,47 @@ classdef PointClusterTuner < handle
             obj.addLabel(item.Pane, "K");
             obj.UI.Clustering.K = obj.numericField(item.Pane, 2);
 
-            obj.addLabel(item.Pane, "Recluster");
-            obj.UI.Clustering.Recluster = uidropdown(item.Pane, ...
-                "Items", {'false','true'}, ...
-                "ItemsData", {false,true}, ...
-                "Value", false);
-            matlabx.app.PointClusterTuner.placeInCurrentRow(item.Pane, obj.UI.Clustering.Recluster);
-
             obj.UI.Clustering.RunButton = uibutton(item.Pane, ...
                 "Text", "Run Clustering", ...
                 "ButtonPushedFcn", @(~,~) obj.runClustering());
-            obj.UI.Clustering.RunButton.Layout.Row = 5;
+            obj.UI.Clustering.RunButton.Layout.Row = 4;
             obj.UI.Clustering.RunButton.Layout.Column = [1 2];
+
+            obj.UI.Clustering.ReclusterButton = uibutton(item.Pane, ...
+                "Text", "Recluster Current Points", ...
+                "ButtonPushedFcn", @(~,~) obj.runRecluster());
+            obj.UI.Clustering.ReclusterButton.Layout.Row = 5;
+            obj.UI.Clustering.ReclusterButton.Layout.Column = [1 2];
         end
 
         function setupPointRefinementControls(obj)
         %SETUPPOINTREFINEMENTCONTROLS Create within-cluster refinement controls.
             item = obj.SettingsAccordion.getItem("Point Refinement");
-            obj.configurePaneGrid(item.Pane, 7);
+            obj.configurePaneGrid(item.Pane, 11);
 
-            obj.addLabel(item.Pane, "Method");
-            obj.UI.RefinePoints.MethodDropDown = uidropdown(item.Pane, ...
-                "Items", {'dbscan','nnDistance','nnSupport'}, ...
-                "Value", "nnDistance");
-            matlabx.app.PointClusterTuner.placeInCurrentRow(item.Pane, obj.UI.RefinePoints.MethodDropDown);
+            obj.addSectionHeader(item.Pane, "DBSCAN Outliers");
 
             obj.addLabel(item.Pane, "Min Points");
-            obj.UI.RefinePoints.MinPoints = obj.numericField(item.Pane, 3);
+            obj.UI.RefinePoints.DBSCANMinPoints = obj.numericField(item.Pane, 3);
+
+            obj.UI.RefinePoints.RunDBSCANButton = uibutton(item.Pane, ...
+                "Text", "Run DBSCAN Refinement", ...
+                "ButtonPushedFcn", @(~,~) obj.runPointRefinement("dbscan"));
+            obj.UI.RefinePoints.RunDBSCANButton.Layout.Row = 3;
+            obj.UI.RefinePoints.RunDBSCANButton.Layout.Column = [1 2];
+
+            obj.addSectionHeader(item.Pane, "Nearest-Neighbor Distance");
 
             obj.addLabel(item.Pane, "Sigma Factor");
             obj.UI.RefinePoints.SigmaFactor = obj.numericField(item.Pane, 2.5);
+
+            obj.UI.RefinePoints.RunNNDistanceButton = uibutton(item.Pane, ...
+                "Text", "Run NN Distance Refinement", ...
+                "ButtonPushedFcn", @(~,~) obj.runPointRefinement("nnDistance"));
+            obj.UI.RefinePoints.RunNNDistanceButton.Layout.Row = 6;
+            obj.UI.RefinePoints.RunNNDistanceButton.Layout.Column = [1 2];
+
+            obj.addSectionHeader(item.Pane, "Nearest-Neighbor Support");
 
             obj.addLabel(item.Pane, "Min Support");
             obj.UI.RefinePoints.MinSupport = obj.numericField(item.Pane, 4);
@@ -324,50 +337,58 @@ classdef PointClusterTuner < handle
             obj.addLabel(item.Pane, "Radius Factor");
             obj.UI.RefinePoints.RadiusFactor = obj.numericField(item.Pane, 4);
 
-            obj.addLabel(item.Pane, "Recluster After");
-            obj.UI.RefinePoints.Recluster = uidropdown(item.Pane, ...
-                "Items", {'false','true'}, ...
-                "ItemsData", {false,true}, ...
-                "Value", false);
-            matlabx.app.PointClusterTuner.placeInCurrentRow(item.Pane, obj.UI.RefinePoints.Recluster);
-
-            obj.UI.RefinePoints.RunButton = uibutton(item.Pane, ...
-                "Text", "Refine Points", ...
-                "ButtonPushedFcn", @(~,~) obj.runPointRefinement());
-            obj.UI.RefinePoints.RunButton.Layout.Row = 7;
-            obj.UI.RefinePoints.RunButton.Layout.Column = [1 2];
+            obj.UI.RefinePoints.RunNNSupportButton = uibutton(item.Pane, ...
+                "Text", "Run NN Support Refinement", ...
+                "ButtonPushedFcn", @(~,~) obj.runPointRefinement("nnSupport"));
+            obj.UI.RefinePoints.RunNNSupportButton.Layout.Row = 11;
+            obj.UI.RefinePoints.RunNNSupportButton.Layout.Column = [1 2];
         end
 
         function setupClusterFilteringControls(obj)
-        %SETUPCLUSTERFILTERINGCONTROLS Create one-property filtering controls.
+        %SETUPCLUSTERFILTERINGCONTROLS Create all property-filter controls.
             item = obj.SettingsAccordion.getItem("Cluster Filtering");
-            obj.configurePaneGrid(item.Pane, 5);
+            props = obj.filterProperties();
+            obj.configurePaneGrid(item.Pane, 2*numel(props) + 1, {'fit', 70, 70});
 
-            obj.addLabel(item.Pane, "Property");
-            obj.UI.Filter.PropertyDropDown = uidropdown(item.Pane, ...
-                "Items", {'nPoints','PointDensity','HullArea','Compactness', ...
-                    'Eccentricity','NNMedian','NNDispersion','DistanceSD', ...
-                    'DistTailRatio','Anisotropy'}, ...
-                "Value", "Eccentricity");
-            matlabx.app.PointClusterTuner.placeInCurrentRow(item.Pane, obj.UI.Filter.PropertyDropDown);
+            obj.UI.Filter = struct();
+            for i = 1:numel(props)
+                prop = props(i);
+                obj.addSectionHeader(item.Pane, prop);
 
-            obj.addLabel(item.Pane, "Min");
-            obj.UI.Filter.MinValue = obj.numericField(item.Pane, -Inf);
+                row = obj.nextGridRow(item.Pane);
+                enableBox = uicheckbox(item.Pane, ...
+                    "Text", "Use", ...
+                    "FontColor", [0.85 0.85 0.85], ...
+                    "Value", false, ...
+                    "ValueChangedFcn", @(src,~) obj.onFilterEnabledChanged(src));
+                enableBox.Layout.Row = row;
+                enableBox.Layout.Column = 1;
 
-            obj.addLabel(item.Pane, "Max");
-            obj.UI.Filter.MaxValue = obj.numericField(item.Pane, 0.98);
+                minField = uieditfield(item.Pane, "numeric", ...
+                    "Value", -Inf, ...
+                    "Enable", "off");
+                minField.Layout.Row = row;
+                minField.Layout.Column = 2;
+
+                maxField = uieditfield(item.Pane, "numeric", ...
+                    "Value", Inf, ...
+                    "Enable", "off");
+                maxField.Layout.Row = row;
+                maxField.Layout.Column = 3;
+
+                fieldName = matlab.lang.makeValidName(prop);
+                obj.UI.Filter.(fieldName) = struct( ...
+                    "Property", prop, ...
+                    "Enabled", enableBox, ...
+                    "Min", minField, ...
+                    "Max", maxField);
+            end
 
             obj.UI.Filter.RunButton = uibutton(item.Pane, ...
-                "Text", "Apply Filter", ...
-                "ButtonPushedFcn", @(~,~) obj.runClusterFilter());
-            obj.UI.Filter.RunButton.Layout.Row = 4;
-            obj.UI.Filter.RunButton.Layout.Column = [1 2];
-
-            obj.UI.Filter.RefineButton = uibutton(item.Pane, ...
-                "Text", "Run Default Filters", ...
-                "ButtonPushedFcn", @(~,~) obj.runDefaultClusterFilters());
-            obj.UI.Filter.RefineButton.Layout.Row = 5;
-            obj.UI.Filter.RefineButton.Layout.Column = [1 2];
+                "Text", "Apply Enabled Filters", ...
+                "ButtonPushedFcn", @(~,~) obj.runClusterFilters());
+            obj.UI.Filter.RunButton.Layout.Row = 2*numel(props) + 1;
+            obj.UI.Filter.RunButton.Layout.Column = [1 3];
         end
 
         function setupDisplayControls(obj)
@@ -577,10 +598,7 @@ classdef PointClusterTuner < handle
                     obj.DetectionPoints, ...
                     "ClusterMethod", method, ...
                     "MinPointsPerCluster", obj.UI.Clustering.MinPoints.Value, ...
-                    "k", obj.UI.Clustering.K.Value, ...
-                    "Recluster", obj.UI.Clustering.Recluster.Value, ...
-                    "RefinePoints", false, ...
-                    "RefineClusters", false);
+                    "k", obj.UI.Clustering.K.Value);
 
                 obj.refreshStageDropDown();
                 obj.refreshClusterOverlay();
@@ -592,8 +610,28 @@ classdef PointClusterTuner < handle
             end
         end
 
-        function runPointRefinement(obj)
-        %RUNPOINTREFINEMENT Remove suspect points within each live cluster.
+        function runRecluster(obj)
+        %RUNRECLUSTER Re-run clustering on currently clustered points.
+            try
+                if isempty(obj.Clusters) || ~isvalid(obj.Clusters)
+                    return
+                end
+
+                obj.Clusters.MinPointsPerCluster = obj.UI.Clustering.MinPoints.Value;
+                obj.Clusters.k = obj.UI.Clustering.K.Value;
+                obj.Clusters.recluster("ClusterMethod", char(obj.UI.Clustering.MethodDropDown.Value));
+
+                obj.refreshStageDropDown();
+                obj.refreshClusterOverlay();
+                obj.refreshTable();
+                obj.appendStatus(sprintf("Reclustered current points: %d cluster(s).", obj.Clusters.nClusters));
+            catch ME
+                obj.reportException(ME);
+            end
+        end
+
+        function runPointRefinement(obj, method)
+        %RUNPOINTREFINEMENT Remove suspect points using one explicit method.
             try
                 if isempty(obj.Clusters) || ~isvalid(obj.Clusters)
                     obj.runClustering();
@@ -602,62 +640,67 @@ classdef PointClusterTuner < handle
                     return
                 end
 
-                removed = obj.Clusters.refinePoints( ...
-                    "Method", char(obj.UI.RefinePoints.MethodDropDown.Value), ...
-                    "MinPoints", obj.UI.RefinePoints.MinPoints.Value, ...
-                    "SigmaFactor", obj.UI.RefinePoints.SigmaFactor.Value, ...
-                    "MinSupport", obj.UI.RefinePoints.MinSupport.Value, ...
-                    "RadiusFactor", obj.UI.RefinePoints.RadiusFactor.Value);
-
-                if obj.UI.RefinePoints.Recluster.Value
-                    obj.Clusters.recluster("ClusterMethod", char(obj.UI.Clustering.MethodDropDown.Value));
+                method = string(method);
+                switch method
+                    case "dbscan"
+                        removed = obj.Clusters.refinePoints( ...
+                            "Method", 'dbscan', ...
+                            "MinPoints", obj.UI.RefinePoints.DBSCANMinPoints.Value);
+                    case "nnDistance"
+                        removed = obj.Clusters.refinePoints( ...
+                            "Method", 'nnDistance', ...
+                            "SigmaFactor", obj.UI.RefinePoints.SigmaFactor.Value);
+                    case "nnSupport"
+                        removed = obj.Clusters.refinePoints( ...
+                            "Method", 'nnSupport', ...
+                            "MinSupport", obj.UI.RefinePoints.MinSupport.Value, ...
+                            "RadiusFactor", obj.UI.RefinePoints.RadiusFactor.Value);
                 end
 
                 obj.refreshStageDropDown();
                 obj.refreshClusterOverlay();
                 obj.refreshTable();
-                obj.appendStatus(sprintf("Point refinement removed %d point(s).", height(removed)));
+                obj.appendStatus(sprintf("%s point refinement removed %d point(s).", ...
+                    method, height(removed)));
             catch ME
                 obj.reportException(ME);
             end
         end
 
-        function runClusterFilter(obj)
-        %RUNCLUSTERFILTER Apply one property-threshold cluster filter.
+        function runClusterFilters(obj)
+        %RUNCLUSTERFILTERS Apply every enabled property-threshold filter.
             try
                 if isempty(obj.Clusters) || ~isvalid(obj.Clusters)
                     return
                 end
 
-                prop = char(obj.UI.Filter.PropertyDropDown.Value);
-                thresh = [obj.UI.Filter.MinValue.Value obj.UI.Filter.MaxValue.Value];
-                removed = obj.Clusters.filterByProperty(prop, thresh, ...
-                    "StageName", "FilteredClusters", ...
-                    "Reason", "ManualFilter");
+                props = obj.filterProperties();
+                removed = table();
+                nEnabled = 0;
+                for i = 1:numel(props)
+                    prop = props(i);
+                    ctl = obj.UI.Filter.(matlab.lang.makeValidName(prop));
+                    if ~ctl.Enabled.Value
+                        continue
+                    end
 
-                obj.refreshStageDropDown();
-                obj.refreshClusterOverlay();
-                obj.refreshTable();
-                obj.appendStatus(sprintf("Filter %s [%g %g] removed %d cluster(s).", ...
-                    prop, thresh(1), thresh(2), height(removed)));
-            catch ME
-                obj.reportException(ME);
-            end
-        end
+                    nEnabled = nEnabled + 1;
+                    thresh = [ctl.Min.Value ctl.Max.Value];
+                    removed = [removed; obj.Clusters.filterByProperty(char(prop), thresh, ...
+                        "StageName", "FilteredClusters", ...
+                        "Reason", "ManualFilter")]; %#ok<AGROW>
+                end
 
-        function runDefaultClusterFilters(obj)
-        %RUNDEFAULTCLUSTERFILTERS Apply PointClusters built-in quality filters.
-            try
-                if isempty(obj.Clusters) || ~isvalid(obj.Clusters)
+                if nEnabled == 0
+                    obj.appendStatus("No cluster filters are enabled.");
                     return
                 end
 
-                obj.Clusters.MinPointsPerCluster = obj.UI.Clustering.MinPoints.Value;
-                removed = obj.Clusters.refineClusters();
                 obj.refreshStageDropDown();
                 obj.refreshClusterOverlay();
                 obj.refreshTable();
-                obj.appendStatus(sprintf("Default cluster filters removed %d cluster(s).", height(removed)));
+                obj.appendStatus(sprintf("Applied %d filter(s); removed %d cluster(s).", ...
+                    nEnabled, height(removed)));
             catch ME
                 obj.reportException(ME);
             end
@@ -691,13 +734,13 @@ classdef PointClusterTuner < handle
 
             if isfield(obj.DetectionInfo, "Method")
                 lines(end+1) = "Detection";
-                lines(end+1) = matlabx.struct.prettyPrint(obj.DetectionInfo.Parameters);
+                lines = [lines; obj.splitTextLines(matlabx.struct.prettyPrint(obj.DetectionInfo.Parameters))];
                 lines(end+1) = "";
             end
 
             if ~isempty(obj.Clusters) && isvalid(obj.Clusters)
                 lines(end+1) = "History";
-                lines(end+1) = evalc("disp(obj.Clusters.getHistoryTable())");
+                lines = [lines; obj.splitTextLines(evalc("disp(obj.Clusters.getHistoryTable())"))];
             else
                 lines(end+1) = "No cluster history yet.";
             end
@@ -725,8 +768,8 @@ classdef PointClusterTuner < handle
                     "Points", obj.DetectionPoints, ...
                     "Marker", "o", ...
                     "MarkerSize", 5, ...
-                    "MarkerEdgeColor", [1 1 0], ...
-                    "MarkerFaceColor", "none", ...
+                    "MarkerEdgeColor", [0 0 0], ...
+                    "MarkerFaceColor", [1 1 1], ...
                     "Visible", show);
             else
                 obj.DetectionOverlay.Points = obj.DetectionPoints;
@@ -857,6 +900,7 @@ classdef PointClusterTuner < handle
                 lines = lines(end-maxLines+1:end);
             end
             obj.StatusText.Value = cellstr(lines);
+            scroll(obj.StatusText, "bottom");
         end
 
         function reportException(obj, ME)
@@ -901,16 +945,83 @@ classdef PointClusterTuner < handle
                 clim = double([min(vals(:)) max(vals(:))]);
             end
         end
+
+        function onFilterEnabledChanged(~, src)
+        %ONFILTERENABLEDCHANGED Enable or disable min/max controls for a filter.
+            row = src.Layout.Row;
+            parent = src.Parent;
+            controls = parent.Children;
+            for i = 1:numel(controls)
+                h = controls(i);
+                if h.Layout.Row == row && h ~= src && isprop(h, "Enable")
+                    h.Enable = matlab.lang.OnOffSwitchState(src.Value);
+                end
+            end
+        end
+
+        function updateViewerColumnWidth(obj)
+        %UPDATEVIEWERCOLUMNWIDTH Keep the image panel close to square.
+            if isempty(obj.MainGrid) || ~isvalid(obj.MainGrid)
+                return
+            end
+
+            figH = obj.Fig.Position(4);
+            availableH = max(figH - 2*obj.Padding, 200);
+
+            % Account for the outer preview uipanel title and the ImageAxes
+            % title chrome. For now we trust the calibrated value, matching the
+            % sizing simplification discussed for this tuning app.
+            try
+                panelChrome = matlabx.UICal.panelChromeHeight(obj.FontSize, "FontUnits", "pixels");
+            catch
+                panelChrome = 20;
+            end
+            imagePanelW = max(250, round(availableH - 2*panelChrome));
+
+            obj.MainGrid.ColumnWidth = {obj.ControlW, imagePanelW, "1x"};
+        end
+
+        function lines = splitTextLines(~, txt)
+        %SPLITTEXTLINES Split char/string blocks into TextWindow line cells.
+            txt = string(txt);
+            if strlength(txt) == 0
+                lines = strings(0,1);
+            else
+                lines = splitlines(txt);
+                if ~isempty(lines) && strlength(lines(end)) == 0
+                    lines(end) = [];
+                end
+            end
+        end
     end
 
     methods (Access=private)
-        function configurePaneGrid(obj, pane, nRows)
+        function configurePaneGrid(obj, pane, nRows, colWidth)
         %CONFIGUREPANEGRID Apply the app's standard accordion pane layout.
+            arguments
+                obj
+                pane
+                nRows (1,1) double
+                colWidth = {'fit','1x'}
+            end
+
             set(pane, ...
                 "RowHeight", repmat({'fit'},1,nRows), ...
-                "ColumnWidth", {'fit','1x'}, ...
+                "ColumnWidth", colWidth, ...
                 "RowSpacing", obj.Padding, ...
                 "ColumnSpacing", obj.Padding);
+        end
+
+        function h = addSectionHeader(obj, parent, text)
+        %ADDSECTIONHEADER Add a full-width grouping label in an accordion pane.
+            row = obj.nextGridRow(parent);
+            h = uilabel(parent, ...
+                "Text", text, ...
+                "FontColor", [1 1 1], ...
+                "FontWeight", "bold", ...
+                "FontSize", obj.FontSize);
+            h.Layout.Row = row;
+            h.Layout.Column = [1 numel(parent.ColumnWidth)];
         end
 
         function h = addLabel(obj, parent, text)
@@ -994,6 +1105,13 @@ classdef PointClusterTuner < handle
             I = imgaussfilt(I, 0.7) + 0.04*randn(sz);
             I = rescale(I);
             delete(restoreRng);
+        end
+
+        function props = filterProperties()
+        %FILTERPROPERTIES Return cluster metrics exposed as filter controls.
+            props = ["nPoints", "PointDensity", "HullArea", "Compactness", ...
+                "Eccentricity", "NNMedian", "NNDispersion", "DistanceSD", ...
+                "DistTailRatio", "Anisotropy"];
         end
     end
 end
