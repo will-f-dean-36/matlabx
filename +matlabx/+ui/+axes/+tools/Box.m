@@ -178,29 +178,36 @@ classdef Box < matlabx.ui.axes.AxesTool
         function onDown(obj, E)
         %ONDOWN Create a new box on plain image click while enabled.
 
-            if E.MouseChord ~= "click"
-                return
+            switch E.MouseChord
+                case "click"
+                    H = obj.Host;
+                    XY = H.cursorPosition;
+        
+                    if isempty(XY)
+                        return
+                    end
+        
+                    s = obj.BoxSize;
+                    [cx,cy] = obj.clampCenter(XY, s);
+                    ID = matlabx.utils.text.uniqueID();
+        
+                    % Draw now; notify controller (optimistic)
+                    obj.addBox(ID, [cx cy], s);      
+        
+                    if ~isempty(obj.BoxCreatedFcn)
+                        obj.BoxCreatedFcn(H, struct('ID', ID, 'CenterPx', [cx cy], 'BoxSize', s));
+                    end
+        
+                    obj.setActive(ID);
+
+                case "shift+doubleclick"
+                    obj.clearBoxSelection("Emit",true);
+
+                otherwise
+                    return
+
             end
 
-            H = obj.Host;
-            XY = H.cursorPosition;
-
-            if isempty(XY)
-                return
-            end
-
-            s = obj.BoxSize;
-            [cx,cy] = obj.clampCenter(XY, s);
-            ID = matlabx.utils.text.uniqueID();
-
-            % Draw now; notify controller (optimistic)
-            obj.addBox(ID, [cx cy], s);      
-
-            if ~isempty(obj.BoxCreatedFcn)
-                obj.BoxCreatedFcn(H, struct('ID', ID, 'CenterPx', [cx cy], 'BoxSize', s));
-            end
-
-            obj.setActive(ID);
         end
 
     end
@@ -775,6 +782,11 @@ classdef Box < matlabx.ui.axes.AxesTool
 
     %% Host update helpers
     methods
+
+        function onHostLeave(obj,~)
+        %ONHOSTLEAVE Clear transient hover state when cursor leaves ImageAxes.
+            obj.stopHover();
+        end
 
         function pointer = getPreferredPointer(obj)
         %GETPREFERREDPOINTER Return pointer requested by current Box state.

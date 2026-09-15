@@ -54,6 +54,11 @@ classdef AxesTool < handle
 %   Host notifications are opt-in. For example, pass
 %   ListenToRenderSourceChanged=true and override onHostRenderSourceChanged()
 %   to react when the selected source plane/composite changes.
+%
+%   Tools may also override onHostEnter(E) and onHostLeave(E) to clean up
+%   transient interaction state when the pointer crosses the host ImageAxes
+%   boundary. These hooks are distinct from FigureEventHub onEnter/onLeave:
+%   they mean "entered/left my host", not "this tool claimed hover."
 
 
     properties (SetAccess=protected)
@@ -274,6 +279,8 @@ classdef AxesTool < handle
         % Optional host notification hooks
         function onHostAxesChanged(~,~),   end   % e.g., XLim/YLim/CLim changed
         function onHostRenderSourceChanged(~,~),  end   % rendered source plane/composite changed
+        function onHostEnter(~,~), end
+        function onHostLeave(~,~), end
 
         % Optional context-menu contribution hook
         function contributeContextMenu(~,~), end

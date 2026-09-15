@@ -1,16 +1,23 @@
 classdef FigureEventHub < handle
-%matlabx.ui.interaction.FigureEventHub  Per-figure event hub that routes window-level events
+%FIGUREEVENTHUB Route figure-level UI events to registered interaction handlers.
 %
-% Per-figure event hub that routes figure/window-level events to registered
-% handlers with priority and optional capture. Also supports chained
-% figure-level listeners without requiring direct mutation of figure
-% callback properties after hub installation.
+%   HUB = matlabx.ui.interaction.FigureEventHub.ensure(FIG) installs, or
+%   returns, one shared event hub for a uifigure. The hub owns the figure's
+%   low-level callbacks and routes normalized HubEvent payloads to registered
+%   objects such as ImageAxes.
+%
+%   The hub has two audiences:
+%     1. Registrants claim events by implementing matches/onDown/onMove/etc.
+%     2. Passive listeners observe selected event kinds without claiming them.
+%
+%   This lets components and tools share one figure safely instead of each
+%   overwriting WindowButtonDownFcn, KeyPressFcn, and similar callbacks.
 %
 % Notes/Definitions
 %
 % Registrant: object registered with the hub (e.g., axes.ImageAxes)
-%   Each registrant registers itself with the hub at startuo and must implement 
-%   matches(tgt, kind, evt), which returns true if registrant should claim the event
+%   Each registrant registers itself with the hub at startup and must implement
+%   matches(E), which returns true if the registrant should claim the event.
 %
 % Registry entry: stored info about a registrant (id, obj, priority, CaptureDuringDrag)
 %   id (stable numeric ID), obj (the registrant handle), priority (bigger wins), CaptureDuringDrag (logical)
@@ -31,8 +38,9 @@ classdef FigureEventHub < handle
 % tgt: graphics obj under cursor (hittest(Fig) result)
 % 
 % kind: the event kind string the hub uses to sort events:
-%   'Move'|'Down'|'Up'|'Scroll'|'KeyPress'|'KeyRelease'
-%   Corresponds to figure mouse, scroll, KeyPressFcn, and KeyReleaseFcn callbacks.
+%   'Move'|'Down'|'Up'|'Scroll'|'KeyPress'|'KeyRelease'|'Enter'|'Leave'
+%   The first six correspond to figure callbacks. Enter and Leave are
+%   synthetic hover-transition events generated when the hover claimant changes.
 %
 % evt: the MATLAB event struct passed from the figure callback (e.g., WindowButtonDownFcn arg, etc.)
 
@@ -64,7 +72,9 @@ classdef FigureEventHub < handle
             'Up',         struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
             'Scroll',     struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
             'KeyPress',   struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
-            'KeyRelease', struct('id', {}, 'Fcn', {}, 'Priority', {}))
+            'KeyRelease', struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
+            'Enter',      struct('id', {}, 'Fcn', {}, 'Priority', {}), ...
+            'Leave',      struct('id', {}, 'Fcn', {}, 'Priority', {}))
 
         NextListenerID double = 1
     end
@@ -72,6 +82,7 @@ classdef FigureEventHub < handle
     methods (Static)
 
         function hub = ensure(fig)
+        %ENSURE Return the installed hub for a figure, creating one if needed.
             hub = getappdata(fig, 'FigureEventHub');
             if isempty(hub) || ~isvalid(hub)
                 hub = matlabx.ui.interaction.FigureEventHub(fig);
@@ -84,9 +95,11 @@ classdef FigureEventHub < handle
     methods (Access=private)
 
         function obj = FigureEventHub(fig)
+        %FIGUREEVENTHUB Construct and install callback dispatchers.
             obj.Fig = fig;
 
-            % Preserve any existing callbacks as listeners before installing hub
+            % Preserve existing callback functions as low-priority listeners
+            % before the hub takes ownership of the figure callback slots.
             obj.captureExistingCallback('WindowButtonDownFcn',   'Down');
             obj.captureExistingCallback('WindowButtonMotionFcn', 'Move');
             obj.captureExistingCallback('WindowButtonUpFcn',     'Up');
@@ -104,6 +117,7 @@ classdef FigureEventHub < handle
         end
 
         function captureExistingCallback(obj, propName, kind)
+        %CAPTUREEXISTINGCALLBACK Preserve a pre-existing figure callback.
             existing = obj.Fig.(propName);
             if ~isempty(existing)
                 obj.addListener(kind, existing, 'Priority', -inf);
@@ -115,14 +129,19 @@ classdef FigureEventHub < handle
     methods
 
         function id = register(obj, h, varargin)
-            % REGISTER(H, 'Priority', P, 'CaptureDuringDrag', TF)
+        %REGISTER Add an event-claiming object to the hub registry.
+        %
+        %   ID = HUB.register(H) registers H with default priority.
+        %   ID = HUB.register(H,'Priority',P,'CaptureDuringDrag',TF)
+        %   controls overlap resolution and drag capture.
 
             p = inputParser;
             p.addParameter('Priority', 0, @(x) isnumeric(x) && isscalar(x));
             p.addParameter('CaptureDuringDrag', false, @(x) islogical(x) && isscalar(x));
             p.parse(varargin{:});
 
-            % ensure registrants implement required methods
+            % Registrants use a deliberately small protocol. Requiring the
+            % methods at registration gives clearer errors than a later click.
             requiredMethods = obj.getRequiredMethods();
             for i = 1:numel(requiredMethods)
                 if ~ismethod(h, requiredMethods{i})
@@ -149,6 +168,7 @@ classdef FigureEventHub < handle
         end
 
         function unregister(obj, id)
+        %UNREGISTER Remove a registrant and release any hover/capture state.
             if nargin < 2 || isempty(id) || ~isfinite(id)
                 return
             end
@@ -165,11 +185,15 @@ classdef FigureEventHub < handle
 
             % release hover if necessary, then fire onLeave()
             if ~isnan(obj.HoverID) && obj.HoverID == id
-                % obj.safeCall(obj.Registry(idx).obj, 'onLeave', [], hittest(obj.Fig));
-
                 tgt = hittest(obj.Fig);
-                E = matlabx.ui.interaction.HubEvent(obj.Fig, tgt, '', []);
+                E = matlabx.ui.interaction.HubEvent(obj.Fig, tgt, 'Leave', [], ...
+                    "ModifierState", obj.ModifierState, ...
+                    "LastKey", obj.LastKey, ...
+                    "LastHotkey", obj.LastHotkey, ...
+                    "LastKeyTimestamp", obj.LastKeyTimestamp, ...
+                    "Claimant", obj.Registry(idx).obj);
                 obj.safeCall(obj.Registry(idx).obj, 'onLeave', E);
+                obj.notifyListeners(E);
                 obj.HoverID = NaN;
             end
 
@@ -178,7 +202,11 @@ classdef FigureEventHub < handle
         end
 
         function id = addListener(obj, kind, fcn, varargin)
-            % ADDLISTENER(KIND, FCN, 'Priority', P)
+        %ADDLISTENER Add a passive listener for one supported event kind.
+        %
+        %   ID = HUB.addListener(KIND,FCN) calls FCN(E) after hub routing.
+        %   Listeners observe events but do not participate in claiming,
+        %   capture, or propagation.
 
             kind = validatestring(kind, obj.supportedKinds());
 
@@ -207,6 +235,7 @@ classdef FigureEventHub < handle
         end
 
         function removeListener(obj, kind, id)
+        %REMOVELISTENER Remove a passive listener by kind and listener ID.
             kind = validatestring(kind, obj.supportedKinds());
 
             % get listener registry for this event kind
@@ -227,12 +256,13 @@ classdef FigureEventHub < handle
         end
 
         function clearListeners(obj, kind)
-            % reset listener registry for this event kind
+        %CLEARLISTENERS Remove all passive listeners for one event kind.
             kind = validatestring(kind, obj.supportedKinds());
             obj.ListenerRegistry.(kind) = struct('id', {}, 'Fcn', {}, 'Priority', {});
         end
 
         function listRegistrants(obj)
+        %LISTREGISTRANTS Print registered event claimants and priorities.
             for i = 1:numel(obj.Registry)
                 entry = obj.Registry(i);
                 fprintf('Entry %d: %s (Priority=%g, ID=%d)\n', ...
@@ -242,6 +272,7 @@ classdef FigureEventHub < handle
         end
 
         function listListeners(obj, kind)
+        %LISTLISTENERS Print passive listeners for one event kind.
             kind = validatestring(kind, obj.supportedKinds());
             L = obj.ListenerRegistry.(kind);
 
@@ -257,13 +288,16 @@ classdef FigureEventHub < handle
     methods (Access=private)
 
         function route(obj, kind, evt)
-            % ensure valid registrants and listener entries
+        %ROUTE Build a HubEvent and dispatch it to claimants/listeners.
+            % Clean up stale handles before every route. This keeps deleted
+            % components from trapping events without requiring manual teardown.
             obj.pruneInvalidRegistrants();
             obj.pruneInvalidListeners(kind);
 
             obj.updateKeyboardState(kind, evt);
             obj.expireStaleShortcutModifierState(kind);
 
+            % hittest gives the graphics/UI object currently under the pointer.
             tgt = hittest(obj.Fig);
             E = matlabx.ui.interaction.HubEvent(obj.Fig, tgt, kind, evt, ...
                 "ModifierState", obj.ModifierState, ...
@@ -314,8 +348,9 @@ classdef FigureEventHub < handle
         end
 
         function updateHover(obj, E)
+        %UPDATEHOVER Recompute the current hover claimant and emit transitions.
             claimantID = NaN;
-            % iterate Registry in priority order
+            % Iterate in priority order. The first positive match owns hover.
             for k = 1:numel(obj.Registry)
                 e = obj.Registry(k);
                 try
@@ -336,7 +371,9 @@ classdef FigureEventHub < handle
                 if ~isnan(obj.HoverID)
                     previousIdx = obj.indexOfID(obj.HoverID);
                     if ~isempty(previousIdx)
-                        obj.safeCall(obj.Registry(previousIdx).obj, 'onLeave', E);
+                        leaveEvent = obj.syntheticEventLike(E, "Leave", obj.Registry(previousIdx).obj);
+                        obj.safeCall(obj.Registry(previousIdx).obj, 'onLeave', leaveEvent);
+                        obj.notifyListeners(leaveEvent);
                     end
                 end
 
@@ -344,7 +381,9 @@ classdef FigureEventHub < handle
                 if ~isnan(claimantID)
                     newIdx = obj.indexOfID(claimantID);
                     if ~isempty(newIdx)
-                        obj.safeCall(obj.Registry(newIdx).obj, 'onEnter', E);
+                        enterEvent = obj.syntheticEventLike(E, "Enter", obj.Registry(newIdx).obj);
+                        obj.safeCall(obj.Registry(newIdx).obj, 'onEnter', enterEvent);
+                        obj.notifyListeners(enterEvent);
                     end
                 end
 
@@ -354,6 +393,7 @@ classdef FigureEventHub < handle
         end
 
         function tf = matches(~, h, E)
+        %MATCHES Safely ask a registrant whether it claims an event.
             tf = false;
             if isvalid(h)
                 tf = h.matches(E);
@@ -361,6 +401,7 @@ classdef FigureEventHub < handle
         end
 
         function updateKeyboardState(obj, kind, evt)
+        %UPDATEKEYBOARDSTATE Track normalized key/modifier state.
             if ~any(string(kind) == ["KeyPress", "KeyRelease"])
                 return
             end
@@ -375,6 +416,9 @@ classdef FigureEventHub < handle
 
             switch string(kind)
                 case "KeyPress"
+                    % MATLAB reports currently held modifiers separately
+                    % from the pressed key. Include modifier keys themselves
+                    % so later mouse events can carry the current chord.
                     obj.ModifierState = matlabx.ui.interaction.FigureEventHub.canonicalModifiers_([modifiers, key]);
                     if obj.isShortcutLikeKeyEvent_(key, modifiers)
                         obj.ShortcutModifierStateTimestamp = datetime("now");
@@ -394,6 +438,12 @@ classdef FigureEventHub < handle
         end
 
         function expireStaleShortcutModifierState(obj, kind)
+        %EXPIRESTALESHORTCUTMODIFIERSTATE Clear stale shortcut modifiers.
+        %
+        %   Some MATLAB UI operations, such as menu accelerators followed by a
+        %   modal progress dialog, can prevent the matching key-release event
+        %   from reaching the hub. Only shortcut-like modifier states expire;
+        %   held modifier keys from ordinary interaction remain live.
             if string(kind) ~= "Down" ...
                     || isempty(obj.ModifierState) ...
                     || isnat(obj.ShortcutModifierStateTimestamp)
@@ -407,6 +457,7 @@ classdef FigureEventHub < handle
         end
 
         function tf = isShortcutLikeKeyEvent_(obj, key, modifiers)
+        %ISSHORTCUTLIKEKEYEVENT_ True for menu-accelerator style key chords.
             key = lower(string(key));
             modifiers = matlabx.ui.interaction.FigureEventHub.canonicalModifiers_(modifiers);
 
@@ -418,12 +469,14 @@ classdef FigureEventHub < handle
         end
 
         function tf = isModifierKey_(~, key)
+        %ISMODIFIERKEY_ True when key names a modifier rather than content key.
             key = lower(string(key));
             modifierKeys = ["shift", "control", "alt", "meta", "command", "option", "ctrl"];
             tf = any(key == modifierKeys);
         end
 
         function call(~, h, E)
+        %CALL Dispatch an event to the matching registrant callback method.
             if ~isvalid(h), return; end
 
             switch E.Kind
@@ -433,10 +486,13 @@ classdef FigureEventHub < handle
                 case 'Scroll', h.onScroll(E);
                 case 'KeyPress',   h.onKeyPress(E);
                 case 'KeyRelease', h.onKeyRelease(E);
+                case 'Enter',      h.onEnter(E);
+                case 'Leave',      h.onLeave(E);
             end
         end
 
         function safeCall(~, h, methodName, E)
+        %SAFECALL Call an optional transition method without breaking routing.
             if isvalid(h)
                 try
                     h.(methodName)(E);
@@ -448,6 +504,7 @@ classdef FigureEventHub < handle
         end
 
         function notifyListeners(obj, E)
+        %NOTIFYLISTENERS Notify passive listeners for the event kind.
             L = obj.ListenerRegistry.(E.Kind);
             for i = 1:numel(L)
                 try
@@ -460,11 +517,13 @@ classdef FigureEventHub < handle
         end
 
         function idx = indexOfID(obj, id)
+        %INDEXOFID Find a registrant index from its stable hub ID.
             ids = [obj.Registry.id];
             idx = find(ids == id, 1, 'first');
         end
 
         function pruneInvalidRegistrants(obj)
+        %PRUNEINVALIDREGISTRANTS Remove deleted registrant handles.
             keep = false(1, numel(obj.Registry));
             for i = 1:numel(obj.Registry)
                 keep(i) = isvalid(obj.Registry(i).obj);
@@ -484,6 +543,7 @@ classdef FigureEventHub < handle
         end
 
         function pruneInvalidListeners(obj, kind)
+        %PRUNEINVALIDLISTENERS Placeholder for listener cleanup policy.
             L = obj.ListenerRegistry.(kind);
             keep = true(1, numel(L));
 
@@ -497,6 +557,7 @@ classdef FigureEventHub < handle
         end
 
         function sortRegistry(obj)
+        %SORTREGISTRY Keep registrants sorted by descending priority.
             if isempty(obj.Registry)
                 return
             end
@@ -505,6 +566,7 @@ classdef FigureEventHub < handle
         end
 
         function sortListeners(obj, kind)
+        %SORTLISTENERS Keep passive listeners sorted by descending priority.
             L = obj.ListenerRegistry.(kind);
             if isempty(L)
                 return
@@ -513,11 +575,26 @@ classdef FigureEventHub < handle
             obj.ListenerRegistry.(kind) = L(ord);
         end
 
+        function E2 = syntheticEventLike(obj, E, kind, claimant)
+        %SYNTHETICEVENTLIKE Create an Enter/Leave event from an existing event.
+        %
+        %   Synthetic hover events reuse the current target, raw event, and
+        %   keyboard state, but identify the registrant that entered or left
+        %   hover through HubEvent.Claimant.
+            E2 = matlabx.ui.interaction.HubEvent(obj.Fig, E.Target, kind, E.RawEvent, ...
+                "ModifierState", E.ModifierState, ...
+                "LastKey", E.LastKey, ...
+                "LastHotkey", E.LastHotkey, ...
+                "LastKeyTimestamp", E.LastKeyTimestamp, ...
+                "Claimant", claimant);
+        end
+
     end
 
     methods (Static)
 
         function requiredMethods = getRequiredMethods()
+        %GETREQUIREDMETHODS Return the registrant callback protocol.
             requiredMethods = { ...
                 'matches', ...
                 'onDown', ...
@@ -531,10 +608,13 @@ classdef FigureEventHub < handle
         end
 
         function kinds = supportedKinds()
-            kinds = {'Down', 'Move', 'Up', 'Scroll', 'KeyPress', 'KeyRelease'};
+        %SUPPORTEDKINDS Return figure-backed and synthetic event kind names.
+            kinds = {'Down', 'Move', 'Up', 'Scroll', ...
+                'KeyPress', 'KeyRelease', 'Enter', 'Leave'};
         end
 
         function modifiers = canonicalModifiers_(modifiers)
+        %CANONICALMODIFIERS_ Normalize modifier names and ordering.
             modifiers = lower(string(modifiers));
             modifiers(modifiers == "") = [];
             modifiers(modifiers == "command") = "meta";

@@ -321,6 +321,16 @@ classdef ImageAxesToolManager < handle
             toolsCell = obj.prioritySortCell(obj.installedToolValues());
         end
 
+        function notifyHostEnter(obj, E)
+        %NOTIFYHOSTENTER Forward host-boundary enter events to installed tools.
+            obj.notifyHostBoundary("onHostEnter", E);
+        end
+
+        function notifyHostLeave(obj, E)
+        %NOTIFYHOSTLEAVE Forward host-boundary leave events to installed tools.
+            obj.notifyHostBoundary("onHostLeave", E);
+        end
+
         function toolsCell = prioritySortCell(~, toolsCell)
         %PRIORITYSORTCELL Sort a cell array of tools by descending priority.
             if isempty(toolsCell)
@@ -415,6 +425,24 @@ classdef ImageAxesToolManager < handle
     end
 
     methods (Access=private)
+        function notifyHostBoundary(obj, methodName, E)
+        %NOTIFYHOSTBOUNDARY Call a host-boundary hook on installed tools.
+            toolsCell = obj.prioritySort();
+            for i = 1:numel(toolsCell)
+                tool = toolsCell{i};
+                if isempty(tool) || ~isvalid(tool)
+                    continue
+                end
+
+                try
+                    tool.(methodName)(E);
+                catch err
+                    warning('ImageAxesToolManager:HostBoundaryHookError', ...
+                        'Error in %s.%s: %s', class(tool), methodName, err.message);
+                end
+            end
+        end
+
         function toolsCell = installedToolValues(obj)
         %INSTALLEDTOOLVALUES Return installed tools as a cell array.
             if isempty(obj.InstalledTools)

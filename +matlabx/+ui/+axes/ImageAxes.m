@@ -2914,18 +2914,19 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.routeEventToTools(E);
         end
 
-        function onEnter(obj,~)
+        function onEnter(obj,E)
             obj.BottomLabel.Visible = "on";
-            % no-op to tools by default
+            obj.ToolManager.notifyHostEnter(E);
         end
 
-        function onLeave(obj,~)
+        function onLeave(obj,E)
             % hide label
             obj.BottomLabel.Visible = "off";
             % reset pointer to arrow
             if isvalid(obj.ParentFig)
                 obj.ParentFig.Pointer = 'arrow';
             end
+            obj.ToolManager.notifyHostLeave(E);
         end
 
     end
