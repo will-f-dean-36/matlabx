@@ -4,6 +4,7 @@ classdef TextWindow < handle
         Title       (:,1) char   = 'Untitled'
         Text        (:,1) cell   = {}
         FontName    (1,:) char   = 'Courier New'
+        WordWrap    (1,1) matlab.lang.OnOffSwitchState = "off"
         Position    (1,:) double = []
         ClosedFcn   (:,1) function_handle = function_handle.empty
     end
@@ -25,6 +26,7 @@ classdef TextWindow < handle
                 opts.Title      (:,1) char = 'Untitled'
                 opts.Text       (:,1) cell = {}
                 opts.FontName   (1,:) = 'Courier New'
+                opts.WordWrap   (1,1) matlab.lang.OnOffSwitchState = "off"
                 opts.Position   (1,:) double = []
                 opts.ClosedFcn  (:,1) function_handle = function_handle.empty
             end
@@ -33,6 +35,7 @@ classdef TextWindow < handle
             obj.Title = opts.Title;
             obj.Text = opts.Text;
             obj.FontName = opts.FontName;
+            obj.WordWrap = opts.WordWrap;
             obj.ClosedFcn = opts.ClosedFcn;
 
             if ~isempty(opts.Position)
@@ -63,7 +66,7 @@ classdef TextWindow < handle
             obj.TextArea = uitextarea(obj.Grid, ...
                 "Value",obj.Text, ...
                 "FontName",obj.FontName, ...
-                "WordWrap","off");
+                "WordWrap",obj.WordWrap);
 
             % Center the figure
             movegui(obj.Fig, "center");
