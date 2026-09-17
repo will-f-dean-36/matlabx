@@ -10,8 +10,10 @@ classdef Line < matlabx.ui.axes.AxesTool
         LineColor = [1 1 1]
         LineAlpha (1,1) double {mustBeGreaterThanOrEqual(LineAlpha,0), mustBeLessThanOrEqual(LineAlpha,1)} = 1
         LineWidth (1,1) double {mustBePositive} = 1
-        MarkerSize (1,1) double {mustBePositive} = 7
-        HoverMarkerSize (1,1) double {mustBePositive} = 9
+        MarkerSize (1,1) double {mustBePositive} = 4
+        HoverMarkerSize (1,1) double {mustBePositive} = 5
+        ActivateOnCreate (1,1) logical = true
+        DragStartThresholdPx (1,1) double {mustBeNonnegative} = 3
     end
 
     properties
@@ -35,7 +37,9 @@ classdef Line < matlabx.ui.axes.AxesTool
 
     properties (Access=private)
         LineIds (1,:) string = string.empty(1,0)
+        DrawingLineID (1,1) string = ""
         PendingDragPart (1,1) string = ""
+        DragStartFigurePoint (1,2) double = [NaN NaN]
         DragStartCursor (1,2) double = [NaN NaN]
         DragStartEndpoints (2,2) double = [NaN NaN; NaN NaN]
         DragStartUnitVector (1,2) double = [NaN NaN]
@@ -100,13 +104,6 @@ classdef Line < matlabx.ui.axes.AxesTool
                 "Owner", obj);
 
             menu.addItem( ...
-                "Line.Help", ...
-                "Help...", ...
-                @(~,~) obj.Host.openToolHelpWindow(obj), ...
-                "Parent", "Line", ...
-                "Owner", obj);
-
-            menu.addItem( ...
                 "Line.ClearSelection", ...
                 "Clear Selection", ...
                 @(~,~) obj.clearLineSelection(Emit=true), ...
@@ -143,6 +140,14 @@ classdef Line < matlabx.ui.axes.AxesTool
                 "Owner", obj, ...
                 "Enabled", matlab.lang.OnOffSwitchState(obj.hasAnyLines()), ...
                 "RefreshFcn", @(h) obj.refreshRequiresLines(h));
+
+            menu.addItem( ...
+                "Line.Help", ...
+                "Help...", ...
+                @(~,~) obj.Host.openToolHelpWindow(obj), ...
+                "Parent", "Line", ...
+                "Owner", obj, ...
+                "Separator", "on");
         end
     end
 
@@ -168,7 +173,10 @@ classdef Line < matlabx.ui.axes.AxesTool
                 "ToggleTool", obj.ToggleHotkey, ...
                 "CreateLine", "click-drag image background while Line is enabled", ...
                 "Activate", "click line", ...
-                "ToggleSelection", "meta+click line", ...
+                "ToggleSelection", "shift+extendclick line", ...
+                "ClearSelection", "shift+doubleclick image background", ...
+                "Deactivate", "alt+click line body", ...
+                "DeleteLine", "control+contextclick line", ...
                 "Translate", "click-drag midpoint marker", ...
                 "AdjustEndpoint", "click-drag endpoint marker", ...
                 "ExtendEndpointFixedAngle", "shift+extendclick endpoint marker and drag", ...
@@ -189,7 +197,17 @@ classdef Line < matlabx.ui.axes.AxesTool
     methods
         function onDown(obj, E)
         %ONDOWN Start drawing a line from a background click.
-            if E.MouseChord ~= "click" || obj.isLineOverlayTarget(E.Target)
+            if obj.isLineOverlayTarget(E.Target)
+                return
+            end
+
+            if E.MouseChord == "shift+doubleclick"
+                obj.clearLineSelection(Emit=true);
+                E.stop();
+                return
+            end
+
+            if E.MouseChord ~= "click"
                 return
             end
 
@@ -198,27 +216,34 @@ classdef Line < matlabx.ui.axes.AxesTool
                 return
             end
 
-            id = matlabx.utils.text.uniqueID();
-            obj.addLine(id, [XY; XY]);
-            obj.Host.Overlays.setActive(id);
+            obj.DrawingLineID = "";
+            obj.DragStartFigurePoint = E.CurrentPointFigure;
+            obj.DragStartCursor = XY;
             obj.setMode('DrawingLine', true);
-
-            if ~isempty(obj.LineCreatedFcn)
-                obj.LineCreatedFcn(obj, struct('ID', id, 'Endpoints', [XY; XY]));
-            end
-
-            obj.emitActiveChanged(id);
             E.stop();
         end
 
-        function onMove(obj, ~)
+        function onMove(obj, E)
         %ONMOVE Update drawing or drag preview while the mouse is down.
             if obj.Mode.DrawingLine
+                if strlength(obj.DrawingLineID) == 0
+                    if ~obj.hasExceededDragThreshold(E)
+                        return
+                    end
+
+                    obj.startDrawingLineOverlay();
+                    return
+                end
+
                 obj.previewDrawLine();
                 return
             end
 
             if obj.Mode.PrimedForDrag
+                if ~obj.hasExceededDragThreshold(E)
+                    return
+                end
+
                 obj.startDraggingLine();
                 return
             end
@@ -231,15 +256,23 @@ classdef Line < matlabx.ui.axes.AxesTool
         function onUp(obj, ~)
         %ONUP Commit line drawing or drag state.
             if obj.Mode.DrawingLine
-                obj.previewDrawLine();
+                id = obj.DrawingLineID;
+                if strlength(id) > 0
+                    obj.previewDrawLine();
+                    obj.emitMoveCommitted(id);
+                end
                 obj.setMode('DrawingLine', false);
-                obj.emitMoveCommitted(obj.activeLineId());
+                obj.setDrawingLineMarkersVisible("off");
+                obj.DrawingLineID = "";
+                obj.clearDragStart();
+                obj.DragStartCursor = [NaN NaN];
                 return
             end
 
             if obj.Mode.PrimedForDrag
                 obj.setMode('PrimedForDrag', false);
                 obj.PendingDragPart = "";
+                obj.clearDragStart();
                 return
             end
 
@@ -440,32 +473,36 @@ classdef Line < matlabx.ui.axes.AxesTool
             end
 
             switch E.MouseChord
-                case "meta+click"
-                    obj.toggleSelection(id, Emit=true);
-
                 case "click"
                     obj.setActive(id);
                     if obj.Enabled && any(part == ["midpoint", "endpoint1", "endpoint2"])
-                        obj.primeDrag(part);
+                        obj.primeDrag(part, E);
                     end
 
                 case "shift+extendclick"
-                    obj.setActive(id);
                     if obj.Enabled && any(part == ["endpoint1", "endpoint2"])
-                        obj.primeDrag("extend" + erase(part,"endpoint") + "fixed");
+                        obj.setActive(id);
+                        obj.primeDrag("extend" + erase(part,"endpoint") + "fixed", E);
+                    else
+                        obj.toggleSelection(id, Emit=true);
                     end
 
                 case "alt+click"
-                    obj.setActive(id);
-                    if obj.Enabled
-                        obj.primeDrag("extendBoth");
+                    if obj.Enabled && any(part == ["midpoint", "endpoint1", "endpoint2"])
+                        obj.setActive(id);
+                        obj.primeDrag("extendBoth", E);
+                    else
+                        obj.deactivateActive();
                     end
 
                 case "shift+alt+extendclick"
                     obj.setActive(id);
                     if obj.Enabled
-                        obj.primeDrag("extendBothFixed");
+                        obj.primeDrag("extendBothFixed", E);
                     end
+
+                case "control+contextclick"
+                    obj.deleteLineById(id);
             end
         end
 
@@ -478,6 +515,17 @@ classdef Line < matlabx.ui.axes.AxesTool
 
             obj.Host.Overlays.setActive(id);
             obj.emitActiveChanged(id);
+        end
+
+        function deactivateActive(obj)
+        %DEACTIVATEACTIVE Clear active line state and emit empty activation.
+            if strlength(obj.activeLineId()) == 0
+                return
+            end
+
+            obj.clearDragModes();
+            obj.Host.Overlays.clearActive();
+            obj.emitActiveChanged("");
         end
 
         function toggleSelection(obj, id, opts)
@@ -500,7 +548,7 @@ classdef Line < matlabx.ui.axes.AxesTool
             end
         end
 
-        function primeDrag(obj, part)
+        function primeDrag(obj, part, E)
         %PRIMEDRAG Store drag intent until the cursor actually moves.
             XY = obj.Host.cursorPosition;
             idx = obj.activeLineIdx();
@@ -509,6 +557,7 @@ classdef Line < matlabx.ui.axes.AxesTool
             end
 
             obj.PendingDragPart = string(part);
+            obj.DragStartFigurePoint = E.CurrentPointFigure;
             obj.DragStartCursor = XY;
             obj.DragStartEndpoints = obj.LineROI(idx).Endpoints;
             obj.DragStartUnitVector = obj.lineUnitVector(obj.DragStartEndpoints);
@@ -557,21 +606,79 @@ classdef Line < matlabx.ui.axes.AxesTool
             obj.setModeIfPresent('ExtendBoth', false);
             obj.setModeIfPresent('ExtendBothFixedAngle', false);
             obj.PendingDragPart = "";
+            obj.clearDragStart();
             obj.DragStartCursor = [NaN NaN];
             obj.DragStartEndpoints = [NaN NaN; NaN NaN];
             obj.DragStartUnitVector = [NaN NaN];
         end
 
+        function tf = hasExceededDragThreshold(obj, E)
+        %HASEXCEEDEDDRAGTHRESHOLD Return true after enough screen-pixel motion.
+            d = obj.dragStartDistancePx(E);
+            tf = isfinite(d) && d >= obj.DragStartThresholdPx;
+        end
+
+        function d = dragStartDistancePx(obj, E)
+        %DRAGSTARTDISTANCEPX Measure motion from mouse-down in figure pixels.
+            if any(isnan(obj.DragStartFigurePoint)) || any(isnan(E.CurrentPointFigure))
+                d = Inf;
+                return
+            end
+
+            delta = E.CurrentPointFigure - obj.DragStartFigurePoint;
+            d = hypot(delta(1), delta(2));
+        end
+
+        function clearDragStart(obj)
+        %CLEARDRAGSTART Clear stored figure-pixel drag origin.
+            obj.DragStartFigurePoint = [NaN NaN];
+        end
+
         function previewDrawLine(obj)
         %PREVIEWDRAWLINE Update second endpoint while drawing a new line.
-            idx = obj.activeLineIdx();
+            if strlength(obj.DrawingLineID) == 0
+                return
+            end
+
+            idx = obj.idxOfId(obj.DrawingLineID);
             XY = obj.Host.cursorPosition;
             if isempty(XY) || ~obj.isValidLineIdx(idx)
                 return
             end
 
-            obj.LineROI(idx).Endpoint2 = XY;
+            obj.LineROI(idx).Endpoint2 = obj.clampPointToImage(XY);
             obj.emitPreviewMoved(obj.LineIds(idx));
+        end
+
+        function startDrawingLineOverlay(obj)
+        %STARTDRAWINGLINEOVERLAY Create overlay after draw threshold.
+            XY = obj.DragStartCursor;
+            if isempty(XY) || any(isnan(XY))
+                return
+            end
+
+            id = matlabx.utils.text.uniqueID();
+            obj.addLine(id, [XY; XY]);
+            obj.DrawingLineID = id;
+            obj.setDrawingLineMarkersVisible("on");
+
+            if ~isempty(obj.LineCreatedFcn)
+                obj.LineCreatedFcn(obj, struct('ID', id, 'Endpoints', [XY; XY]));
+            end
+
+            if obj.ActivateOnCreate
+                obj.emitActiveChanged(id);
+            end
+
+            obj.previewDrawLine();
+        end
+
+        function setDrawingLineMarkersVisible(obj, value)
+        %SETDRAWINGLINEMARKERSVISIBLE Temporarily show handles while drawing.
+            idx = obj.idxOfId(obj.DrawingLineID);
+            if obj.isValidLineIdx(idx)
+                obj.LineROI(idx).AlwaysShowMarkers = value;
+            end
         end
 
         function dragActiveLine(obj)
@@ -585,11 +692,12 @@ classdef Line < matlabx.ui.axes.AxesTool
             endpoints = obj.DragStartEndpoints;
             if obj.Mode.DragLine
                 delta = XY - obj.DragStartCursor;
+                delta = obj.clampLineTranslationDelta(obj.DragStartEndpoints, delta);
                 endpoints = endpoints + delta;
             elseif obj.Mode.DragEndpoint1
-                endpoints(1,:) = XY;
+                endpoints(1,:) = obj.clampPointToImage(XY);
             elseif obj.Mode.DragEndpoint2
-                endpoints(2,:) = XY;
+                endpoints(2,:) = obj.clampPointToImage(XY);
             elseif obj.Mode.ExtendEndpoint1FixedAngle
                 endpoints = obj.extendOneEndpointFixedAngle(1, XY);
             elseif obj.Mode.ExtendEndpoint2FixedAngle
@@ -600,6 +708,7 @@ classdef Line < matlabx.ui.axes.AxesTool
                 endpoints = obj.extendBothFromMidpoint(XY, PreserveRotation=true);
             end
 
+            endpoints = obj.clampEndpointsToImage(endpoints);
             obj.LineROI(idx).Endpoints = endpoints;
             obj.emitPreviewMoved(obj.LineIds(idx));
         end
@@ -691,6 +800,7 @@ classdef Line < matlabx.ui.axes.AxesTool
                 opts.HoverMarkerSize = []
             end
 
+            endpoints = obj.clampEndpointsToImage(endpoints);
             next = obj.nLines + 1;
 
             nv = { ...
@@ -700,7 +810,8 @@ classdef Line < matlabx.ui.axes.AxesTool
                 "LineAlpha", obj.valueOrDefault(opts.LineAlpha, obj.LineAlpha), ...
                 "LineWidth", obj.valueOrDefault(opts.LineWidth, obj.LineWidth), ...
                 "MarkerSize", obj.valueOrDefault(opts.MarkerSize, obj.MarkerSize), ...
-                "HoverMarkerSize", obj.valueOrDefault(opts.HoverMarkerSize, obj.HoverMarkerSize)};
+                "HoverMarkerSize", obj.valueOrDefault(opts.HoverMarkerSize, obj.HoverMarkerSize), ...
+                "ActivateOnCreate", obj.ActivateOnCreate};
 
             obj.LineROI(next) = obj.Host.Overlays.add("Line", nv{:});
             obj.LineIds(end+1) = string(id);
@@ -724,6 +835,7 @@ classdef Line < matlabx.ui.axes.AxesTool
 
             obj.LineROI = matlabx.ui.axes.overlays.Line.empty();
             obj.LineIds = string.empty(1,0);
+            obj.DrawingLineID = "";
             obj.clearDragModes();
             obj.stopHover();
         end
@@ -863,6 +975,7 @@ classdef Line < matlabx.ui.axes.AxesTool
             direction = obj.endpointDirection(endpointIdx);
             distance = max(dot(xy - origin, direction), 0.5);
             endpoints(endpointIdx,:) = origin + direction .* distance;
+            endpoints = obj.clampEndpointsToImage(endpoints);
         end
 
         function endpoints = extendBothFromMidpoint(obj, xy, opts)
@@ -890,6 +1003,7 @@ classdef Line < matlabx.ui.axes.AxesTool
 
             halfLength = max(halfLength, 0.5);
             endpoints = [midpoint - direction .* halfLength; midpoint + direction .* halfLength];
+            endpoints = obj.clampEndpointsToImage(endpoints);
         end
 
         function direction = endpointDirection(obj, endpointIdx)
@@ -911,6 +1025,34 @@ classdef Line < matlabx.ui.axes.AxesTool
             else
                 direction = d ./ L;
             end
+        end
+
+        function xy = clampPointToImage(obj, xy)
+        %CLAMPPOINTTOIMAGE Keep one image-space point inside image bounds.
+            xy = double(xy);
+            xy(1) = min(max(xy(1), 1), obj.Host.ImageWidth);
+            xy(2) = min(max(xy(2), 1), obj.Host.ImageHeight);
+        end
+
+        function endpoints = clampEndpointsToImage(obj, endpoints)
+        %CLAMPENDPOINTSTOIMAGE Clamp both line endpoints to image bounds.
+            endpoints = double(endpoints);
+            endpoints(:,1) = min(max(endpoints(:,1), 1), obj.Host.ImageWidth);
+            endpoints(:,2) = min(max(endpoints(:,2), 1), obj.Host.ImageHeight);
+        end
+
+        function delta = clampLineTranslationDelta(obj, endpoints, delta)
+        %CLAMPLINETRANSLATIONDELTA Limit translation without changing shape.
+            endpoints = double(endpoints);
+            delta = double(delta);
+
+            minX = min(endpoints(:,1));
+            maxX = max(endpoints(:,1));
+            minY = min(endpoints(:,2));
+            maxY = max(endpoints(:,2));
+
+            delta(1) = min(max(delta(1), 1 - minX), obj.Host.ImageWidth - maxX);
+            delta(2) = min(max(delta(2), 1 - minY), obj.Host.ImageHeight - maxY);
         end
     end
 

@@ -25,6 +25,7 @@ classdef ImageAxesOverlay < handle & matlab.mixin.SetGetExactNames
         T = "all"
 
         Visible (1,1) matlab.lang.OnOffSwitchState = "on"
+        ActivateOnCreate (1,1) logical = false
         Hovered (1,1) logical = false
         Selected (1,1) logical = false
         Active (1,1) logical = false
@@ -52,6 +53,7 @@ classdef ImageAxesOverlay < handle & matlab.mixin.SetGetExactNames
                 opts.Z = "all"
                 opts.T = "all"
                 opts.Visible (1,1) matlab.lang.OnOffSwitchState = "on"
+                opts.ActivateOnCreate (1,1) logical = false
             end
 
             obj.Host = host;
@@ -73,6 +75,7 @@ classdef ImageAxesOverlay < handle & matlab.mixin.SetGetExactNames
             obj.Z = obj.normalizeIndexSpec(opts.Z);
             obj.T = obj.normalizeIndexSpec(opts.T);
             obj.Visible = opts.Visible;
+            obj.ActivateOnCreate = opts.ActivateOnCreate;
         end
 
         function delete(obj)
@@ -141,6 +144,14 @@ classdef ImageAxesOverlay < handle & matlab.mixin.SetGetExactNames
         %SETVIEWVISIBLE Set manager-controlled C/Z/T visibility.
             obj.ViewVisible = value;
             obj.updateVisibility();
+        end
+
+        function tf = isInsideRectangle(~, ~)
+        %ISINSIDERECTANGLE True when overlay selection point lies in rectangle.
+        %
+        %   Subclasses override this for rectangle/lasso-style selection.
+        %   RECT is [xmin xmax ymin ymax] in image data coordinates.
+            tf = false;
         end
     end
 

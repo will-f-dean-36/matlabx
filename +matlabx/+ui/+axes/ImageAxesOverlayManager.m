@@ -61,6 +61,10 @@ classdef ImageAxesOverlayManager < handle
             overlay.refresh();
             obj.refreshVisibility();
             notify(obj, 'OverlayAdded');
+
+            if overlay.ActivateOnCreate
+                obj.setActive(id);
+            end
         end
 
         function remove(obj, id)
@@ -356,6 +360,28 @@ classdef ImageAxesOverlayManager < handle
             ids = obj.filterIDsByType(obj.SelectedIDs, opts.Type);
         end
 
+        function ids = idsInsideRectangle(obj, rect, opts)
+        %IDSINSIDERECTANGLE Return overlay IDs whose selection point is inside rect.
+        %
+        %   RECT is [xmin xmax ymin ymax] in image data coordinates. Type can
+        %   be "all", "", a scalar type such as "Point", or a string vector.
+            arguments
+                obj
+                rect (1,4) double
+                opts.Type (1,:) string = ""
+            end
+
+            candidateIDs = obj.idsForTypes(opts.Type);
+            keep = false(size(candidateIDs));
+
+            for i = 1:numel(candidateIDs)
+                overlay = obj.get(candidateIDs(i));
+                keep(i) = isvalid(overlay) && overlay.isInsideRectangle(rect);
+            end
+
+            ids = candidateIDs(keep);
+        end
+
         function refreshVisibility(obj)
         %REFRESHVISIBILITY Sync overlay visibility to current C/Z/T view.
             vals = obj.Registry.values;
@@ -397,15 +423,30 @@ classdef ImageAxesOverlayManager < handle
         %FILTERIDSBYTYPE Keep only IDs whose overlays match typeName.
             ids = obj.normalizeIds(ids);
             typeName = string(typeName);
-            if strlength(typeName) == 0
+            if isempty(typeName) || any(typeName == "") || any(strcmpi(typeName, "all"))
                 return
             end
 
             keep = false(size(ids));
             for i = 1:numel(ids)
-                keep(i) = obj.idMatchesType(ids(i), typeName);
+                keep(i) = any(arrayfun(@(t) obj.idMatchesType(ids(i), t), typeName));
             end
             ids = ids(keep);
+        end
+
+        function ids = idsForTypes(obj, typeNames)
+        %IDSFORTYPES Return registered IDs filtered by scalar/vector type names.
+            typeNames = string(typeNames);
+            if isempty(typeNames) || any(typeNames == "") || any(strcmpi(typeNames, "all"))
+                ids = obj.ids();
+                return
+            end
+
+            ids = string.empty(1,0);
+            for i = 1:numel(typeNames)
+                ids = [ids, obj.ids(Type=typeNames(i))]; %#ok<AGROW>
+            end
+            ids = unique(ids, "stable");
         end
 
         function tf = idMatchesType(obj, id, typeName)

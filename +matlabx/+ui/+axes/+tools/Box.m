@@ -36,11 +36,14 @@ classdef Box < matlabx.ui.axes.AxesTool
     properties (Access=private)
         % track box IDs in parallel with overlay handles
         BoxIds (1,:) string = string.empty(1,0)
+        DragStartFigurePoint (1,2) double = [NaN NaN]
     end
 
     % Box Settings/Info
     properties
         BoxSize (1,1) double = 50
+        ActivateOnCreate (1,1) logical = true
+        DragStartThresholdPx (1,1) double {mustBeNonnegative} = 3
         BoxCenters (:,2) double = []
     end
 
@@ -90,13 +93,6 @@ classdef Box < matlabx.ui.axes.AxesTool
                 "Owner", obj);
 
             menu.addItem( ...
-                "Box.Help", ...
-                "Help...", ...
-                @(~,~) obj.Host.openToolHelpWindow(obj), ...
-                "Parent", "Box", ...
-                "Owner", obj);
-
-            menu.addItem( ...
                 "Box.ClearSelection", ...
                 "Clear Selection", ...
                 @(~,~) obj.clearBoxSelection(Emit=true), ...
@@ -133,6 +129,14 @@ classdef Box < matlabx.ui.axes.AxesTool
                 "Owner", obj, ...
                 "Enabled", matlab.lang.OnOffSwitchState(obj.hasAnyBoxes()), ...
                 "RefreshFcn", @(h) obj.refreshRequiresBoxes(h));
+
+            menu.addItem( ...
+                "Box.Help", ...
+                "Help...", ...
+                @(~,~) obj.Host.openToolHelpWindow(obj), ...
+                "Parent", "Box", ...
+                "Owner", obj, ...
+                "Separator", "on");
         end
 
     end
@@ -198,7 +202,9 @@ classdef Box < matlabx.ui.axes.AxesTool
                         obj.BoxCreatedFcn(H, struct('ID', ID, 'CenterPx', [cx cy], 'BoxSize', s));
                     end
         
-                    obj.setActive(ID);
+                    if obj.ActivateOnCreate
+                        obj.emitActiveChanged(ID);
+                    end
 
                 case "shift+doubleclick"
                     obj.clearBoxSelection("Emit",true);
@@ -232,7 +238,11 @@ classdef Box < matlabx.ui.axes.AxesTool
 
             % if we are primed for drag (button down on box with no cursor movement)
             if obj.Mode.PrimedForDrag
-                % start dragging
+                if ~obj.hasExceededDragThreshold(E)
+                    return
+                end
+
+                % start dragging once the cursor has moved far enough on screen
                 obj.startDraggingBox(obj.activeBoxIdx());
                 return
             end
@@ -262,6 +272,7 @@ classdef Box < matlabx.ui.axes.AxesTool
             if obj.Mode.PrimedForDrag
                 % no longer primed for drag
                 obj.setMode('PrimedForDrag',false);
+                obj.clearDragStart();
                 return
             end
 
@@ -440,13 +451,14 @@ classdef Box < matlabx.ui.axes.AxesTool
 
                 case "click"
                     obj.setActive(id);
-                    obj.primeDrag();
+                    obj.primeDrag(E);
             end
         end
 
-        function primeDrag(obj)
+        function primeDrag(obj, E)
         %PRIMEDRAG Mark active box as ready to drag on the next move event.
             if obj.Enabled && strlength(obj.activeBoxId()) > 0
+                obj.DragStartFigurePoint = E.CurrentPointFigure;
                 obj.setMode('PrimedForDrag', true);
             end
         end
@@ -470,6 +482,7 @@ classdef Box < matlabx.ui.axes.AxesTool
 
             obj.setMode('PrimedForDrag', false);
             obj.setMode('DragBox', false);
+            obj.clearDragStart();
             obj.Host.Overlays.clearActive();
             obj.emitActiveChanged("");
         end
@@ -555,6 +568,7 @@ classdef Box < matlabx.ui.axes.AxesTool
         %STARTDRAGGINGBOX Transition from primed to dragging state.
             % we are no longer PrimedForDrag
             obj.setMode('PrimedForDrag',false);
+            obj.clearDragStart();
             if ~obj.isValidBoxIdx(idx)
                 return
             end
@@ -580,7 +594,30 @@ classdef Box < matlabx.ui.axes.AxesTool
                 end
             end
             obj.setMode('DragBox',false);
+            obj.clearDragStart();
             obj.Host.updateFromTool();
+        end
+
+        function tf = hasExceededDragThreshold(obj, E)
+        %HASEXCEEDEDDRAGTHRESHOLD Return true after enough screen-pixel motion.
+            d = obj.dragStartDistancePx(E);
+            tf = isfinite(d) && d >= obj.DragStartThresholdPx;
+        end
+
+        function d = dragStartDistancePx(obj, E)
+        %DRAGSTARTDISTANCEPX Measure motion from mouse-down in figure pixels.
+            if any(isnan(obj.DragStartFigurePoint)) || any(isnan(E.CurrentPointFigure))
+                d = Inf;
+                return
+            end
+
+            delta = E.CurrentPointFigure - obj.DragStartFigurePoint;
+            d = hypot(delta(1), delta(2));
+        end
+
+        function clearDragStart(obj)
+        %CLEARDRAGSTART Clear stored figure-pixel drag origin.
+            obj.DragStartFigurePoint = [NaN NaN];
         end
 
         function startHoverById(obj, id)
@@ -655,7 +692,8 @@ classdef Box < matlabx.ui.axes.AxesTool
                 "ID", string(id), ...
                 "Label", opts.Label, ...
                 "EdgeColor", opts.EdgeColor, ...
-                "FaceColor", opts.FaceColor);
+                "FaceColor", opts.FaceColor, ...
+                "ActivateOnCreate", obj.ActivateOnCreate);
 
 
             obj.BoxCenters(end+1,:) = [cx cy];
@@ -678,6 +716,7 @@ classdef Box < matlabx.ui.axes.AxesTool
             obj.BoxROI = matlabx.ui.axes.overlays.Box.empty();
             obj.BoxCenters = zeros(0,2);
             obj.BoxIds = string.empty(1,0);
+            obj.clearDragStart();
         end
 
         function setSelectedBoxIDs(obj, ids, opts)

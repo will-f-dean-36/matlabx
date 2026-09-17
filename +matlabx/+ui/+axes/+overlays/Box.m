@@ -51,6 +51,7 @@ classdef Box < matlabx.ui.axes.ImageAxesOverlay
                 opts.Z = "all"
                 opts.T = "all"
                 opts.UserData = []
+                opts.ActivateOnCreate (1,1) logical = false
             end
 
             obj@matlabx.ui.axes.ImageAxesOverlay(host, ...
@@ -60,7 +61,8 @@ classdef Box < matlabx.ui.axes.ImageAxesOverlay
                 "C", opts.C, ...
                 "Z", opts.Z, ...
                 "T", opts.T, ...
-                "UserData", opts.UserData);
+                "UserData", opts.UserData, ...
+                "ActivateOnCreate", opts.ActivateOnCreate);
 
             ax = obj.TargetAxes;
             obj.BoxPatch = patch(ax, ...
@@ -177,6 +179,13 @@ classdef Box < matlabx.ui.axes.ImageAxesOverlay
                 obj.BoxPatch.LineWidth = obj.LineWidth;
                 obj.BoxPatch.FaceAlpha = obj.FaceAlpha;
             end
+        end
+
+        function tf = isInsideRectangle(obj, rect)
+        %ISINSIDERECTANGLE True when box center lies inside rect.
+            xy = obj.Center;
+            tf = xy(1) >= rect(1) && xy(1) <= rect(2) ...
+                && xy(2) >= rect(3) && xy(2) <= rect(4);
         end
     end
 

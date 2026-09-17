@@ -13,6 +13,16 @@ classdef FigureEventHub < handle
 %   This lets components and tools share one figure safely instead of each
 %   overwriting WindowButtonDownFcn, KeyPressFcn, and similar callbacks.
 %
+% Modifier and menubar focus note
+%
+%   On some MATLAB/platform combinations, pressing and releasing alt/option
+%   can focus the figure menubar. Once the menubar owns keyboard focus,
+%   later modifier-release events may not reach the hub; for example,
+%   alt+shift followed by releasing alt first can leave the hub believing
+%   shift is still down. To preserve alt as a usable tool modifier, the hub
+%   temporarily disables top-level figure menus while alt/option is held and
+%   restores their exact previous Enable states on alt/option release.
+%
 % Notes/Definitions
 %
 % Registrant: object registered with the hub (e.g., axes.ImageAxes)
@@ -64,6 +74,8 @@ classdef FigureEventHub < handle
         LastKeyTimestamp datetime = NaT
         ShortcutModifierStateMaxAge duration = seconds(1)
         ShortcutModifierStateTimestamp datetime = NaT
+        AltDisabledMenus = matlab.ui.container.Menu.empty(1,0)
+        AltDisabledMenuEnableState (1,:) string = string.empty(1,0)
 
         % Extra listeners keyed by event kind.
         ListenerRegistry struct = struct( ...
@@ -420,6 +432,10 @@ classdef FigureEventHub < handle
                     % from the pressed key. Include modifier keys themselves
                     % so later mouse events can carry the current chord.
                     obj.ModifierState = matlabx.ui.interaction.FigureEventHub.canonicalModifiers_([modifiers, key]);
+                    if obj.isAltKey_(key)
+                        obj.disableFigureMenusForAlt_();
+                    end
+
                     if obj.isShortcutLikeKeyEvent_(key, modifiers)
                         obj.ShortcutModifierStateTimestamp = datetime("now");
                     elseif obj.isModifierKey_(key)
@@ -429,6 +445,10 @@ classdef FigureEventHub < handle
                     obj.ModifierState = modifiers;
                     if isempty(obj.ModifierState)
                         obj.ShortcutModifierStateTimestamp = NaT;
+                    end
+
+                    if obj.isAltKey_(key)
+                        obj.restoreFigureMenusAfterAlt_();
                     end
             end
 
@@ -473,6 +493,75 @@ classdef FigureEventHub < handle
             key = lower(string(key));
             modifierKeys = ["shift", "control", "alt", "meta", "command", "option", "ctrl"];
             tf = any(key == modifierKeys);
+        end
+
+        function tf = isAltKey_(~, key)
+        %ISALTKEY_ True when a key name maps to the alt/option modifier.
+            key = lower(string(key));
+            tf = any(key == ["alt", "option"]);
+        end
+
+        function disableFigureMenusForAlt_(obj)
+        %DISABLEFIGUREMENUSFORALT_ Disable top-level menus while alt is down.
+        %
+        %   This prevents MATLAB/platform menubar keyboard focus from stealing
+        %   subsequent modifier-release events. The original Enable states are
+        %   cached so disabled menus remain disabled after restoration.
+            try
+                if ~isempty(obj.AltDisabledMenus)
+                    return
+                end
+
+                menus = obj.Fig.Children(arrayfun(@(h) isa(h, "matlab.ui.container.Menu"), obj.Fig.Children));
+                if isempty(menus)
+                    return
+                end
+
+                obj.AltDisabledMenus = menus;
+                obj.AltDisabledMenuEnableState = string({menus.Enable});
+
+                wasEnabled = obj.AltDisabledMenuEnableState == "on";
+
+                % Only toggle menus that were enabled. Restoring all previous
+                % states later preserves app-specific disabled menu items.
+                set(menus(wasEnabled), "Enable", "off");
+                drawnow limitrate
+            catch
+                % Menu focus prevention is best-effort only; event routing
+                % should never fail because a figure has unusual menu objects.
+                obj.AltDisabledMenus = matlab.ui.container.Menu.empty(1,0);
+                obj.AltDisabledMenuEnableState = string.empty(1,0);
+            end
+        end
+
+        function restoreFigureMenusAfterAlt_(obj)
+        %RESTOREFIGUREMENUSAFTERALT_ Restore menu enabled states after alt.
+        %
+        %   This pairs with disableFigureMenusForAlt_. It is intentionally
+        %   best-effort because figures may delete or rebuild menus while a key
+        %   is held; stale handles are skipped and bookkeeping is always reset.
+            try
+                menus = obj.AltDisabledMenus;
+                enableState = obj.AltDisabledMenuEnableState;
+
+                if isempty(menus)
+                    return
+                end
+
+                keep = isvalid(menus);
+                menus = menus(keep);
+                enableState = enableState(keep);
+
+                for i = 1:numel(menus)
+                    menus(i).Enable = char(enableState(i));
+                end
+            catch
+                % Restoration is best-effort; reset bookkeeping either way so
+                % a later alt press can try again with the current menu state.
+            end
+
+            obj.AltDisabledMenus = matlab.ui.container.Menu.empty(1,0);
+            obj.AltDisabledMenuEnableState = string.empty(1,0);
         end
 
         function call(~, h, E)

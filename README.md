@@ -287,13 +287,13 @@ matlabx.keyboard.hotkey("z", "Modifiers", ["shift", "meta"])
 - `Image > Metadata...`
 - `Image > Color Mode`
 - `Image > Component Color`
-- `Overlays > Viewport Box`
+- `Display > Viewport Box`
 - tool menus such as `Zoom > Level` and `Box > Select All`
 
 Choose which built-ins are available with `ContextMenuItems`:
 
 ```matlab
-ax.ContextMenuItems = ["Status", "ResetView", "Image", "Overlays"];
+ax.ContextMenuItems = ["Image", "Display", "ResetView", "Status"];
 matlabx.ui.axes.ImageAxes.getContextMenuItemNames()
 ```
 
@@ -302,6 +302,9 @@ You can also expose individual built-ins without their parent group:
 ```matlab
 ax.ContextMenuItems = ["ResetView", "ComponentColor", "ViewportBox"];
 ```
+
+The order of `ContextMenuItems` is honored for top-level built-ins. Tool menus
+are contributed below the built-ins and separated from them automatically.
 
 ## ImageAxes Overlays
 

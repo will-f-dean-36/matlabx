@@ -10,7 +10,7 @@ classdef ImageAxesContextMenuManager < handle
 %       * Status command for a compact operational report.
 %       * Reset View command.
 %       * Image submenu grouping image/data/display commands.
-%       * Overlays submenu grouping visual aids drawn over/around the image.
+%       * Display submenu grouping visible image aids such as viewport boxes.
 %       * Image Properties and Metadata commands.
 %       * Color Mode and Component Color submenus.
 %       * addItem/removeItem helpers for future simple contributions.
@@ -27,7 +27,8 @@ classdef ImageAxesContextMenuManager < handle
     properties (Access=private)
         BuiltinUI struct = struct()
         Items struct = struct()
-        BuiltinItems_ (1,:) string = ["Status","ResetView","Image","Overlays"]
+        ItemOrder_ (1,:) string = string.empty(1,0)
+        BuiltinItems_ (1,:) string = ["Image","Display","ResetView","Status"]
     end
 
     methods
@@ -46,43 +47,48 @@ classdef ImageAxesContextMenuManager < handle
 
             S = struct();
 
-            if obj.hasBuiltin("Status")
-                S = obj.buildStatusMenu(S, obj.Menu);
-            end
-
-            if obj.hasBuiltin("ResetView")
-                S = obj.buildResetViewMenu(S, obj.Menu);
-            end
-
-            if obj.hasBuiltin("Image")
-                S = obj.buildImageMenu(S);
-            end
-
-            if obj.hasBuiltin("Overlays")
-                S = obj.buildOverlaysMenu(S);
-            end
-
-            if obj.hasBuiltin("ImageProperties") && ~obj.hasBuiltin("Image")
-                S = obj.buildImagePropertiesMenu(S, obj.Menu);
-            end
-
-            if obj.hasBuiltin("Metadata") && ~obj.hasBuiltin("Image")
-                S = obj.buildMetadataMenu(S, obj.Menu);
-            end
-
-            if obj.hasBuiltin("ComponentColor") && ~obj.hasBuiltin("Image")
-                S = obj.buildComponentColorMenu(S, obj.Menu);
-            end
-
-            if obj.hasBuiltin("ColorMode") && ~obj.hasBuiltin("Image")
-                S = obj.buildColorModeMenu(S, obj.Menu);
-            end
-
-            if obj.hasBuiltin("ViewportBox") && ~obj.hasBuiltin("Overlays")
-                S = obj.buildViewportBoxMenu(S, obj.Menu);
+            % Build in the user-supplied order. Grouped parents own their
+            % children, so child tokens are only built as top-level items when
+            % their parent group is absent.
+            for i = 1:numel(obj.BuiltinItems_)
+                switch obj.BuiltinItems_(i)
+                    case "Image"
+                        S = obj.buildImageMenu(S);
+                    case "Display"
+                        S = obj.buildDisplayMenu(S);
+                    case "ResetView"
+                        S = obj.buildResetViewMenu(S, obj.Menu);
+                    case "Status"
+                        S = obj.buildStatusMenu(S, obj.Menu);
+                    case "ImageProperties"
+                        if ~obj.hasBuiltin("Image")
+                            S = obj.buildImagePropertiesMenu(S, obj.Menu);
+                        end
+                    case "Metadata"
+                        if ~obj.hasBuiltin("Image")
+                            S = obj.buildMetadataMenu(S, obj.Menu);
+                        end
+                    case "ComponentColor"
+                        if ~obj.hasBuiltin("Image")
+                            S = obj.buildComponentColorMenu(S, obj.Menu);
+                        end
+                    case "ColorMode"
+                        if ~obj.hasBuiltin("Image")
+                            S = obj.buildColorModeMenu(S, obj.Menu);
+                        end
+                    case "Colormap"
+                        if ~obj.hasBuiltin("Image")
+                            S = obj.buildColormapMenu(S, obj.Menu);
+                        end
+                    case "ViewportBox"
+                        if ~obj.hasBuiltin("Display")
+                            S = obj.buildViewportBoxMenu(S, obj.Menu);
+                        end
+                end
             end
 
             obj.BuiltinUI = S;
+            obj.orderRootMenus();
             obj.refresh();
         end
 
@@ -94,6 +100,7 @@ classdef ImageAxesContextMenuManager < handle
 
             obj.BuiltinUI = struct();
             obj.Items = struct();
+            obj.ItemOrder_ = string.empty(1,0);
         end
 
         function refresh(obj)
@@ -121,6 +128,11 @@ classdef ImageAxesContextMenuManager < handle
                             matlab.lang.OnOffSwitchState(canHaveColor && currentName == colorNames(i));
                     end
                 end
+            end
+
+            if isfield(obj.BuiltinUI, "Colormap")
+                obj.BuiltinUI.Colormap.Enable = ...
+                    matlab.lang.OnOffSwitchState(obj.Host.currentComponentCanHaveColor());
             end
 
             if isfield(obj.BuiltinUI, "ViewportBox")
@@ -171,7 +183,10 @@ classdef ImageAxesContextMenuManager < handle
                 "Enable", opts.Enabled, ...
                 "Visible", opts.Visible);
 
-            obj.Items.(fieldName) = obj.makeItemEntry(h, opts.Owner, opts.RefreshFcn);
+            obj.Items.(fieldName) = obj.makeItemEntry( ...
+                h, opts.Owner, opts.RefreshFcn, opts.Parent);
+            obj.ItemOrder_(end+1) = string(fieldName);
+            obj.orderRootMenus();
         end
 
         function h = addItem(obj, id, label, callback, opts)
@@ -210,7 +225,10 @@ classdef ImageAxesContextMenuManager < handle
                 "Visible", opts.Visible, ...
                 "UserData", opts.UserData);
 
-            obj.Items.(fieldName) = obj.makeItemEntry(h, opts.Owner, opts.RefreshFcn);
+            obj.Items.(fieldName) = obj.makeItemEntry( ...
+                h, opts.Owner, opts.RefreshFcn, opts.Parent);
+            obj.ItemOrder_(end+1) = string(fieldName);
+            obj.orderRootMenus();
         end
 
         function removeItem(obj, id)
@@ -226,6 +244,7 @@ classdef ImageAxesContextMenuManager < handle
             end
 
             obj.Items = rmfield(obj.Items, fieldName);
+            obj.ItemOrder_(obj.ItemOrder_ == string(fieldName)) = [];
         end
 
         function removeOwner(obj, owner)
@@ -280,6 +299,68 @@ classdef ImageAxesContextMenuManager < handle
             tf = any(obj.BuiltinItems_ == name);
         end
 
+        function orderRootMenus(obj)
+        %ORDERROOTMENUS Keep built-ins first and contributed root menus after.
+            pos = 1;
+
+            % Built-ins follow the exact order requested by ContextMenuItems.
+            for i = 1:numel(obj.BuiltinItems_)
+                h = obj.rootBuiltinHandle(obj.BuiltinItems_(i));
+                if isempty(h) || ~isvalid(h)
+                    continue
+                end
+
+                obj.setMenuPosition(h, pos);
+                pos = pos + 1;
+            end
+
+            hasBuiltinRoots = pos > 1;
+            firstContribution = true;
+
+            % Tool/app root contributions stay below all built-ins, in the
+            % order they were contributed. Child menu items keep local order.
+            for i = 1:numel(obj.ItemOrder_)
+                fieldName = char(obj.ItemOrder_(i));
+                if ~isfield(obj.Items, fieldName)
+                    continue
+                end
+
+                entry = obj.Items.(fieldName);
+                if strlength(string(entry.ParentId)) > 0 || ~isvalid(entry.Handle)
+                    continue
+                end
+
+                obj.setMenuPosition(entry.Handle, pos);
+                entry.Handle.Separator = matlab.lang.OnOffSwitchState( ...
+                    hasBuiltinRoots && firstContribution);
+
+                pos = pos + 1;
+                firstContribution = false;
+            end
+        end
+
+        function h = rootBuiltinHandle(obj, item)
+        %ROOTBUILTINHANDLE Return a top-level built-in menu handle, if present.
+            h = [];
+            fieldName = char(item);
+            if isfield(obj.BuiltinUI, fieldName)
+                candidate = obj.BuiltinUI.(fieldName);
+                if isa(candidate, "matlab.ui.container.Menu")
+                    h = candidate;
+                end
+            end
+        end
+
+        function setMenuPosition(~, h, pos)
+        %SETMENUPOSITION Best-effort root menu ordering across MATLAB releases.
+            try
+                h.Position = pos;
+            catch
+                % Older/changed menu implementations may not expose Position.
+                % Creation order still works as a fallback for fresh menus.
+            end
+        end
+
         function S = buildResetViewMenu(obj, S, parent)
         %BUILDRESETVIEWMENU Add a top-level/default view reset command.
             S.ResetView = uimenu(parent, ...
@@ -297,22 +378,31 @@ classdef ImageAxesContextMenuManager < handle
         function S = buildImageMenu(obj, S)
         %BUILDIMAGEMENU Add grouped image/data/display commands.
             S.Image = uimenu(obj.Menu, "Text", "Image");
-            S = obj.buildImagePropertiesMenu(S, S.Image);
-            S = obj.buildMetadataMenu(S, S.Image);
-            S = obj.buildComponentColorMenu(S, S.Image, "on");
+            S = obj.buildComponentColorMenu(S, S.Image);
             S = obj.buildColorModeMenu(S, S.Image);
+            S = obj.buildColormapMenu(S, S.Image);
+            S = obj.buildImagePropertiesMenu(S, S.Image, "on");
+            S = obj.buildMetadataMenu(S, S.Image);
         end
 
-        function S = buildOverlaysMenu(obj, S)
-        %BUILDOVERLAYSMENU Add grouped image overlay/display-aid commands.
-            S.Overlays = uimenu(obj.Menu, "Text", "Overlays");
-            S = obj.buildViewportBoxMenu(S, S.Overlays);
+        function S = buildDisplayMenu(obj, S)
+        %BUILDDISPLAYMENU Add grouped image display-aid commands.
+            S.Display = uimenu(obj.Menu, "Text", "Display");
+            S = obj.buildViewportBoxMenu(S, S.Display);
         end
 
-        function S = buildImagePropertiesMenu(obj, S, parent)
+        function S = buildImagePropertiesMenu(obj, S, parent, separator)
         %BUILDIMAGEPROPERTIESMENU Add generated ImageData summary command.
+            arguments
+                obj
+                S struct
+                parent
+                separator matlab.lang.OnOffSwitchState = "off"
+            end
+
             S.ImageProperties = uimenu(parent, ...
                 "Text", "Properties...", ...
+                "Separator", separator, ...
                 "MenuSelectedFcn", @(~,~) obj.Host.openImagePropertiesWindow());
         end
 
@@ -334,6 +424,27 @@ classdef ImageAxesContextMenuManager < handle
                 "Text", "luts", ...
                 "MenuSelectedFcn", @(~,~) obj.Host.setComponentColorMode("luts"), ...
                 "Checked", "off");
+        end
+
+        function S = buildColormapMenu(obj, S, parent)
+        %BUILDCOLORMAPMENU Add registry-backed colormap choices.
+            S.Colormap = uimenu(parent, "Text", "Colormap...");
+
+            categories = matlabx.colors.maps.Registry.categories();
+            for i = 1:numel(categories)
+                category = categories(i);
+                categoryField = obj.colormapCategoryFieldName(category);
+                S.(categoryField) = uimenu(S.Colormap, "Text", char(category));
+
+                names = matlabx.colors.maps.Registry.names(category);
+                for j = 1:numel(names)
+                    name = names(j);
+                    mapField = obj.colormapFieldName(category, name);
+                    S.(mapField) = uimenu(S.(categoryField), ...
+                        "Text", char(name), ...
+                        "MenuSelectedFcn", @(~,~) obj.onColormapSelected(name, category));
+                end
+            end
         end
 
         function S = buildViewportBoxMenu(obj, S, parent)
@@ -366,6 +477,12 @@ classdef ImageAxesContextMenuManager < handle
                     "MenuSelectedFcn", @(~,~) obj.Host.setComponentColor(name), ...
                     "Checked", "off");
             end
+        end
+
+        function onColormapSelected(obj, name, category)
+        %ONCOLORMAPSELECTED Apply a registry colormap to the current component.
+            cmap = matlabx.colors.maps.Registry.map(name, category);
+            obj.Host.setComponentColormap(cmap);
         end
 
         function setItemProperty(obj, id, propertyName, value)
@@ -416,7 +533,7 @@ classdef ImageAxesContextMenuManager < handle
         function items = availableBuiltinItems()
         %AVAILABLEBUILTINITEMS Return valid ImageAxes built-in context item names.
             items = ["Status","ResetView","Image","ImageProperties","Metadata", ...
-                "ComponentColor","ColorMode","Overlays","ViewportBox"];
+                "ComponentColor","ColorMode","Colormap","Display","ViewportBox"];
         end
 
         function items = validateBuiltinItems(items)
@@ -440,12 +557,13 @@ classdef ImageAxesContextMenuManager < handle
     end
 
     methods (Static, Access=private)
-        function entry = makeItemEntry(handle, owner, refreshFcn)
+        function entry = makeItemEntry(handle, owner, refreshFcn, parentId)
         %MAKEITEMENTRY Package a contributed item handle and metadata.
             entry = struct( ...
                 "Handle", handle, ...
                 "Owner", owner, ...
-                "RefreshFcn", refreshFcn);
+                "RefreshFcn", refreshFcn, ...
+                "ParentId", string(parentId));
         end
 
         function handles = collectHandles(S)
@@ -488,6 +606,17 @@ classdef ImageAxesContextMenuManager < handle
         function fieldName = componentColorFieldName(name)
         %COMPONENTCOLORFIELDNAME Return the BuiltinUI field for a color item.
             fieldName = matlab.lang.makeValidName("ComponentColor_" + string(name));
+        end
+
+        function fieldName = colormapCategoryFieldName(category)
+        %COLORMAPCATEGORYFIELDNAME Return the BuiltinUI field for a category.
+            fieldName = matlab.lang.makeValidName("Colormap_" + string(category));
+        end
+
+        function fieldName = colormapFieldName(category, name)
+        %COLORMAPFIELDNAME Return the BuiltinUI field for a registry map item.
+            fieldName = matlab.lang.makeValidName( ...
+                "Colormap_" + string(category) + "_" + string(name));
         end
     end
 

@@ -22,9 +22,9 @@ classdef Line < matlabx.ui.axes.ImageAxesOverlay
 
     properties (SetObservable, AbortSet)
         LineColor = [1 1 1]
-        SelectionLineColor = [0 0.75 1]
+        SelectionLineColor = [1 1 0]
         HoverLineColor = [1 1 1]
-        ActiveLineColor = [1 1 0]
+        ActiveLineColor = [1 1 1]
 
         LineAlpha (1,1) double {mustBeGreaterThanOrEqual(LineAlpha,0), mustBeLessThanOrEqual(LineAlpha,1)} = 1
         SelectionLineAlpha (1,1) double {mustBeGreaterThanOrEqual(SelectionLineAlpha,0), mustBeLessThanOrEqual(SelectionLineAlpha,1)} = 1
@@ -32,16 +32,16 @@ classdef Line < matlabx.ui.axes.ImageAxesOverlay
         ActiveLineAlpha (1,1) double {mustBeGreaterThanOrEqual(ActiveLineAlpha,0), mustBeLessThanOrEqual(ActiveLineAlpha,1)} = 1
 
         LineWidth (1,1) double {mustBePositive} = 1
-        SelectionLineWidth (1,1) double {mustBePositive} = 1.5
-        HoverLineWidth (1,1) double {mustBePositive} = 2
-        ActiveLineWidth (1,1) double {mustBePositive} = 2
+        SelectionLineWidth (1,1) double {mustBePositive} = 1
+        HoverLineWidth (1,1) double {mustBePositive} = 1
+        ActiveLineWidth (1,1) double {mustBePositive} = 1
 
         LineStyle (1,:) char = '-'
 
-        MarkerStyle (1,:) char = 'o'
-        MarkerSize (1,1) double {mustBePositive} = 7
-        HoverMarkerSize (1,1) double {mustBePositive} = 9
-        MarkerLineWidth (1,1) double {mustBePositive} = 1
+        MarkerStyle (1,:) char = 's'
+        MarkerSize (1,1) double {mustBePositive} = 4
+        HoverMarkerSize (1,1) double {mustBePositive} = 5
+        MarkerLineWidth (1,1) double {mustBePositive} = 0.5
         MarkerEdgeColor = [0 0 0]
         MarkerFaceColor = [1 1 1]
         HitAreaWidth (1,1) double {mustBePositive} = 10
@@ -76,9 +76,9 @@ classdef Line < matlabx.ui.axes.ImageAxesOverlay
                 opts.LineAlpha (1,1) double {mustBeGreaterThanOrEqual(opts.LineAlpha,0), mustBeLessThanOrEqual(opts.LineAlpha,1)} = 1
                 opts.LineWidth (1,1) double {mustBePositive} = 1
                 opts.LineStyle (1,:) char = '-'
-                opts.MarkerStyle (1,:) char = 'o'
-                opts.MarkerSize (1,1) double {mustBePositive} = 7
-                opts.HoverMarkerSize (1,1) double {mustBePositive} = 9
+                opts.MarkerStyle (1,:) char = 's'
+                opts.MarkerSize (1,1) double {mustBePositive} = 4
+                opts.HoverMarkerSize (1,1) double {mustBePositive} = 5
                 opts.MarkerEdgeColor = [0 0 0]
                 opts.MarkerFaceColor = []
                 opts.HitAreaWidth (1,1) double {mustBePositive} = 10
@@ -86,6 +86,7 @@ classdef Line < matlabx.ui.axes.ImageAxesOverlay
                 opts.Z = "all"
                 opts.T = "all"
                 opts.UserData = []
+                opts.ActivateOnCreate (1,1) logical = false
             end
 
             obj@matlabx.ui.axes.ImageAxesOverlay(host, ...
@@ -95,7 +96,8 @@ classdef Line < matlabx.ui.axes.ImageAxesOverlay
                 "C", opts.C, ...
                 "Z", opts.Z, ...
                 "T", opts.T, ...
-                "UserData", opts.UserData);
+                "UserData", opts.UserData, ...
+                "ActivateOnCreate", opts.ActivateOnCreate);
 
             ax = obj.TargetAxes;
 
@@ -287,6 +289,13 @@ classdef Line < matlabx.ui.axes.ImageAxesOverlay
             obj.updateGeometry();
             obj.updateVisibility();
         end
+
+        function tf = isInsideRectangle(obj, rect)
+        %ISINSIDERECTANGLE True when line midpoint lies inside rect.
+            xy = obj.Midpoint;
+            tf = xy(1) >= rect(1) && xy(1) <= rect(2) ...
+                && xy(2) >= rect(3) && xy(2) <= rect(4);
+        end
     end
 
     methods (Access=protected)
@@ -346,6 +355,10 @@ classdef Line < matlabx.ui.axes.ImageAxesOverlay
                 lineColor = obj.HoverLineColor;
                 lineAlpha = obj.HoverLineAlpha;
                 lineWidth = obj.HoverLineWidth;
+            elseif obj.Active && obj.Selected
+                lineColor = obj.SelectionLineColor;
+                lineAlpha = obj.SelectionLineAlpha;
+                lineWidth = obj.ActiveLineWidth;
             elseif obj.Active
                 lineColor = obj.ActiveLineColor;
                 lineAlpha = obj.ActiveLineAlpha;
