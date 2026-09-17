@@ -11,9 +11,9 @@ The project is under active development. APIs may still move as the package gets
 - `matlabx.ui.axes.ImageAxes`, an `Image5D`-backed image display component for MATLAB apps
 - Multi-component, Z-stack, and time-series image handling through `matlabx.image.Image5D`
 - Bio-Formats-backed image loading for many microscopy and proprietary image formats
-- Pluggable axes tools such as zoom, colorbar, colormap selection, box regions, and rectangle drawing
+- Pluggable axes tools such as zoom, colorbar, colormap selection, box/point/line/rectangle overlays, and rectangle selection
 - Figure-level event routing with normalized mouse, scroll, key, drag, hover, modifier, and hotkey state
-- First-pass overlay system for image-space graphics such as boxes, lines, point sets, and cluster visualizations
+- First-pass overlay system for image-space graphics such as boxes, points, lines, rectangles, point sets, and cluster visualizations
 - Point detection, point clustering, and an early tuning app for puncta/feature clustering workflows
 - Custom UI containers and controls not currently available as MATLAB built-ins
 - Small apps and dialogs including `matlabx.app.Viewer5D`, `matlabx.app.PointClusterTuner`, `matlabx.app.ParamsDialog`, `matlabx.app.TextWindow`, and quick image viewers
@@ -92,7 +92,7 @@ Use `ImageAxes` directly in a UI:
 fig = uifigure;
 ax = matlabx.ui.axes.ImageAxes(fig, ...
     "CData", imread("rice.png"), ...
-    "Tools", {'Zoom', 'Colorbar', 'ChooseColormap'});
+    "Tools", ["Zoom", "Colorbar", "ChooseColormap"]);
 ```
 
 Create a demo multi-component image:
@@ -154,7 +154,7 @@ I = matlabx.image.Image5D.demo();
 
 ax = matlabx.ui.axes.ImageAxes(fig, ...
     "ImageData", I, ...
-    "Tools", {'Zoom', 'Colorbar', 'ChooseColormap'}, ...
+    "Tools", ["Zoom", "Colorbar", "ChooseColormap"], ...
     "Units", "normalized", ...
     "Position", [0 0 1 1]);
 ```
@@ -219,7 +219,7 @@ ax.debug("IncludeSizeDiagnostics", true)
 Tools are installed by assigning names to `ax.Tools`. Reading `ax.Tools` returns the installed tool objects:
 
 ```matlab
-ax.Tools = ["Zoom", "Box", "DrawRectangle"];
+ax.Tools = ["Zoom", "Box", "Point", "Line", "Rectangle", "RectangleSelect"];
 ax.Tools.Box.BoxSize = 40;
 ```
 
@@ -236,8 +236,22 @@ Current first-party tools include:
 - `Colorbar`: colorbar display support
 - `ChooseColormap`: colormap selection
 - `Box`: square box region creation, activation, selection, movement, and deletion
-- `Line`: line drawing, endpoint editing, midpoint translation, selection, and deletion
-- `DrawRectangle`: one-shot rotated rectangle drawing and measurement annotations
+- `Point`: point overlay creation, activation, selection, movement, and deletion
+- `Line`: line drawing, endpoint editing, midpoint translation, symmetric/fixed-angle extension, selection, and deletion
+- `Rectangle`: axis-aligned rectangle drawing, body translation, handle resizing, square/center-constrained resizing, selection, and deletion
+- `RectangleSelect`: drag-box selection of existing overlays, with shift toggling selection membership
+- `DrawRectangle`: specialized push-style rotated rectangle drawing and measurement annotations
+
+The interactive overlay tools share a deliberately consistent gesture grammar:
+
+- click an existing overlay to activate it
+- `alt+click` an overlay body to deactivate; for Line, `alt+click` on a midpoint or endpoint handle primes symmetric extension
+- `shift+extendclick` an overlay to toggle selection membership
+- `control+contextclick` an overlay to delete it
+- drag a body, midpoint, point, or handle to move/edit geometry
+- `shift+doubleclick` empty image space to clear selection for that tool
+
+Line and rectangle creation use a small screen-pixel drag threshold, so an accidental click does not leave an invisible zero-length line or zero-size rectangle. Interactive overlay geometry is clamped to image bounds.
 
 Tool subclasses inherit from `matlabx.ui.axes.AxesTool`. A custom tool usually:
 
@@ -281,14 +295,15 @@ matlabx.keyboard.hotkey("z", "Modifiers", ["shift", "meta"])
 
 `ImageAxes` owns a context-menu manager that builds a small set of built-in menus and lets tools contribute their own commands. The default menu includes:
 
-- `Status...`
-- `Reset View`
+- `Image > Component Color`
+- `Image > Color Mode`
+- `Image > Colormap...`
 - `Image > Properties...`
 - `Image > Metadata...`
-- `Image > Color Mode`
-- `Image > Component Color`
 - `Display > Viewport Box`
-- tool menus such as `Zoom > Level` and `Box > Select All`
+- `Reset View`
+- `Status...`
+- tool menus such as `Zoom > Level`, `Box > Select All`, and `Rectangle > Delete Selected`
 
 Choose which built-ins are available with `ContextMenuItems`:
 
@@ -303,14 +318,13 @@ You can also expose individual built-ins without their parent group:
 ax.ContextMenuItems = ["ResetView", "ComponentColor", "ViewportBox"];
 ```
 
-The order of `ContextMenuItems` is honored for top-level built-ins. Tool menus
-are contributed below the built-ins and separated from them automatically.
+The order of `ContextMenuItems` is honored for top-level built-ins. Tool menus are contributed below the built-ins and separated from them automatically. Tool submenus can also contribute help entries; these open a formatted help window with the tool's summary, usage notes, bindings, and extra notes.
 
 ## ImageAxes Overlays
 
 `ImageAxes` owns an overlay manager available as `ax.Overlays`. Overlays are graphics objects tied to image coordinates and C/Z/T applicability. The manager owns overlay lifetime and shared state such as active, hovered, and selected IDs; tools and apps decide what user interactions mean.
 
-Add a point overlay:
+Add many detected points as a display overlay:
 
 ```matlab
 points = matlabx.image.measure.detectPoints(I, "Method", "log");
@@ -322,9 +336,12 @@ ov = ax.Overlays.add("PointSet", ...
     "MarkerFaceColor", [1 1 1]);
 ```
 
-Add a box or line overlay:
+Add interactive-style single-object overlays:
 
 ```matlab
+pt = ax.Overlays.add("Point", ...
+    "Position", [96 128]);
+
 box = ax.Overlays.add("Box", ...
     "Center", [128 128], ...
     "BoxSize", 40, ...
@@ -333,6 +350,9 @@ box = ax.Overlays.add("Box", ...
 ln = ax.Overlays.add("Line", ...
     "Endpoints", [50 50; 200 120], ...
     "LineColor", [1 1 0]);
+
+rect = ax.Overlays.add("Rectangle", ...
+    "Position", [40 60 120 80]);
 ```
 
 Visualize cluster-analysis output:
@@ -359,11 +379,15 @@ ax.Overlays.remove(ids(1));
 First-party overlays currently include:
 
 - `matlabx.ui.axes.overlays.Box`
+- `matlabx.ui.axes.overlays.Point`
 - `matlabx.ui.axes.overlays.Line`
+- `matlabx.ui.axes.overlays.Rectangle`
 - `matlabx.ui.axes.overlays.PointSet`
 - `matlabx.ui.axes.overlays.PointClusters`
 
 The overlay base class is intentionally small. Custom overlays inherit from `matlabx.ui.axes.ImageAxesOverlay`, own their own graphics handles, implement `updateGeometry` and `updateAppearance`, and call `registerGraphics` for hit-test ownership and manager lookup.
+
+The interactive overlays (`Box`, `Point`, `Line`, `Rectangle`) expose active, hovered, and selected visual states. Tools generally mutate those states through `ax.Overlays`, while the overlay subclasses decide how their appearance changes. `PointSet` and `PointClusters` are mostly display-oriented overlays for showing many points or clustering output.
 
 ## Point Detection And Clustering
 
@@ -444,15 +468,17 @@ MATLAB figure callbacks are powerful, but a growing app can quickly run into con
 The hub handles:
 
 - mouse down, move, up, scroll, key press, and key release events
+- synthetic enter and leave events when hover ownership changes
 - priority-based claiming when multiple components match the same event
 - optional drag capture so a component keeps receiving move/up events during a drag
 - preserved pre-existing callbacks as low-priority listeners
 - modifier-state tracking for mouse gestures
 - shortcut-style modifier cleanup to avoid stale keys after menu accelerators, dialogs, or interrupted UI interaction
+- a targeted alt/option menubar-focus workaround so alt can remain usable as an interaction modifier
 
 `HubEvent` centralizes event normalization. Useful fields include:
 
-- `Kind`: `"Down"`, `"Move"`, `"Up"`, `"Scroll"`, `"KeyPress"`, or `"KeyRelease"`
+- `Kind`: `"Down"`, `"Move"`, `"Up"`, `"Scroll"`, `"KeyPress"`, `"KeyRelease"`, `"Enter"`, or `"Leave"`
 - `Target`, `CurrentAxes`, `CurrentObject`, and `CurrentPointFigure`
 - `SelectionType`: raw MATLAB click type
 - `MouseAction`: normalized action such as `"click"`, `"contextclick"`, `"extendclick"`, `"move"`, `"up"`, or `"scroll"`
@@ -461,6 +487,10 @@ The hub handles:
 - `LastKey`, `LastHotkey`, and `LastKeyTimestamp`
 - `VerticalScrollCount`
 - `Handled` and `StopPropagation`
+
+Modifier names are normalized to `shift`, `control`, `alt`, and `meta`. On platforms where releasing alt/option can focus the figure menubar and suppress later key-release events, `FigureEventHub` temporarily disables top-level figure menus while alt/option is held, then restores their previous enabled states on release. This keeps chords such as `alt+click` and `shift+alt+extendclick` usable for tools.
+
+`CurrentPointFigure` is stored in figure pixel coordinates and is useful for screen-pixel drag thresholds. The overlay tools use this so click-versus-drag behavior feels consistent across different image sizes and zoom levels.
 
 Print an event for debugging:
 
@@ -478,11 +508,11 @@ id = hub.register(myComponent, ...
     "CaptureDuringDrag", true);
 ```
 
-The registered object implements `matches` and event hooks. `ImageAxes` uses this pattern internally, then routes claimed events to installed tools.
+The registered object implements `matches(E)` and event hooks. `ImageAxes` uses this pattern internally, then routes claimed events to installed tools.
 
 ```matlab
-function tf = matches(obj, target, kind, E)
-    tf = isequal(ancestor(target, "axes"), obj.Axes);
+function tf = matches(obj, E)
+    tf = isequal(ancestor(E.Target, "axes"), obj.Axes);
 end
 
 function onDown(obj, E)
