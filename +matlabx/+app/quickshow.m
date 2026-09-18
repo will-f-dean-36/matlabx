@@ -3,8 +3,7 @@ function [ax,fig] = quickshow(I,opts)
         I
         opts.Colormap (256,3) double
         opts.Title (1,:) char = 'Viewer'
-        opts.Tools (1,:) cell {mustBeMember(opts.Tools,{'Zoom','Colorbar','ChooseColormap','Box','Line','DrawRectangle'})} ...
-            = matlabx.ui.axes.ImageAxes.getDefaultTools()
+        opts.Tools (1,:) cell = matlabx.ui.axes.ImageAxes.getDefaultTools()
         opts.WindowStyle (1,:) char {mustBeMember(opts.WindowStyle,{'normal','alwaysontop'})} = 'alwaysontop'
         opts.Visible (1,1) matlab.lang.OnOffSwitchState = "on"
         opts.Size (1,1) double = 500
@@ -13,6 +12,8 @@ function [ax,fig] = quickshow(I,opts)
             {'center','north','south','east','west','northeast','northwest','southeast','southwest'})} = 'center'
         opts.ComponentColorMode (1,:) char {mustBeMember(opts.ComponentColorMode,{'luts','colors'})} = 'luts'
     end
+
+    validateTools(opts.Tools);
 
     if ~isfield(opts,'Colormap') || isempty(opts.Colormap)
         opts.Colormap = gray(256);
@@ -72,4 +73,17 @@ function [ax,fig] = quickshow(I,opts)
 
     fig.Visible = opts.Visible;
 
+end
+
+function validateTools(toolNames)
+%VALIDATETOOLS Check requested ImageAxes tools against available tool classes.
+    available = string(matlabx.ui.axes.ImageAxes.getToolNames());
+    requested = string(toolNames);
+    invalid = requested(~ismember(requested, available));
+
+    if ~isempty(invalid)
+        error('matlabx:app:quickshow:InvalidTool', ...
+            'Unknown ImageAxes tool(s): %s. Available tools are: %s.', ...
+            strjoin(invalid, ', '), strjoin(available, ', '));
+    end
 end

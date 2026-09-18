@@ -219,7 +219,8 @@ ax.debug("IncludeSizeDiagnostics", true)
 Tools are installed by assigning names to `ax.Tools`. Reading `ax.Tools` returns the installed tool objects:
 
 ```matlab
-ax.Tools = ["Zoom", "Box", "Point", "Line", "Rectangle", "RectangleSelect"];
+ax.Tools = ["Zoom", "Colorbar", "ChooseColormap", "DisplayLimits", ...
+    "Box", "Point", "Line", "Rectangle", "RectangleSelect"];
 ax.Tools.Box.BoxSize = 40;
 ```
 
@@ -235,6 +236,7 @@ Current first-party tools include:
 - `Zoom`: zooming, cursor-follow navigation, zoom-level menu, and viewport-box display while active
 - `Colorbar`: colorbar display support
 - `ChooseColormap`: colormap selection
+- `DisplayLimits`: opens the host-owned display-limits slider dialog
 - `Box`: square box region creation, activation, selection, movement, and deletion
 - `Point`: point overlay creation, activation, selection, movement, and deletion
 - `Line`: line drawing, endpoint editing, midpoint translation, symmetric/fixed-angle extension, selection, and deletion

@@ -60,68 +60,11 @@ classdef Image5D < handle
                 opts.Source string = ""
             end
 
-            if ~iscell(data)
-                data = {data};
-            end
-    
-            n = numel(data);
-            if n == 0
-                error('matlabx:image:Image5D:EmptyInput', 'At least one component is required.');
-            end
-
-            names = opts.Names;
-            kinds = opts.Kinds;
-    
-            % Basic validation: numeric/logical arrays only, shared XY, shared ZT
-            refSize = [];
-            for k = 1:n
-                A = data{k};
-    
-                if ~(isnumeric(A) || islogical(A))
-                    error('matlabx:image:Image5D:InvalidComponentType', ...
-                        'Component %d must be numeric or logical.', k);
-                end
-    
-                stackSize = matlabx.image.Image5D.inferComponentSize_(A);
-    
-                if isempty(refSize)
-                    refSize = stackSize;
-                else
-                    if ~isequal(stackSize([1,2,4,5]), refSize([1,2,4,5]))
-                        error('matlabx:image:Image5D:InconsistentComponentSize', ...
-                            ['All components must have matching Y, X, Z, and T size. ' ...
-                             'Component 1 is [%d %d %d %d %d], component %d is [%d %d %d %d %d].'], ...
-                            refSize, k, stackSize);
-                    end
-                end
-
-                % populate default names and kinds if not provided
-                % if numel(names) < k, names(k) = sprintf("Component %i",k); end
-                if numel(names) < k, names(k) = ""; end
-                if numel(kinds) < k, kinds(k) = matlabx.image.Image5D.inferComponentKind_(stackSize); end
-            end
-
-            % initialize components
-            comps(1,n) = matlabx.image.ImageComponent();
-
-            for k = 1:n
-                
-                stackSize = matlabx.image.Image5D.inferComponentSize_(data{k});
-
-                nativeDisplayRange = getrangefromclass(data{k});
-                dataRange = [double(min(data{k}(:))), double(max(data{k}(:)))];
-
-                comps(k) = matlabx.image.ImageComponent( ...
-                    data{k}, ...
-                    Name=names(k), ...
-                    Kind=kinds(k), ...
-                    Class=string(class(data{k})), ...
-                    Size=stackSize, ...
-                    NativeDisplayRange=nativeDisplayRange, ...
-                    DataRange=dataRange);
-            end
-    
-            src = matlabx.image.InMemoryImageSource(comps, Source=opts.Source);
+            src = matlabx.image.InMemoryImageSource( ...
+                data, ...
+                Names=opts.Names, ...
+                Kinds=opts.Kinds, ...
+                Source=opts.Source);
             obj = matlabx.image.Image5D(src);
         end
 
@@ -407,59 +350,6 @@ classdef Image5D < handle
             Z = s(4);
             T = s(5);
         end
-    end
-
-    % Static helpers
-    methods (Static, Access = private)
-
-        function out = inferComponentKind_(sz)
-            if sz(3) == 1
-                out = "scalar";
-                return
-            end
-            if sz(3) == 3
-                out = "rgb";
-                return
-            end
-            error('matlabx:image:Image5D:InvalidComponentSize', ...
-                'Component must have size [Y X 1 Z T] (scalar) or [Y X 3 Z T] (truecolor).');
-        end
-
-        function out = expandTextOpt_(value, n, defaultBase)
-            if isempty(value)
-                out = strings(1, n);
-                for k = 1:n
-                    out(k) = defaultBase + k;
-                end
-                return
-            end
-
-            if isstring(value) || ischar(value) || iscellstr(value)
-                value = string(value);
-            end
-
-            if isscalar(value)
-                out = repmat(value, 1, n);
-                return
-            end
-
-            if isstring(value) && numel(value) == n
-                out = reshape(value, 1, []);
-                return
-            end
-
-            error('Image5D:InvalidOptionSize', ...
-                'Option must be scalar text or have one entry per component.');
-
-        end
-
-        function sz = inferComponentSize_(A)
-            sz = size(A, 1:5);
-            % if numel(sz) < 5
-            %     sz = [sz, ones(1, 5-numel(sz))];
-            % end
-        end
-
     end
 
 end

@@ -212,7 +212,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     % popup windows
     properties (Access=private, Transient, NonCopyable)
-        contrastTool (:,1) matlabx.app.SliderGroupDialog
+        displayLimitsWindow (:,1) matlabx.ui.axes.ImageAxesDisplayLimitsWindow
         metadataWindow matlabx.app.TextWindow
         imagePropertiesWindow matlabx.app.TextWindow
         statusWindow matlabx.app.TextWindow
@@ -220,7 +220,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     properties (Access=private)
-        contrastToolOpen (1,1) logical = false
         metadataWindowOpen (1,1) logical = false
         imagePropertiesWindowOpen (1,1) logical = false
         statusWindowOpen (1,1) logical = false
@@ -256,6 +255,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     %% Events
     events (NotifyAccess=protected)
         RenderSourceChanged
+        DisplayStateChanged
+        ImageDataChanged
     end
 
     %% ComponentContainer lifecycle (setup/update)
@@ -2024,10 +2025,12 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 val (1,1) matlabx.image.Image5D
             end
 
+            oldSummary = obj.getImageDataEventSummary_();
             obj.ImageData_ = val;
             obj.syncViewStateToImageData();
             obj.syncSelfFromFirstLinkedPeer();
             obj.syncRenderSourceToView(ResetView=true);
+            obj.notifyImageDataChanged_(oldSummary, obj.getImageDataEventSummary_());
         end
     
         % --- CData: compatibility alias for raw image input/current source ---
@@ -2039,11 +2042,13 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 cdata = matlabx.ui.axes.ImageAxes.placeholderImage();
             end
 
+            oldSummary = obj.getImageDataEventSummary_();
             obj.ImageData_ = matlabx.image.Image5D.fromComponents(cdata);
 
             obj.syncViewStateToImageData();
             obj.syncSelfFromFirstLinkedPeer();
             obj.syncRenderSourceToView(ResetView=true);
+            obj.notifyImageDataChanged_(oldSummary, obj.getImageDataEventSummary_());
         end
 
         % --- RenderSource: selected plane or computed composite ---
@@ -2113,6 +2118,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
 
+            previousMode = obj.ViewState_.CLimMode;
+            previousCLims = obj.ComponentCLims;
             obj.ViewState_.CLimMode = val;
             changed = true;
     
@@ -2126,6 +2133,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             if changed
                 obj.updateDisplayMapping();
+            end
+
+            obj.notifyDisplayStateChanged_( ...
+                "CLimMode", [], previousMode, obj.ViewState_.CLimMode);
+
+            if strcmp(val, 'auto') && ~isequaln(previousCLims, obj.ComponentCLims)
+                obj.notifyDisplayStateChanged_( ...
+                    "ComponentCLims", 1:obj.NumComponents, previousCLims, obj.ComponentCLims);
             end
         end
     
@@ -2246,11 +2261,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         function set.ComponentColors(obj, val)
             obj.validateFullComponentCell(val, 'ComponentColors');
 
+            previousValue = obj.ComponentColors;
             changed = obj.setComponentColors_(val, 1:obj.NumComponents);
 
             if changed
                 obj.updateAllDisplayMaps();
                 obj.updateDisplayMapping();
+                obj.notifyDisplayStateChanged_( ...
+                    "ComponentColors", 1:obj.NumComponents, previousValue, obj.ComponentColors);
             end
         end
     
@@ -2265,11 +2283,14 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         function set.ComponentColormaps(obj, val)
             obj.validateFullComponentCell(val, 'ComponentColormaps');
 
+            previousValue = obj.ComponentColormaps;
             changed = obj.setComponentColormaps_(val, 1:obj.NumComponents);
 
             if changed
                 obj.updateAllDisplayMaps();
                 obj.updateDisplayMapping();
+                obj.notifyDisplayStateChanged_( ...
+                    "ComponentColormaps", 1:obj.NumComponents, previousValue, obj.ComponentColormaps);
             end
         end
 
@@ -2281,9 +2302,12 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
 
+            previousValue = obj.ViewState_.ComponentColorMode;
             obj.ViewState_.ComponentColorMode = val;
             obj.updateAllDisplayMaps();
             obj.updateDisplayMapping();
+            obj.notifyDisplayStateChanged_( ...
+                "ComponentColorMode", [], previousValue, obj.ViewState_.ComponentColorMode);
         end
 
         % --- ComponentCLims ---
@@ -2297,11 +2321,20 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         function set.ComponentCLims(obj, val)
             obj.validateFullComponentCell(val, 'ComponentCLims');
 
+            previousValue = obj.ComponentCLims;
+            previousMode = obj.ViewState_.CLimMode;
             changed = obj.setComponentCLims_(val, 1:obj.NumComponents);
             obj.ViewState_.CLimMode = 'manual';
 
             if changed
                 obj.updateDisplayMapping();
+                obj.notifyDisplayStateChanged_( ...
+                    "ComponentCLims", 1:obj.NumComponents, previousValue, obj.ComponentCLims);
+            end
+
+            if ~strcmp(previousMode, obj.ViewState_.CLimMode)
+                obj.notifyDisplayStateChanged_( ...
+                    "CLimMode", [], previousMode, obj.ViewState_.CLimMode);
             end
         end
 
@@ -2661,6 +2694,55 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             I = matlabx.ui.axes.ImageAxesDisplayRenderer.getCompositeImage( ...
                 obj.ImageData_, obj.ComponentDisplay_, obj.ViewState_);
         end
+
+        function notifyDisplayStateChanged_(obj, propertyName, componentIdx, previousValue, currentValue)
+        %NOTIFYDISPLAYSTATECHANGED_ Emit a semantic display-state event.
+            evtData = matlabx.ui.axes.events.DisplayStateChangedEventData( ...
+                Property=string(propertyName), ...
+                ComponentIdx=componentIdx, ...
+                PreviousValue=previousValue, ...
+                CurrentValue=currentValue);
+
+            notify(obj, 'DisplayStateChanged', evtData);
+        end
+
+        function notifyImageDataChanged_(obj, oldSummary, newSummary)
+        %NOTIFYIMAGEDATACHANGED_ Emit a semantic image-data event.
+            evtData = matlabx.ui.axes.events.ImageDataChangedEventData( ...
+                PreviousNumComponents=oldSummary.NumComponents, ...
+                CurrentNumComponents=newSummary.NumComponents, ...
+                PreviousSize=oldSummary.Size, ...
+                CurrentSize=newSummary.Size);
+
+            notify(obj, 'ImageDataChanged', evtData);
+        end
+
+        function summary = getImageDataEventSummary_(obj)
+        %GETIMAGEDATAEVENTSUMMARY_ Return compact ImageData event metadata.
+            summary = struct( ...
+                "NumComponents", obj.ImageData_.NumComponents, ...
+                "Size", [obj.ImageData_.SizeY, obj.ImageData_.SizeX, ...
+                         obj.ImageData_.SizeZ, obj.ImageData_.SizeT]);
+        end
+
+        function limits = getDisplayLimitsSliderLimits_(~, comp)
+        %GETDISPLAYLIMITSSLIDERLIMITS_ Return nondegenerate slider limits.
+            limits = double(comp.DataRange);
+
+            if limits(2) > limits(1)
+                return
+            end
+
+            nativeLimits = double(comp.NativeDisplayRange);
+            if nativeLimits(2) > nativeLimits(1)
+                limits = nativeLimits;
+                return
+            end
+
+            center = limits(1);
+            delta = max(abs(center) * 0.01, 1);
+            limits = center + [-delta, delta];
+        end
     
     end
 
@@ -2894,7 +2976,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 case 'shift+meta+m'
                     obj.toggleComposite();
                 case 'shift+meta+c'
-                    obj.openContrastTool();
+                    obj.openDisplayLimitsWindow();
                 case 'rightarrow'
                     obj.nextComponent();
                 case 'leftarrow'
@@ -3251,28 +3333,24 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     %% Popup window management
-    methods
+    methods (Access=?matlabx.ui.axes.ImageAxesDisplayLimitsWindow)
 
-        % --- ContrastTool ---
-
-        function openContrastTool(obj)
-
-            if obj.contrastToolOpen
-                return
-            end
-
+        function state = getDisplayLimitsWindowState(obj)
+        %GETDISPLAYLIMITSWINDOWSTATE Return slider-ready display-limit state.
             N = obj.NumComponents;
 
-            sliderName = cell(1,N);
-            sliderLimits = cell(1,N);
-            sliderValue = cell(1,N);
-            sliderRoundDigits = cell(1,N);
-            sliderRoundValues = cell(1,N);
-            sliderValueDisplayFormat = cell(1,N);
-            sliderColormap = cell(1,N);
+            state = struct( ...
+                "CanOpen", true, ...
+                "NumComponents", N, ...
+                "Name", {cell(1, N)}, ...
+                "Limits", {cell(1, N)}, ...
+                "Value", {cell(1, N)}, ...
+                "RoundDigits", {cell(1, N)}, ...
+                "RoundValues", {cell(1, N)}, ...
+                "ValueDisplayFormat", {cell(1, N)}, ...
+                "Colormap", {cell(1, N)});
 
-            for i = 1:obj.NumComponents
-
+            for i = 1:N
                 comp = obj.ImageData_.Components(i);
                 compDisplay = obj.ComponentDisplay_(i);
 
@@ -3280,52 +3358,48 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                     case 'scalar'
                         switch comp.Class
                             case {'double','single'}
-                                dispFmt = '%0.2f'; roundVals = "off";
+                                displayFormat = '%0.2f';
+                                roundValues = "off";
                             case {'uint8','uint16'}
-                                dispFmt = '%i'; roundVals = "on";
+                                displayFormat = '%i';
+                                roundValues = "on";
                             otherwise
+                                state.CanOpen = false;
                                 return
                         end
                     otherwise
+                        state.CanOpen = false;
                         return
                 end
 
-                sliderName{i} = comp.Name;
-                sliderLimits{i} = comp.DataRange;
-                sliderValue{i} = compDisplay.CLim;
-                sliderRoundDigits{i} = 0;
-                sliderRoundValues{i} = roundVals;
-                sliderValueDisplayFormat{i} = dispFmt;
-                sliderColormap{i} = compDisplay.DisplayMap;
+                clim = compDisplay.CLim;
+                if isempty(clim)
+                    clim = comp.DataRange;
+                end
+
+                state.Name{i} = char(comp.Name);
+                state.Limits{i} = obj.getDisplayLimitsSliderLimits_(comp);
+                state.Value{i} = clim;
+                state.RoundDigits{i} = 0;
+                state.RoundValues{i} = roundValues;
+                state.ValueDisplayFormat{i} = displayFormat;
+                state.Colormap{i} = compDisplay.DisplayMap;
+            end
+        end
+
+    end
+
+    methods
+
+        % --- DisplayLimitsWindow ---
+
+        function openDisplayLimitsWindow(obj)
+        %OPENDISPLAYLIMITSWINDOW Open the host-owned CLim slider dialog.
+            if isempty(obj.displayLimitsWindow) || ~isvalid(obj.displayLimitsWindow)
+                obj.displayLimitsWindow = matlabx.ui.axes.ImageAxesDisplayLimitsWindow(obj);
             end
 
-            obj.contrastTool = matlabx.app.SliderGroupDialog(...
-                N,...
-                "Title","Adjust display limits",...
-                "Name",sliderName,...
-                "Limits",sliderLimits,...
-                "Value",sliderValue,...
-                "RoundDigits",sliderRoundDigits,...
-                "RoundValues",sliderRoundValues,...
-                "ValueDisplayFormat",sliderValueDisplayFormat,...
-                "Colormap",sliderColormap,...
-                "ValueChangingFcn",@(o,e) obj.onContrastToolValueChanging(o,e),...
-                "ValueChangedFcn",@(o,e) obj.onContrastToolValueChanged(o,e),...
-                "ClosedFcn",@(~,~) obj.onContrastToolClosed());
-
-            obj.contrastToolOpen = true;
-        end
-
-        function onContrastToolClosed(obj)
-            obj.contrastToolOpen = false;
-        end
-
-        function onContrastToolValueChanged(obj,o,e)
-            obj.setComponentCLim(o.Value, e.ID);
-        end
-
-        function onContrastToolValueChanging(obj,o,e)
-            obj.setComponentCLim(o.Value, e.ID);
+            obj.displayLimitsWindow.open();
         end
 
         % --- MetadataWindow ---
@@ -3647,7 +3721,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function names = getDefaultTools()
-            names = {'Zoom','Colorbar','ChooseColormap'};
+            names = {'Zoom','Colorbar','ChooseColormap','DisplayLimits'};
         end
 
         function props = getLinkableProperties()
@@ -3734,8 +3808,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             % replace listener property with empty array of event.listener
             obj.L = event.listener.empty;
 
-            % contrastTool
-            if ~isempty(obj.contrastTool), delete(obj.contrastTool(isvalid(obj.contrastTool))); end
+            % displayLimitsWindow
+            if ~isempty(obj.displayLimitsWindow)
+                delete(obj.displayLimitsWindow(isvalid(obj.displayLimitsWindow)));
+            end
 
             % metadataWindow
             if ~isempty(obj.metadataWindow), delete(obj.metadataWindow(isvalid(obj.metadataWindow))); end
