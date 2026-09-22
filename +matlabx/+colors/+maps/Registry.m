@@ -15,7 +15,11 @@
 % with this program; if not, see <https://www.gnu.org/licenses/>.
 
 classdef Registry
-    % Directory-based colormap registry (assets/colormaps/<Category>/*.mat)
+    % Directory/runtime colormap registry.
+    %
+    % File-backed maps live in assets/colormaps/<Category>/*.mat. The MATLAB
+    % category is generated at runtime from MATLAB's built-in colormap
+    % functions so matlabx does not redistribute MathWorks colormap data.
     % Values are matlabx.colors.maps.Colormap objects.
 
     methods (Static)
@@ -90,14 +94,8 @@ classdef Registry
 
             end
 
-            nameKeys = keys(nameCount);
-            for t = 1:numel(nameKeys)
-                if nameCount(nameKeys{t}) > 1
-                    warning('Duplicate colormap name found: %s',nameKeys{t})
-                    % remove from unique map
-                    S.BYNAME_UNIQUE.remove(nameKeys{t});
-                end
-            end
+            matlabx.colors.maps.Registry.addMatlabBuiltins_(S, nameCount);
+            matlabx.colors.maps.Registry.removeDuplicateShortNames_(S, nameCount);
 
             matlabx.colors.maps.Registry.state('set', S);
         end
@@ -211,6 +209,60 @@ classdef Registry
                 matlabx.colors.maps.Registry.refresh();
                 S = matlabx.colors.maps.Registry.state('get');
             end
+        end
+    end
+
+    methods (Static, Access=private)
+        function removeDuplicateShortNames_(S, nameCount)
+        %REMOVEDUPLICATESHORTNAMES_ Keep one-argument lookup only for unique names.
+            nameKeys = keys(nameCount);
+            for t = 1:numel(nameKeys)
+                if nameCount(nameKeys{t}) > 1
+                    warning('Duplicate colormap name found: %s',nameKeys{t})
+                    if isKey(S.BYNAME_UNIQUE, nameKeys{t})
+                        S.BYNAME_UNIQUE.remove(nameKeys{t});
+                    end
+                end
+            end
+        end
+
+        function addMatlabBuiltins_(S, nameCount)
+        %ADDMATLABBUILTINS_ Register MATLAB colormap functions at runtime.
+            category = "MATLAB";
+            names = matlabx.colors.maps.Registry.matlabBuiltinNames_();
+            mapCell = {};
+
+            for i = 1:numel(names)
+                name = names(i);
+                if exist(char(name), 'file') ~= 2 && exist(char(name), 'builtin') ~= 5
+                    continue
+                end
+
+                obj = matlabx.colors.maps.Colormap(name, category, "builtin:" + name);
+                key = matlabx.colors.maps.Registry.mkKey(name, category);
+                nameKey = char(name);
+
+                S.BYKEY(key) = obj;
+                mapCell{end+1,1} = obj; %#ok<AGROW>
+
+                if ~isKey(nameCount, nameKey)
+                    nameCount(nameKey) = 1;
+                else
+                    nameCount(nameKey) = nameCount(nameKey) + 1;
+                end
+
+                S.BYNAME_UNIQUE(nameKey) = obj;
+            end
+
+            if ~isempty(mapCell)
+                S.BYCAT(char(category)) = mapCell;
+            end
+        end
+
+        function names = matlabBuiltinNames_()
+        %MATLABBUILTINNAMES_ Built-in MATLAB colormap functions exposed by matlabx.
+            names = ["autumn","bone","cool","copper","gray","hot","hsv", ...
+                "jet","parula","pink","sky","spring","summer","turbo","winter"];
         end
     end
 end

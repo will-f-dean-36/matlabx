@@ -15,7 +15,11 @@
 % with this program; if not, see <https://www.gnu.org/licenses/>.
 
 classdef Colormap < handle
-    % Represents a single colormap file with lazy-loaded data.
+    % Represents a single colormap source with lazy-loaded data.
+    %
+    % Path is either a MAT-file path or a virtual builtin path of the form
+    % "builtin:<name>". Builtin paths are evaluated at runtime by calling the
+    % corresponding MATLAB colormap function.
     properties (SetAccess=immutable)
         Name     string
         Category string
@@ -33,11 +37,22 @@ classdef Colormap < handle
         end
 
         function M = getMap(this)
-            % Lazy load Nx3 from .mat; cache after first load.
+            % Lazy load Nx3 colormap data; cache after first load.
             if ~isempty(this.MapCache)
                 M = this.MapCache;
                 return
             end
+
+            if startsWith(this.Path, "builtin:")
+                name = extractAfter(this.Path, "builtin:");
+                M = feval(char(name), 256);
+                validateattributes(M, {'double','single'}, {'2d','ncols',3}, mfilename, 'colormap');
+                assert(all(isfinite(M(:))), 'Colormap contains NaN/Inf: %s', this.Path);
+                this.MapCache = double(M);
+                M = this.MapCache;
+                return
+            end
+
             mf = matfile(this.Path);
             vars = who(mf);
             M = [];
