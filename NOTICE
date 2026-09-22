@@ -1,0 +1,89 @@
+matlabx third-party notices
+===========================
+
+This project includes or interoperates with third-party software. The
+matlabx project itself is licensed under the GNU General Public License,
+version 2 or later. See LICENSE for the full license text.
+
+
+Bio-Formats / bfmatlab
+----------------------
+
+This repository bundles the Bio-Formats MATLAB helper files under:
+
+    external/bfmatlab/
+
+and the Bio-Formats Java package:
+
+    external/bfmatlab/bioformats_package.jar
+
+The bundled JAR manifest identifies it as:
+
+    Implementation-Title: bioformats_package
+    Implementation-Version: 8.5.0
+    Implementation-Date: 18 March 2026
+    Implementation-Vendor: Open Microscopy Environment
+    Implementation-Build: 877c317e4e396381dc76e56c1539b24947f71dce
+    Implementation-URL: https://www.openmicroscopy.org/bio-formats/
+
+Bio-Formats is developed by the Open Microscopy Environment (OME):
+
+    https://www.openmicroscopy.org/bio-formats/
+    https://github.com/ome/bioformats
+
+Bio-Formats is distributed under GNU public copyleft licenses or more
+permissive open source licenses depending on component. The bundled
+bioformats_package.jar contains embedded license and notice metadata,
+including:
+
+    META-INF/LICENSE
+    META-INF/LICENSE.txt
+    META-INF/NOTICE
+    META-INF/NOTICE.txt
+    META-INF/third-party-licenses/
+
+OME's licensing information is available at:
+
+    https://www.openmicroscopy.org/licensing/
+
+
+ColorBrewer
+-----------
+
+This repository bundles ColorBrewer color scheme data under:
+
+    assets/colormaps/Brewer/
+
+ColorBrewer color specifications and designs are developed by Cynthia Brewer,
+Mark Harrower, and The Pennsylvania State University.
+
+Copyright (c) 2002 Cynthia Brewer, Mark Harrower, and The Pennsylvania State
+University. All rights reserved.
+
+This product includes color specifications and designs developed by Cynthia
+Brewer (http://colorbrewer.org/).
+
+The ColorBrewer color schemes are distributed under an Apache-style software
+license for ColorBrewer software and ColorBrewer color schemes. The name
+"ColorBrewer" must not be used to endorse or promote products derived from
+this software without prior written permission.
+
+
+COLORNAMES
+----------
+
+This repository bundles Stephen Cobeldick's COLORNAMES utility under:
+
+    external/colornames/
+
+The bundled license file is:
+
+    external/colornames/license.txt
+
+COLORNAMES is distributed under a BSD-style license. Its copyright notice
+begins:
+
+    Copyright (c) 2026, Stephen Cobeldick
+    All rights reserved.
+
+The full license terms are retained in the bundled license file.
