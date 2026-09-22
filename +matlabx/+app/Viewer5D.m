@@ -714,6 +714,7 @@ classdef Viewer5D < handle
         %ONLOAD Menubar callback for [File]->[Load...]
             % hide figure, show file selection dialog, show figure
             obj.Fig.Visible = 'off';
+            restoreVisibility = onCleanup(@() set(obj.Fig, "Visible", "on"));
             % update log
             matlabx.Log.DEBUG("Selecting image file...");
 
@@ -721,15 +722,18 @@ classdef Viewer5D < handle
                 % get Image5D using file dialog
                 I = matlabx.image.Image5D.fromFileDialog(...
                     "LoadOnCreate",true);
+                if isempty(I)
+                    matlabx.Log.DEBUG("Image file selection canceled.");
+                    return
+                end
                 % set as image
                 obj.Image = I;
             catch ME
-                matlabx.Log.ERROR(ME);
-                obj.guialert(ME);
+                matlabx.Log.EXCEPTION(ME);
+                obj.guialert("Title","Error","Message",ME.message,"Icon","error");
             end
 
             obj.refreshUI();
-            obj.Fig.Visible = 'on';
         end
 
         function onClose(obj)
@@ -766,6 +770,8 @@ classdef Viewer5D < handle
                 opts.Icon (1,:) char {mustBeMember(opts.Icon,{'error','warning','info','message','success',''})} = ''
             end
 
+            % give focus to figure
+            figure(obj.Fig);
             % uialert dialog, closing will resume interaction on main window
             uialert(obj.Fig,...
                 opts.Message,...

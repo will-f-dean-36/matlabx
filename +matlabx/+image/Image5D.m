@@ -91,6 +91,12 @@ classdef Image5D < handle
             end
 
             [file,location,~] = matlabx.image.io.uigetimagefile();
+
+            if isequal(file, 0) || isequal(location, 0)
+                obj = matlabx.image.Image5D.empty();
+                return
+            end
+
             filePath = fullfile(location,file);
 
             src = matlabx.image.BioFormatsImageSource(string(filePath), SeriesIndex=opts.SeriesIndex);

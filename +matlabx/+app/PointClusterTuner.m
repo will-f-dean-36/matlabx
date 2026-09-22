@@ -505,6 +505,10 @@ classdef PointClusterTuner < handle
         %ONLOADIMAGE Load an image through Image5D file selection.
             try
                 img = matlabx.image.Image5D.fromFileDialog("LoadOnCreate", true);
+                if isempty(img)
+                    obj.appendStatus("Image file selection canceled.");
+                    return
+                end
                 obj.setImage(img, "Loaded image");
             catch ME
                 obj.reportException(ME);

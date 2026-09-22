@@ -15,11 +15,11 @@ classdef ImageAxesDisplayLimitsWindow < handle
     %   feedback loops when one side is updating the other.
 
     properties (SetAccess = private)
-        Host (1,1) matlabx.ui.axes.ImageAxes
+        Host matlabx.ui.axes.ImageAxes = matlabx.ui.axes.ImageAxes.empty()
     end
 
     properties (Access = private, Transient, NonCopyable)
-        Dialog matlabx.app.SliderGroupDialog
+        Dialog matlabx.app.SliderGroupDialog = matlabx.app.SliderGroupDialog.empty()
         Listeners event.listener = event.listener.empty
     end
 
