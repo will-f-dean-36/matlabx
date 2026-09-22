@@ -1,10 +1,19 @@
 # matlabx
 
+[![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL--2.0--or--later-blue.svg)](LICENSE)
+
 matlabx is a MATLAB framework for building richer apps, image viewers, and analysis tools. It is being developed primarily to extend MATLAB's app-building and graphics ecosystem with better image display, more flexible interaction, reusable UI components, and small complete apps built from those pieces.
 
 The project is under active development. APIs may still move as the package gets sharper.
 
 > Note: matlabx is an independent project and is not affiliated with or endorsed by MathWorks.
+
+## License
+
+matlabx is free software licensed under the GNU General Public License,
+version 2 or later (`GPL-2.0-or-later`). See [LICENSE](LICENSE) for the full
+license text. Third-party notices for bundled dependencies are listed in
+[NOTICE](NOTICE).
 
 ## What It Offers
 
