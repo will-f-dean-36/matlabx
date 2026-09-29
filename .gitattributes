@@ -16,3 +16,6 @@
 *.ico binary
 *.icns binary
 *.pdf binary
+
+# Preserve vendored/external files exactly as provided
+external/** -text
