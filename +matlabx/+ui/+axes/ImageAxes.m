@@ -75,6 +75,23 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 %       ax.Tools = ["Zoom","Box","DrawRectangle"]
 %       ax.Tools.Box.BoxSize = 40
 %
+%   Context menus
+%   -------------
+%   ImageAxes owns the context menu assigned to its inherited ContextMenu
+%   property. Setting ContextMenu directly is not recommended because it
+%   bypasses the built-in menu, dynamic state refresh, and tool cleanup.
+%   Choose built-in entries with ContextMenuItems. Application tools can add
+%   entries by overriding AxesTool.contributeContextMenu and using the supplied
+%   ImageAxesContextMenuManager:
+%
+%       function contributeContextMenu(obj, menu)
+%           menu.addItem("MyTool.Action", "Run action", ...
+%               @(~,~) obj.runAction(), Owner=obj);
+%       end
+%
+%   Install the tool normally with installTool; its owner-scoped menu entries
+%   are then removed automatically when the tool is uninstalled.
+%
 %   See also matlabx.image.Image5D, matlabx.app.quickshow,
 %   matlabx.ui.axes.AxesTool, matlabx.ui.axes.ImageAxesToolManager,
 %   matlabx.ui.axes.ImageAxesHotkeyRegistry,
@@ -274,8 +291,9 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         % Patch showing the current visible viewport in the overview.
         ViewportBox (1,1) matlab.graphics.primitive.Patch
 
-
-        % listeners
+        % Internal listener that maintains the aspect-preserving layout.
+        ResizeListener event.listener = event.listener.empty
+        % General listener storage retained for component-owned listeners.
         L event.listener
 
     end
@@ -415,6 +433,17 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function setup(obj)
         %SETUP Construct graphics, managers, routing, and initial display state.
+            % Match the native UIAxes default; constructor values override it.
+            obj.Position = [10 10 400 300];
+
+            % Use the parent's initial color; do not track later changes.
+            parent = obj.Parent;
+            if isprop(parent, "BackgroundColor")
+                obj.BackgroundColor = parent.BackgroundColor;
+            elseif isprop(parent, "Color")
+                obj.BackgroundColor = parent.Color;
+            end
+
             % perform/retrieve calibration first
             obj.UICal = matlabx.UICal.get();
 
@@ -533,8 +562,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.mainAxes.PlotBoxAspectRatio = [1 1 1];
             obj.mainAxes.DataAspectRatio    = [1 1 1];
 
-            % set SizeChangedFcn so we can force visual update upon resizing (AutoResizeChildren of parent must be Off)
-            obj.SizeChangedFcn = @(~,~) obj.updateOnResize();
+            % Keep internal layout handling independent of the public
+            % SizeChangedFcn so applications may assign their own callback.
+            obj.ResizeListener = addlistener(obj, ...
+                'SizeChanged',@(~,~) obj.updateOnResize());
 
             % label in bottom-left corner
             obj.BottomLabel = text('Parent',obj.staticAxes,...
@@ -4583,6 +4614,10 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.detachApplicationOverlays();
 
             % remove listeners first
+            if ~isempty(obj.ResizeListener)
+                delete(obj.ResizeListener(isvalid(obj.ResizeListener)));
+            end
+            obj.ResizeListener = event.listener.empty;
             if ~isempty(obj.L), delete(obj.L(isvalid(obj.L))); end
             % replace listener property with empty array of event.listener
             obj.L = event.listener.empty;
