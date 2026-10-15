@@ -1,3 +1,6 @@
+classdef PlotContent < handle
+%PLOTCONTENT Base lifecycle for graphics transferable between PlotAxes hosts.
+
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
 %
@@ -13,9 +16,6 @@
 %
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
-
-classdef PlotContent < handle
-%PLOTCONTENT Base lifecycle for graphics transferable between PlotAxes hosts.
 
     properties (SetAccess=private)
         Host (:,1) matlabx.ui.axes.PlotAxes = matlabx.ui.axes.PlotAxes.empty(0,1)

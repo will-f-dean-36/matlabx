@@ -1,3 +1,6 @@
+function cmap = ColormapSelector(cmap_name)
+%COLORMAPSELECTOR Open a dialog for selecting a registered colormap.
+
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
 %
@@ -14,7 +17,6 @@
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
 
-function cmap = ColormapSelector(cmap_name)
     arguments
         cmap_name (1,:) char = 'gray'
     end

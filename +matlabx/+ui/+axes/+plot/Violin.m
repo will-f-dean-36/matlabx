@@ -1,3 +1,6 @@
+classdef Violin < handle
+%VIOLIN One logical dataset backed by owned graphics primitives.
+
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2023 William Dean
 %
@@ -13,9 +16,6 @@
 %
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
-
-classdef Violin < handle
-%VIOLIN One logical dataset backed by owned graphics primitives.
 
     properties(Dependent = true, AbortSet = true)
         % data

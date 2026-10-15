@@ -1,3 +1,8 @@
+classdef ViolinStyle
+%VIOLINSTYLE Renderer-facing appearance for grouped violin/swarm content.
+% The style is an inert value. It has no application persistence, callbacks,
+% or knowledge of the model used to produce the plotted numeric data.
+
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
 %
@@ -13,11 +18,6 @@
 %
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
-
-classdef ViolinStyle
-%VIOLINSTYLE Renderer-facing appearance for grouped violin/swarm content.
-% The style is an inert value. It has no application persistence, callbacks,
-% or knowledge of the model used to produce the plotted numeric data.
 
     properties
         Title (1,1) string = ""

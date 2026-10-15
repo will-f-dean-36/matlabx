@@ -1,3 +1,15 @@
+classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
+%PLOTAXES Stable axes host for transferable plot-content renderers.
+%
+% PlotAxes mirrors the host/content boundary used by ImageAxes without yet
+% reproducing its complete event and tool systems. The host owns the axes,
+% layout, and presentation state. A PlotContent object owns plot primitives
+% and can move between PlotAxes hosts without reparenting this container.
+%
+% Event routing and pluggable tools should attach here in the future. Keeping
+% the axes stable gives FigureEventHub one durable registrant per panel and
+% gives tools a host identity independent of the currently mounted renderer.
+
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
 %
@@ -13,18 +25,6 @@
 %
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
-
-classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
-%PLOTAXES Stable axes host for transferable plot-content renderers.
-%
-% PlotAxes mirrors the host/content boundary used by ImageAxes without yet
-% reproducing its complete event and tool systems. The host owns the axes,
-% layout, and presentation state. A PlotContent object owns plot primitives
-% and can move between PlotAxes hosts without reparenting this container.
-%
-% Event routing and pluggable tools should attach here in the future. Keeping
-% the axes stable gives FigureEventHub one durable registrant per panel and
-% gives tools a host identity independent of the currently mounted renderer.
 
     properties (AbortSet)
         Name (1,1) string = ""

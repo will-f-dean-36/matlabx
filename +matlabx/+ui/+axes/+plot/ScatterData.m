@@ -1,3 +1,8 @@
+classdef ScatterData
+%SCATTERDATA Normalized, validated data for grouped scatter rendering.
+% Each cell represents one logical scatter group. Numeric arrays are stored
+% as row vectors so low-level plot primitives receive a consistent shape.
+
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
 %
@@ -13,11 +18,6 @@
 %
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
-
-classdef ScatterData
-%SCATTERDATA Normalized, validated data for grouped scatter rendering.
-% Each cell represents one logical scatter group. Numeric arrays are stored
-% as row vectors so low-level plot primitives receive a consistent shape.
 
     properties (SetAccess=private)
         XData (:,1) cell = {NaN}

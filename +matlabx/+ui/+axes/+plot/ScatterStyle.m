@@ -1,3 +1,8 @@
+classdef ScatterStyle
+%SCATTERSTYLE Renderer-facing appearance for a grouped scatter plot.
+% This value class contains graphics presentation only. Application settings
+% remain responsible for persistence, UI binding, and change notification.
+
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
 %
@@ -13,11 +18,6 @@
 %
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
-
-classdef ScatterStyle
-%SCATTERSTYLE Renderer-facing appearance for a grouped scatter plot.
-% This value class contains graphics presentation only. Application settings
-% remain responsible for persistence, UI binding, and change notification.
 
     properties
         Title (1,1) string = ""

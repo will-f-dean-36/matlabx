@@ -1,3 +1,6 @@
+classdef ScatterRenderer < matlabx.ui.axes.PlotContent
+%SCATTERRENDERER Render grouped scatter series into a transferable PlotAxes.
+
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
 %
@@ -13,9 +16,6 @@
 %
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
-
-classdef ScatterRenderer < matlabx.ui.axes.PlotContent
-%SCATTERRENDERER Render grouped scatter series into a transferable PlotAxes.
 
     properties (SetAccess=private)
         Data (1,1) matlabx.ui.axes.plot.ScatterData = matlabx.ui.axes.plot.ScatterData()

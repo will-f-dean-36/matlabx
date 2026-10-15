@@ -1,3 +1,6 @@
+classdef ViolinRenderer < matlabx.ui.axes.PlotContent
+%VIOLINRENDERER Render grouped swarm/violin series into a PlotAxes host.
+
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
 %
@@ -13,9 +16,6 @@
 %
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
-
-classdef ViolinRenderer < matlabx.ui.axes.PlotContent
-%VIOLINRENDERER Render grouped swarm/violin series into a PlotAxes host.
 
     properties (SetAccess=private)
         Data (1,1) matlabx.ui.axes.plot.ViolinData = matlabx.ui.axes.plot.ViolinData()

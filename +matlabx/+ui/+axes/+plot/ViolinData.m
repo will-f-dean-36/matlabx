@@ -1,3 +1,7 @@
+classdef ViolinData
+%VIOLINDATA Normalized, validated data for grouped violin/swarm rendering.
+% Values and their color data remain aligned within each logical group.
+
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
 %
@@ -13,10 +17,6 @@
 %
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
-
-classdef ViolinData
-%VIOLINDATA Normalized, validated data for grouped violin/swarm rendering.
-% Values and their color data remain aligned within each logical group.
 
     properties (SetAccess=private)
         Values (:,1) cell = {NaN}
