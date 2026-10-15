@@ -293,6 +293,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % Internal listener that maintains the aspect-preserving layout.
         ResizeListener event.listener = event.listener.empty
+        % One-shot listener used when toolbar buttons are created while hidden.
+        InitialToolbarFocusListener event.listener = event.listener.empty
         % General listener storage retained for component-owned listeners.
         L event.listener
 
@@ -343,8 +345,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         pendingSizeUpdate (1,1) logical = false
         % Input key for the most recently applied resize layout.
         LastResizeLayoutKey_ (1,5) double = NaN(1,5)
-        % Whether the ComponentContainer is completing its first update.
-        inStartup (1,1) logical = true
+        % Whether the ComponentContainer still has its first update pending.
+        FirstUpdatePending (1,1) logical = true
         % Whether semantic viewport notifications are temporarily suppressed.
         SuppressViewportChanged_ (1,1) logical = false
     end
@@ -446,6 +448,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             % perform/retrieve calibration first
             obj.UICal = matlabx.UICal.get();
+            obj.uipanelOverheadPx_ = ...
+                obj.UICal.uipanelTopChromeHeightPx(obj.FontSize_);
 
             obj.Interruptible = 'off';
             obj.BusyAction = 'cancel';
@@ -616,11 +620,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function update(obj)
         %UPDATE Apply ComponentContainer property changes to hosted graphics.
-            if obj.inStartup
-                obj.FontSize_ = obj.FontSize;
-                obj.uipanelOverheadPx_ = obj.UICal.uipanelTopChromeHeightPx(obj.FontSize_);
-                obj.inStartup = false;
-            end
+            isFirstUpdate = obj.FirstUpdatePending;
+            obj.FirstUpdatePending = false;
 
             % set the Tag property of the axes used for event routing
             obj.mainAxes.Tag = obj.Name;
@@ -633,6 +634,12 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.sizingGrid.BackgroundColor = obj.BackgroundColor;
 
             obj.updateOnResize();
+
+            % Creating constructor-specified buttons can leave the toolbar
+            % focused. Release it once, after all name-value inputs are applied.
+            if isFirstUpdate && ~isempty(fieldnames(obj.ToolbarButtons))
+                obj.releaseToolbarFocus();
+            end
 
         end
 
@@ -1929,6 +1936,32 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     methods (Access=private)
         %% --- UI refresh helpers ---
 
+        function releaseToolbarFocus(obj)
+        %RELEASETOOLBARFOCUS Return keyboard focus from the axes toolbar to its figure.
+            fig = obj.ParentFig;
+            if isempty(fig) || ~isvalid(fig)
+                return
+            end
+
+            if strcmp(fig.Visible, 'on')
+                obj.clearInitialToolbarFocusListener();
+                focus(fig);
+            elseif isempty(obj.InitialToolbarFocusListener) || ...
+                    ~isvalid(obj.InitialToolbarFocusListener)
+                obj.InitialToolbarFocusListener = addlistener(fig, ...
+                    'Visible','PostSet',@(~,~) obj.releaseToolbarFocus());
+            end
+        end
+
+        function clearInitialToolbarFocusListener(obj)
+        %CLEARINITIALTOOLBARFOCUSLISTENER Remove the pending visibility listener.
+            if ~isempty(obj.InitialToolbarFocusListener)
+                delete(obj.InitialToolbarFocusListener( ...
+                    isvalid(obj.InitialToolbarFocusListener)));
+            end
+            obj.InitialToolbarFocusListener = event.listener.empty;
+        end
+
         function restoreViewportNotifications_(obj)
         %RESTOREVIEWPORTNOTIFICATIONS_ Recover suppression after errors.
             if ~isempty(obj) && isvalid(obj)
@@ -2035,7 +2068,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             S.UpdateState = struct( ...
                 "PendingSizeUpdate", obj.pendingSizeUpdate, ...
                 "LastResizeLayoutKey", obj.LastResizeLayoutKey_, ...
-                "InStartup", obj.inStartup);
+                "FirstUpdatePending", obj.FirstUpdatePending);
 
             if includeSizeDiagnostics
                 S.SizeDiagnostics = obj.getSizeDiagnostics();
@@ -3886,7 +3919,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         % toggle Enabled state of "state" tool specified by name (toolbar button ValueChangedFcn)
         function onToolToggle(obj,toolState,name)
         %ONTOOLTOGGLE Apply a toolbar state-button change to its tool.
-            focus(obj.ParentFig); % attempt to defocus the axes toolbar so that the axes can receive keyboard input
+            obj.releaseToolbarFocus();
             obj.ToolManager.toggle(toolState, name);
         end
 
@@ -3901,7 +3934,6 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         %RUNTOOL Run tool.
             obj.ToolManager.run(name);
         end
-
 
         % disable ActiveExclusiveTool if it exists
         function disableActiveExclusive(obj)
@@ -4618,6 +4650,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 delete(obj.ResizeListener(isvalid(obj.ResizeListener)));
             end
             obj.ResizeListener = event.listener.empty;
+            obj.clearInitialToolbarFocusListener();
             if ~isempty(obj.L), delete(obj.L(isvalid(obj.L))); end
             % replace listener property with empty array of event.listener
             obj.L = event.listener.empty;
