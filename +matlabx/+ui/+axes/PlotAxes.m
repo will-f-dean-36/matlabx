@@ -9,6 +9,24 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
 % Event routing and pluggable tools should attach here in the future. Keeping
 % the axes stable gives FigureEventHub one durable registrant per panel and
 % gives tools a host identity independent of the currently mounted renderer.
+%
+% Create a host, prepare renderer data and style, then mount the renderer:
+%
+%   fig = uifigure;
+%   host = matlabx.ui.axes.PlotAxes(fig);
+%   renderer = matlabx.ui.axes.plot.ScatterRenderer;
+%   data = matlabx.ui.axes.plot.ScatterData( ...
+%       XData={[1 2 3]}, YData={[2 1 4]}, SeriesNames="Samples", ...
+%       CData={[0.2 0.5 0.8]});
+%   renderer.update(data,matlabx.ui.axes.plot.ScatterStyle(Title="Example"));
+%   host.mount(renderer);
+%
+% Content remains application-owned and reusable. clear detaches it without
+% deleting it, and mounting the same content in another PlotAxes transfers it.
+%
+% See also matlabx.ui.axes.PlotContent,
+% matlabx.ui.axes.plot.ScatterRenderer,
+% matlabx.ui.axes.plot.ViolinRenderer
 
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
@@ -26,25 +44,39 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
 
+    % Public host identity and appearance applied to the stable UIAxes.
     properties (AbortSet)
+        % Identifier assigned to the underlying axes Tag.
         Name (1,1) string = ""
+        % Foreground color used for rulers, labels, title, and subtitle.
         ForegroundColor (1,3) double = [0 0 0]
+        % Font size applied to the underlying axes.
         FontSize (1,1) double {mustBePositive} = 12
     end
 
+    % Read-only access to the mounted renderer and stable UIAxes.
     properties (Dependent, SetAccess=private)
+        % Application-owned PlotContent currently mounted in this host.
         Content
+        % Stable UIAxes used by renderers and future tools.
         Axes
     end
 
+    % Graphics, listener, and content references owned by the host lifecycle.
     properties (Access=private, Transient, NonCopyable)
+        % Grid containing the stable axes.
         Grid matlab.ui.container.GridLayout
+        % UIAxes retained while renderer content changes.
         MainAxes matlab.ui.control.UIAxes
+        % Listener that detaches content before axes graphics are destroyed.
         AxesLifetimeListener event.listener = event.listener.empty()
+        % Backing reference for the currently mounted content.
         Content_ (:,1) matlabx.ui.axes.PlotContent = matlabx.ui.axes.PlotContent.empty(0,1)
     end
 
+    % Notifications emitted when the mounted content relationship changes.
     events
+        % Emitted after content is mounted, transferred, or cleared.
         ContentChanged
     end
 
@@ -163,6 +195,9 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             axes.XTickLabelMode = 'auto';
             axes.YTickLabelMode = 'auto';
             axes.ZTickLabelMode = 'auto';
+            axes.XAxis.Visible = 'on';
+            axes.YAxis.Visible = 'on';
+            axes.ZAxis.Visible = 'off';
 
             % Restore general layout properties that plot types commonly alter.
             axes.DataAspectRatioMode = 'auto';
@@ -183,6 +218,9 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             axes.TickDir = 'in';
             axes.View = [0 90];
             axes.NextPlot = 'add';
+            axes.ColorOrderIndex = 1;
+
+            obj.applyHostAppearance();
         end
 
         function delete(obj)
@@ -265,15 +303,32 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 return;
             end
 
+            obj.applyHostAppearance();
+            obj.MainAxes.Tag = char(obj.Name);
+        end
+
+    end
+
+    methods (Access=private)
+
+        function applyHostAppearance(obj)
+        %APPLYHOSTAPPEARANCE Restore colors and typography owned by PlotAxes.
+            if isempty(obj.MainAxes) || ~isvalid(obj.MainAxes) || ...
+                    obj.MainAxes.BeingDeleted == "on"
+                return;
+            end
+
             obj.Grid.BackgroundColor = obj.BackgroundColor;
             obj.MainAxes.Color = obj.BackgroundColor;
             obj.MainAxes.XColor = obj.ForegroundColor;
             obj.MainAxes.YColor = obj.ForegroundColor;
+            obj.MainAxes.ZColor = obj.ForegroundColor;
             obj.MainAxes.XLabel.Color = obj.ForegroundColor;
             obj.MainAxes.YLabel.Color = obj.ForegroundColor;
+            obj.MainAxes.ZLabel.Color = obj.ForegroundColor;
             obj.MainAxes.Title.Color = obj.ForegroundColor;
+            obj.MainAxes.Subtitle.Color = obj.ForegroundColor;
             obj.MainAxes.FontSize = obj.FontSize;
-            obj.MainAxes.Tag = char(obj.Name);
         end
 
     end

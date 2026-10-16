@@ -1,5 +1,16 @@
 classdef ViolinRenderer < matlabx.ui.axes.PlotContent
 %VIOLINRENDERER Render grouped swarm/violin series into a PlotAxes host.
+%
+%   renderer = matlabx.ui.axes.plot.ViolinRenderer;
+%   renderer.update(data,style);
+%   host.mount(renderer);
+%
+% Data and style remain stored while detached. setData and setStyle update
+% one half of the renderer state; update replaces both with one refresh.
+%
+% See also matlabx.ui.axes.PlotAxes, matlabx.ui.axes.PlotContent,
+% matlabx.ui.axes.plot.ViolinData, matlabx.ui.axes.plot.ViolinStyle,
+% matlabx.ui.axes.plot.Violin
 
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
@@ -17,12 +28,17 @@ classdef ViolinRenderer < matlabx.ui.axes.PlotContent
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
 
+    % Publicly readable renderer inputs retained across host transfers.
     properties (SetAccess=private)
+        % Normalized grouped observations currently stored by the renderer.
         Data (1,1) matlabx.ui.axes.plot.ViolinData = matlabx.ui.axes.plot.ViolinData()
+        % Appearance currently applied when the renderer is attached.
         Style (1,1) matlabx.ui.axes.plot.ViolinStyle = matlabx.ui.axes.plot.ViolinStyle()
     end
 
+    % Renderer-owned primitives retained across host transfers.
     properties (Access=private)
+        % One low-level violin group per logical data series.
         Plots (:,1) matlabx.ui.axes.plot.Violin = matlabx.ui.axes.plot.Violin.empty(0,1)
     end
 
@@ -73,27 +89,42 @@ classdef ViolinRenderer < matlabx.ui.axes.PlotContent
 
             for k = 1:count
                 plot = obj.Plots(k);
-                plot.setParent(axes);
+                plot.Parent = axes;
                 plot.PointsVisible = 'off';
                 plot.ViolinOutlinesVisible = 'off';
                 plot.ErrorBarsVisible = 'off';
-                plot.XData = ones(size(data.Values{k}))*ticks(k);
-                plot.YData = data.Values{k};
                 plot.XJitter = 'density';
                 plot.XJitterWidth = style.XJitterWidth;
+                plot.CentralStatistic = style.CentralStatistic;
+                plot.ErrorStatistic = style.ErrorStatistic;
+                plot.setData(ones(size(data.Values{k}))*ticks(k), ...
+                    data.Values{k},data.CData{k});
                 plot.DataTipCell = {{},{}};
                 plot.MarkerSize = style.MarkerSize;
-                plot.MarkerFaceColorMode = 'flat';
+                plot.MarkerLineWidth = style.MarkerLineWidth;
+                if style.MarkerFaceColorMode == "CData"
+                    plot.MarkerFaceColorMode = 'flat';
+                else
+                    plot.MarkerFaceColorMode = obj.resolveColor( ...
+                        style.MarkerFaceColorMode,style.MarkerFaceColor,automatic(k,:));
+                end
                 plot.MarkerFaceAlpha = style.MarkerFaceAlpha;
-                plot.CData = data.CData{k};
-                plot.MarkerEdgeColor = obj.resolveColor( ...
-                    style.MarkerEdgeColorMode,style.MarkerEdgeColor,automatic(k,:));
+                plot.MarkerEdgeAlpha = style.MarkerEdgeAlpha;
+                if style.MarkerEdgeColorMode == "CData"
+                    plot.MarkerEdgeColor = 'flat';
+                else
+                    plot.MarkerEdgeColor = obj.resolveColor( ...
+                        style.MarkerEdgeColorMode,style.MarkerEdgeColor,automatic(k,:));
+                end
                 plot.ViolinFaceColor = obj.resolveColor( ...
                     style.ViolinFaceColorMode,style.ViolinFaceColor,automatic(k,:));
+                plot.ViolinLineWidth = style.ViolinLineWidth;
                 plot.ViolinEdgeColor = obj.resolveColor( ...
                     style.ViolinEdgeColorMode,style.ViolinEdgeColor,automatic(k,:));
+                plot.ViolinEdgeAlpha = style.ViolinEdgeAlpha;
                 plot.ErrorBarsColor = obj.resolveColor( ...
                     style.ErrorBarsColorMode,style.ErrorBarsColor,automatic(k,:));
+                plot.ErrorBarsLineWidth = style.ErrorBarsLineWidth;
                 plot.Name = char(data.SeriesNames(k));
                 plot.PointsVisible = matlab.lang.OnOffSwitchState(style.PointsVisible);
                 plot.ViolinOutlinesVisible = matlab.lang.OnOffSwitchState(style.ViolinOutlinesVisible);
@@ -132,7 +163,7 @@ classdef ViolinRenderer < matlabx.ui.axes.PlotContent
         %ATTACHGRAPHICS Move all existing violin primitives to a new UIAxes.
 
             for k = 1:numel(obj.Plots)
-                obj.Plots(k).setParent(axes);
+                obj.Plots(k).Parent = axes;
             end
         end
 
