@@ -10,6 +10,15 @@ classdef Scatter < handle & matlab.mixin.SetGet
 %
 % Use setData to update XData, YData, and CData together. Assign Parent to
 % move the owned primitives without recreating them; Parent=[] detaches them.
+% Replace the complete point data-tip template with a two-cell value:
+%
+%   group.DataTipCell = {{"Label","Value"},{labels,values}};
+%
+% Each value may be scalar or contain one entry per point. Assign {{},{}} to
+% restore the low-level X/Y template. Numeric rows use DataTipFormat, which
+% defaults to two decimal places and may be changed independently:
+%
+%   group.DataTipFormat = "%.3g";
 %
 % See also matlabx.ui.axes.plot.ScatterRenderer,
 % matlabx.ui.axes.plot.ScatterData, matlabx.ui.axes.plot.ScatterStyle
@@ -58,8 +67,12 @@ classdef Scatter < handle & matlab.mixin.SetGet
         Marker (:,1) char {mustBeMember(Marker,{'o','s','^','h','p','d','v','>','<'})}
         % Scalar or RGB color data associated with the scatter points.
         CData
-        % Labels and values used to replace default data-tip rows.
+        % Two-cell {labels,values} replacement for all point data-tip rows.
+        % Labels and values must have equal counts. Values may be scalar or
+        % contain one entry per point. Assign {{},{}} to restore X and Y.
         DataTipCell (1,2) cell
+        % sprintf-style format applied to numeric data-tip rows.
+        DataTipFormat (1,1) string
         % Series name stored in the scatter DisplayName.
         Name (1,:) char
     end
@@ -88,6 +101,8 @@ classdef Scatter < handle & matlab.mixin.SetGet
     properties(Access = private)
         % Backing value for HullType.
         HullType_ (1,:) char {mustBeMember(HullType_,{'convex','concave'})} = 'concave'
+        % Backing value for the numeric data-tip format.
+        DataTipFormat_ (1,1) string = "%.2f"
     end
 
     %% Graphics objects
@@ -98,6 +113,8 @@ classdef Scatter < handle & matlab.mixin.SetGet
         scatterPoints (1,1) matlab.graphics.chart.primitive.Scatter
         % Patch primitive containing the optional hull.
         Hull (1,1) matlab.graphics.primitive.Patch
+        % Temporary data tip shown only while the pointer hovers over a point.
+        HoverDataTip = []
     end
 
     methods
@@ -113,6 +130,7 @@ classdef Scatter < handle & matlab.mixin.SetGet
                 NameValuePairs.XData (1,:) double = NaN
                 NameValuePairs.YData (1,:) double = NaN
                 NameValuePairs.DataTipCell (1,2) cell = {{},{}};
+                NameValuePairs.DataTipFormat (1,1) string = "%.2f"
                 NameValuePairs.MarkerFaceColor = 'flat'
                 NameValuePairs.MarkerFaceAlpha (1,1) double {mustBeInRange(NameValuePairs.MarkerFaceAlpha,0,1)} = 0.5
                 NameValuePairs.MarkerEdgeColor = [0 0 0]
@@ -168,6 +186,7 @@ classdef Scatter < handle & matlab.mixin.SetGet
             obj.HullType = NameValuePairs.HullType;
 
             % data tip info
+            obj.DataTipFormat = NameValuePairs.DataTipFormat;
             obj.DataTipCell = NameValuePairs.DataTipCell;
 
             % name of the dataset plotted
@@ -197,6 +216,122 @@ classdef Scatter < handle & matlab.mixin.SetGet
             if obj.HullVisible
                 obj.updateHull();
             end
+        end
+
+        function handled = handleEvent(obj,event)
+        %HANDLEEVENT Preview data tips on hover and retain one on click.
+            handled = false;
+            targetMatches = isequal(event.Target,obj.scatterPoints) && ...
+                ~isempty(obj.Parent);
+
+            switch event.Kind
+                case "Move"
+                    if targetMatches
+                        obj.updateHoverDataTip();
+                        handled = true;
+                    else
+                        obj.clearHoverDataTip();
+                    end
+
+                case "Leave"
+                    obj.clearHoverDataTip();
+
+                case "Down"
+                    % A clicked tip is retained by MATLAB and deliberately not
+                    % stored as HoverDataTip, so later movement cannot remove it.
+                    obj.clearHoverDataTip();
+                    if event.MouseAction == "click" && targetMatches
+                        point = obj.Parent.CurrentPoint;
+                        datatip(obj.scatterPoints,point(1,1),point(1,2));
+                        event.markHandled();
+                        handled = true;
+                    end
+            end
+        end
+
+    end
+
+    methods (Access=private)
+
+        function updateHoverDataTip(obj)
+        %UPDATEHOVERDATATIP Keep the existing preview while its point is unchanged.
+            point = obj.Parent.CurrentPoint;
+            candidate = datatip(obj.scatterPoints,point(1,1),point(1,2));
+
+            if obj.sameDataIndex(candidate,obj.HoverDataTip)
+                delete(candidate);
+                return;
+            end
+
+            previous = obj.HoverDataTip;
+            obj.HoverDataTip = candidate;
+            obj.disableHoverTipHitTesting();
+            if ~isempty(previous) && isgraphics(previous)
+                delete(previous);
+            end
+        end
+
+        function clearHoverDataTip(obj)
+        %CLEARHOVERDATATIP Delete only the temporary pointer-following tip.
+            if ~isempty(obj.HoverDataTip) && isgraphics(obj.HoverDataTip)
+                delete(obj.HoverDataTip);
+            end
+            obj.HoverDataTip = [];
+        end
+
+        function disableHoverTipHitTesting(obj)
+        %DISABLEHOVERTIPHITTESTING Keep the tip from obscuring its data point.
+            % Data-tip implementation details vary by MATLAB release, so these
+            % presentation-only assignments remain guarded.
+            try
+                obj.HoverDataTip.HitTest = "off";
+            catch
+            end
+            try
+                obj.HoverDataTip.PickableParts = "none";
+            catch
+            end
+        end
+
+        function tf = sameDataIndex(~,first,second)
+        %SAMEDATAINDEX Compare two valid data tips without assuming internals.
+            tf = false;
+            if isempty(first) || isempty(second) || ...
+                    ~isgraphics(first) || ~isgraphics(second)
+                return;
+            end
+            try
+                tf = isequal(first.DataIndex,second.DataIndex);
+            catch
+            end
+        end
+
+        function row = createDataTipRow(obj,label,value)
+        %CREATEDATATIPROW Format numeric values and preserve text defaults.
+            if isnumeric(value)
+                row = dataTipTextRow(label,value,obj.DataTipFormat_);
+            else
+                row = dataTipTextRow(label,value);
+            end
+        end
+
+        function replaceDataTipRows(obj,val)
+        %REPLACEDATATIPROWS Rebuild all point rows with the current format.
+            dtNames = val{1};
+            dtData = val{2};
+            if numel(dtNames) ~= numel(dtData) || isempty(dtNames)
+                error('matlabx:ui:axes:plot:InvalidDataTipCell', ...
+                    'DataTipCell labels and values must have equal, nonzero counts.');
+            end
+
+            rows = obj.scatterPoints.DataTipTemplate.DataTipRows;
+            for i = 1:numel(dtNames)
+                rows(i) = obj.createDataTipRow(dtNames{i},dtData{i});
+            end
+            for i = numel(rows):-1:numel(dtNames)+1
+                rows(i) = [];
+            end
+            obj.scatterPoints.DataTipTemplate.DataTipRows = rows;
         end
 
     end
@@ -378,23 +513,12 @@ classdef Scatter < handle & matlab.mixin.SetGet
         %% DataTipCell
 
         function set.DataTipCell(obj,val)
-        %SET.DATATIPCELL Set the DataTipCell value on the owned graphics.
+        %SET.DATATIPCELL Replace every point data-tip row, or restore X/Y.
             if any(cellfun(@(x) isempty(x),val))
-                % number of datatiprows in the plot
-                nDataTipRows = numel(obj.scatterPoints.DataTipTemplate.DataTipRows);
-                % clear out default datatiprows
-                for i = nDataTipRows:-1:2
-                    obj.scatterPoints.DataTipTemplate.DataTipRows(i) = [];
-                end
-
-                return
-            else
-                dtNames = val{1};
-                dtData = val{2};
-                for i = 1:numel(dtNames)
-                    obj.scatterPoints.DataTipTemplate.DataTipRows(i) = dataTipTextRow(dtNames{i},dtData{i});
-                end
+                val = {{"X","Y"},{obj.XData,obj.YData}};
             end
+
+            obj.replaceDataTipRows(val);
         end
 
         function DataTipCell = get.DataTipCell(obj)
@@ -406,6 +530,19 @@ classdef Scatter < handle & matlab.mixin.SetGet
             dtData = arrayfun(@(x) x.Value,dtRows','UniformOutput',false);
             % cell array of cell arrays with datatip info in scatterPoints
             DataTipCell = {dtNames,dtData};
+        end
+
+        %% DataTipFormat
+
+        function set.DataTipFormat(obj,val)
+        %SET.DATATIPFORMAT Apply one format to every numeric point row.
+            obj.DataTipFormat_ = val;
+            obj.replaceDataTipRows(obj.DataTipCell);
+        end
+
+        function val = get.DataTipFormat(obj)
+        %GET.DATATIPFORMAT Return the numeric point-row format.
+            val = obj.DataTipFormat_;
         end
 
         %% Name

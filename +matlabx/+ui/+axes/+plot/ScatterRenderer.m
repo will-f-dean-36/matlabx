@@ -97,7 +97,12 @@ classdef ScatterRenderer < matlabx.ui.axes.PlotContent
                 plot.Parent = axes;
                 plot.HullVisible = 'off';
                 plot.setData(data.XData{k},data.YData{k},data.CData{k});
-                plot.DataTipCell = {{},{}};
+                plot.Name = char(data.SeriesNames(k));
+                series = categorical(repmat(data.SeriesNames(k), ...
+                    numel(data.XData{k}),1));
+                plot.DataTipCell = {{"Series","X","Y"}, ...
+                    {series,data.XData{k},data.YData{k}}};
+                plot.DataTipFormat = style.DataTipFormat;
                 plot.MarkerSize = style.MarkerSize;
                 plot.MarkerLineWidth = style.MarkerLineWidth;
                 if style.MarkerFaceColorMode == "CData"
@@ -108,8 +113,6 @@ classdef ScatterRenderer < matlabx.ui.axes.PlotContent
                 end
                 plot.MarkerFaceAlpha = style.MarkerFaceAlpha;
                 plot.MarkerEdgeAlpha = style.MarkerEdgeAlpha;
-                plot.Name = char(data.SeriesNames(k));
-
                 if style.MarkerMode == "single"
                     plot.Marker = 'o';
                 else
@@ -158,6 +161,16 @@ classdef ScatterRenderer < matlabx.ui.axes.PlotContent
             if style.HullVisible
                 axes.Children = [findobj(axes.Children,'-not','Type','patch'); ...
                     findobj(axes.Children,'Type','patch')];
+            end
+        end
+
+        function handleEvent(obj,kind,event)
+        %HANDLEEVENT Delegate routed data-tip gestures to all scatter groups.
+            if ~any(string(kind) == ["Down","Move","Leave"])
+                return;
+            end
+            for k = 1:numel(obj.Plots)
+                obj.Plots(k).handleEvent(event);
             end
         end
 

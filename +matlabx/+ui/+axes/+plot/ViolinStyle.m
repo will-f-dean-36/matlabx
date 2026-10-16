@@ -6,7 +6,8 @@ classdef ViolinStyle
 %   style = matlabx.ui.axes.plot.ViolinStyle( ...
 %       Title="Distributions", YLabel="Value", ...
 %       PointsVisible=true, ViolinOutlinesVisible=true, ...
-%       CentralStatistic="median", ErrorStatistic="iqr");
+%       CentralStatistic="median", ErrorStatistic="iqr", ...
+%       DataTipFormat="%.3g");
 %
 % See also matlabx.ui.axes.plot.ViolinData,
 % matlabx.ui.axes.plot.ViolinRenderer
@@ -43,6 +44,8 @@ classdef ViolinStyle
         Colormap (:,3) double {mustBeFinite,mustBeInRange(Colormap,0,1)} = parula(256)
         % Color limits applied to scalar CData.
         CLim (1,2) double {mustBeFinite,mustBeIncreasingLimits} = [0 1]
+        % sprintf-style format applied to numeric point and summary values.
+        DataTipFormat (1,1) string = "%.2f"
         % Scatter marker area in points squared.
         MarkerSize (1,1) double {mustBeFinite,mustBePositive} = 50
         % Marker edge line width.
@@ -89,6 +92,8 @@ classdef ViolinStyle
         ErrorBarsColor (1,3) double {mustBeFinite,mustBeInRange(ErrorBarsColor,0,1)} = [0 0 0]
         % Central statistic and interval line width.
         ErrorBarsLineWidth (1,1) double {mustBeFinite,mustBePositive} = 1
+        % Width of the independently interactive central-statistic line.
+        CentralStatLineWidth (1,1) double {mustBeFinite,mustBePositive} = 1
     end
 
     methods

@@ -99,7 +99,12 @@ classdef ViolinRenderer < matlabx.ui.axes.PlotContent
                 plot.ErrorStatistic = style.ErrorStatistic;
                 plot.setData(ones(size(data.Values{k}))*ticks(k), ...
                     data.Values{k},data.CData{k});
-                plot.DataTipCell = {{},{}};
+                plot.Name = char(data.SeriesNames(k));
+                group = categorical(repmat(data.SeriesNames(k), ...
+                    numel(data.Values{k}),1));
+                plot.DataTipCell = {{"Series","Value"}, ...
+                    {group,data.Values{k}}};
+                plot.DataTipFormat = style.DataTipFormat;
                 plot.MarkerSize = style.MarkerSize;
                 plot.MarkerLineWidth = style.MarkerLineWidth;
                 if style.MarkerFaceColorMode == "CData"
@@ -125,7 +130,7 @@ classdef ViolinRenderer < matlabx.ui.axes.PlotContent
                 plot.ErrorBarsColor = obj.resolveColor( ...
                     style.ErrorBarsColorMode,style.ErrorBarsColor,automatic(k,:));
                 plot.ErrorBarsLineWidth = style.ErrorBarsLineWidth;
-                plot.Name = char(data.SeriesNames(k));
+                plot.CentralStatLineWidth = style.CentralStatLineWidth;
                 plot.PointsVisible = matlab.lang.OnOffSwitchState(style.PointsVisible);
                 plot.ViolinOutlinesVisible = matlab.lang.OnOffSwitchState(style.ViolinOutlinesVisible);
                 plot.ErrorBarsVisible = matlab.lang.OnOffSwitchState(style.ErrorBarsVisible);
@@ -146,6 +151,16 @@ classdef ViolinRenderer < matlabx.ui.axes.PlotContent
             axes.CLim = style.CLim;
             obj.Host.BackgroundColor = style.BackgroundColor;
             obj.Host.ForegroundColor = style.ForegroundColor;
+        end
+
+        function handleEvent(obj,kind,event)
+        %HANDLEEVENT Delegate routed data-tip gestures to all violin groups.
+            if ~any(string(kind) == ["Down","Move","Leave"])
+                return;
+            end
+            for k = 1:numel(obj.Plots)
+                obj.Plots(k).handleEvent(event);
+            end
         end
 
         function delete(obj)

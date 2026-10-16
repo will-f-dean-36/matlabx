@@ -123,6 +123,7 @@ classdef Demos
             accordion.getItem("Points").expand();
             matlabx.ui.axes.plot.Demos.generateScatter(renderer,controls);
             matlabx.ui.axes.plot.Demos.applyScatterStyle(renderer,controls);
+            movegui(fig,"center");
             fig.Visible = "on";
         end
 
@@ -181,7 +182,7 @@ classdef Demos
             controls.ViolinLineWidth = matlabx.ui.axes.plot.Demos.numericControl( ...
                 violinPane,7,"Line width",1,0.1,10,0.1);
 
-            summaryPane = matlabx.ui.axes.plot.Demos.addSection(accordion,"Summary",6);
+            summaryPane = matlabx.ui.axes.plot.Demos.addSection(accordion,"Summary",7);
             controls.ErrorBarsVisible = matlabx.ui.axes.plot.Demos.checkBoxControl( ...
                 summaryPane,1,"Visible",true);
             controls.CentralStatistic = matlabx.ui.axes.plot.Demos.dropDownControl( ...
@@ -193,7 +194,9 @@ classdef Demos
             controls.ErrorBarsColor = matlabx.ui.axes.plot.Demos.colorControl( ...
                 summaryPane,5,"Custom color",[0 0 0]);
             controls.ErrorBarsLineWidth = matlabx.ui.axes.plot.Demos.numericControl( ...
-                summaryPane,6,"Line width",1,0.1,10,0.1);
+                summaryPane,6,"Error line width",1,0.1,10,0.1);
+            controls.CentralStatLineWidth = matlabx.ui.axes.plot.Demos.numericControl( ...
+                summaryPane,7,"Center line width",1,0.1,10,0.1);
 
             axesPane = matlabx.ui.axes.plot.Demos.addSection(accordion,"Axes",5);
             controls.Title = matlabx.ui.axes.plot.Demos.textControl( ...
@@ -216,6 +219,7 @@ classdef Demos
             accordion.getItem("Summary").expand();
             matlabx.ui.axes.plot.Demos.generateViolin(renderer,controls);
             matlabx.ui.axes.plot.Demos.applyViolinStyle(renderer,controls);
+            movegui(fig,"center");
             fig.Visible = "on";
         end
 
@@ -462,6 +466,7 @@ classdef Demos
                 ErrorBarsColorMode=string(controls.ErrorBarsColorMode.Value), ...
                 ErrorBarsColor=controls.ErrorBarsColor.Value, ...
                 ErrorBarsLineWidth=controls.ErrorBarsLineWidth.Value, ...
+                CentralStatLineWidth=controls.CentralStatLineWidth.Value, ...
                 BackgroundColor=controls.BackgroundColor.Value, ...
                 ForegroundColor=controls.ForegroundColor.Value));
         end

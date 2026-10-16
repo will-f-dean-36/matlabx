@@ -6,9 +6,9 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
 % layout, and presentation state. A PlotContent object owns plot primitives
 % and can move between PlotAxes hosts without reparenting this container.
 %
-% Event routing and pluggable tools should attach here in the future. Keeping
-% the axes stable gives FigureEventHub one durable registrant per panel and
-% gives tools a host identity independent of the currently mounted renderer.
+% PlotAxes registers once with FigureEventHub and forwards normalized events
+% to its mounted content. Keeping the axes stable gives the hub one durable
+% registrant per panel, independent of the currently mounted renderer.
 %
 % Create a host, prepare renderer data and style, then mount the renderer:
 %
@@ -72,6 +72,10 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         AxesLifetimeListener event.listener = event.listener.empty()
         % Backing reference for the currently mounted content.
         Content_ (:,1) matlabx.ui.axes.PlotContent = matlabx.ui.axes.PlotContent.empty(0,1)
+        % Shared figure event router used by this stable host.
+        Hub matlabx.ui.interaction.FigureEventHub
+        % Registration identifier assigned by FigureEventHub.
+        RouterId double = NaN
     end
 
     % Notifications emitted when the mounted content relationship changes.
@@ -148,13 +152,73 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function routeEvent(obj,kind,event)
-        %ROUTEEVENT Forward a normalized future hub event to mounted content.
-        % FigureEventHub registration is intentionally deferred. This method is
-        % the stable routing seam that PlotAxes tools and content can share.
+        %ROUTEEVENT Forward a normalized hub event to mounted content.
 
             if ~isempty(obj.Content_)
                 obj.Content_.handleEvent(string(kind),event);
             end
+        end
+
+        function tf = matches(obj,event)
+        %MATCHES Return whether a routed event belongs to the stable UIAxes.
+            tf = false;
+            target = event.Target;
+            if isempty(target)
+                return;
+            end
+
+            % Data-tip interaction can make hittest return internal opaque
+            % graphics objects. They support neither isvalid nor every normal
+            % handle operation, so keep the entire ancestry query guarded.
+            try
+                if isequal(target,obj.MainAxes)
+                    tf = true;
+                    return;
+                end
+                axes = ancestor(target,'matlab.ui.control.UIAxes');
+                tf = ~isempty(axes) && isequal(axes,obj.MainAxes);
+            catch
+            end
+        end
+
+        function onDown(obj,event)
+        %ONDOWN Forward a routed pointer-down event to mounted content.
+            obj.routeEvent("Down",event);
+        end
+
+        function onMove(obj,event)
+        %ONMOVE Forward a routed pointer-move event to mounted content.
+            obj.routeEvent("Move",event);
+        end
+
+        function onUp(obj,event)
+        %ONUP Forward a routed pointer-up event to mounted content.
+            obj.routeEvent("Up",event);
+        end
+
+        function onScroll(obj,event)
+        %ONSCROLL Forward a routed scroll event to mounted content.
+            obj.routeEvent("Scroll",event);
+        end
+
+        function onKeyPress(obj,event)
+        %ONKEYPRESS Forward a routed key-press event to mounted content.
+            obj.routeEvent("KeyPress",event);
+        end
+
+        function onKeyRelease(obj,event)
+        %ONKEYRELEASE Forward a routed key-release event to mounted content.
+            obj.routeEvent("KeyRelease",event);
+        end
+
+        function onEnter(obj,event)
+        %ONENTER Forward a routed pointer-enter event to mounted content.
+            obj.routeEvent("Enter",event);
+        end
+
+        function onLeave(obj,event)
+        %ONLEAVE Forward a routed pointer-leave event to mounted content.
+            obj.routeEvent("Leave",event);
         end
 
         function resetAxes(obj)
@@ -224,9 +288,17 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function delete(obj)
-        %DELETE Detach content before MATLAB destroys the host axes.
+        %DELETE Unregister event routing and detach content before teardown.
 
             for k = 1:numel(obj)
+
+                try
+                    if ~isempty(obj(k).Hub) && isvalid(obj(k).Hub) && ...
+                            ~isnan(obj(k).RouterId)
+                        obj(k).Hub.unregister(obj(k).RouterId);
+                    end
+                catch
+                end
 
                 if ~isempty(obj(k).Content_)
                     obj(k).clear();
@@ -265,6 +337,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 matlabx.ui.axes.plot.ViolinStyle(Title="Distributions",YLabel="Value"));
             hosts.First.mount(renderers.Scatter);
             hosts.Second.mount(renderers.Violin);
+            movegui(fig,"center");
             fig.Visible = opts.Visible;
         end
 
@@ -288,6 +361,10 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.MainAxes.Interactions = dataTipInteraction;
             obj.MainAxes.Toolbar = axtoolbar(obj.MainAxes,{});
             obj.MainAxes.Tag = char(obj.Name);
+
+            fig = ancestor(obj.Parent,'figure');
+            obj.Hub = matlabx.ui.interaction.FigureEventHub.ensure(fig);
+            obj.RouterId = obj.Hub.register(obj,'Priority',10);
 
             % ComponentContainer can destroy children before the subclass delete
             % method runs. Detach at the axes destruction event while its owned

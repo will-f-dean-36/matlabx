@@ -10,6 +10,25 @@ classdef Violin < handle
 %
 % Use setData to update XData, YData, and CData together. Assign Parent to
 % move the owned primitives without recreating them; Parent=[] detaches them.
+% Replace the complete point data-tip template with a two-cell value:
+%
+%   group.DataTipCell = {{"Label","Value"},{labels,values}};
+%
+% Each value may be scalar or contain one entry per point. Assign {{},{}} to
+% restore the low-level X/Y template. This does not change the separate
+% central-statistic line template. Numeric point and summary rows share
+% DataTipFormat, which defaults to two decimal places:
+%
+%   group.DataTipFormat = "%.3g";
+%
+% Replace the central-statistic line template independently:
+%
+%   group.SummaryDataTipCell = { ...
+%       {"Group","Score"},{"Control",0.92}};
+%
+% Custom summary values are caller-owned and persist when plot data changes.
+% Assign group.SummaryDataTipCell={{},{}} to restore the automatically
+% generated group, sample count, center, interval, minimum, and maximum rows.
 %
 % See also matlabx.ui.axes.plot.ViolinRenderer,
 % matlabx.ui.axes.plot.ViolinData, matlabx.ui.axes.plot.ViolinStyle
@@ -60,8 +79,16 @@ classdef Violin < handle
         % Scalar or RGB color data associated with the observations.
         CData
 
-        % Labels and values used to replace default data-tip rows.
+        % Two-cell {labels,values} replacement for all point data-tip rows.
+        % Labels and values must have equal counts. Values may be scalar or
+        % contain one entry per point. Assign {{},{}} to restore X and Y.
         DataTipCell (1,2) cell
+        % Two-cell {labels,values} replacement for central-line summary rows.
+        % Custom values persist across data changes and must be refreshed by
+        % the caller. Assign {{},{}} to restore the generated statistics.
+        SummaryDataTipCell (1,2) cell
+        % sprintf-style format applied to numeric point and summary rows.
+        DataTipFormat (1,1) string
 
         % Whether the violin density patch is visible.
         ViolinOutlinesVisible (1,1) matlab.lang.OnOffSwitchState
@@ -84,10 +111,12 @@ classdef Violin < handle
         ErrorStatistic (1,1) string
         % Summary graphic line width.
         ErrorBarsLineWidth (1,1) double
+        % Width of the interactive central-statistic line.
+        CentralStatLineWidth (1,1) double
         % Central statistic and interval graphic color.
         ErrorBarsColor (1,3) double
 
-        % Series name used by the central-statistic data tip.
+        % Series name used by the central-statistic line data tip.
         Name (1,:) char
 
     end
@@ -100,6 +129,12 @@ classdef Violin < handle
         CentralStatistic_ (1,1) string = "mean"
         % Backing value for ErrorStatistic.
         ErrorStatistic_ (1,1) string = "std"
+        % Caller-supplied summary data-tip template retained across refreshes.
+        SummaryDataTipCell_ (1,2) cell = {{},{}}
+        % Whether the caller-supplied summary template overrides generated rows.
+        HasCustomSummaryDataTip (1,1) logical = false
+        % Backing value for the numeric data-tip format.
+        DataTipFormat_ (1,1) string = "%.2f"
     end
 
     % Derived geometry calculated from the current observations.
@@ -116,8 +151,14 @@ classdef Violin < handle
         violinPoints (1,1) matlab.graphics.chart.primitive.Scatter
         % Patch containing the central and interval bars.
         errorBars (1,1) matlab.graphics.primitive.Patch
-        % Line marker identifying the selected central statistic.
-        centralStatMarker (1,1) matlab.graphics.chart.primitive.Line
+        % Pickable horizontal line identifying the selected central statistic.
+        centralStatLine (1,1) matlab.graphics.chart.primitive.Line
+        % Temporary point or summary data tip shown under the pointer.
+        HoverDataTip = []
+        % Primitive currently represented by HoverDataTip.
+        HoverDataTipTarget = []
+        % Normal central-line width saved while hover emphasis is active.
+        CentralStatLineWidthBeforeHover = []
     end
 
     methods
@@ -133,6 +174,7 @@ classdef Violin < handle
                 NameValuePairs.XJitter (1,:) char {mustBeMember(NameValuePairs.XJitter,{'none','density'})} = 'density'
                 NameValuePairs.XJitterWidth (1,1) double {mustBeInRange(NameValuePairs.XJitterWidth,0,1,"exclude-lower")} = 0.9
                 NameValuePairs.DataTipCell (1,2) cell = {{},{}};
+                NameValuePairs.DataTipFormat (1,1) string = "%.2f"
 
                 NameValuePairs.MarkerEdgeColor = [0 0 0]
                 NameValuePairs.MarkerEdgeAlpha (1,1) double {mustBeInRange(NameValuePairs.MarkerEdgeAlpha,0,1)} = 1
@@ -154,6 +196,7 @@ classdef Violin < handle
                 NameValuePairs.CentralStatistic (1,1) string {mustBeMember(NameValuePairs.CentralStatistic,["mean","median"])} = "mean"
                 NameValuePairs.ErrorStatistic (1,1) string {mustBeMember(NameValuePairs.ErrorStatistic,["std","sem","iqr"])} = "std"
                 NameValuePairs.ErrorBarsLineWidth (1,1) double = 1
+                NameValuePairs.CentralStatLineWidth (1,1) double = 1
                 NameValuePairs.ErrorBarsColor (1,3) double = [0 0 0]
 
                 NameValuePairs.Name (1,:) char = 'untitled';
@@ -171,10 +214,10 @@ classdef Violin < handle
                 'Parent',Parent,'XData',NaN,'YData',NaN);
             obj.errorBars = patch(Parent,'XData',NaN,'YData',NaN, ...
                 'HitTest','off','PickableParts','none','Tag','ViolinErrorBars');
-            obj.centralStatMarker = matlab.graphics.chart.primitive.Line( ...
+            obj.centralStatLine = matlab.graphics.chart.primitive.Line( ...
                 'Parent',Parent,'XData',NaN,'YData',NaN, ...
-                'HitTest','off','PickableParts','none','Marker','o', ...
-                'MarkerSize',5,'Tag','ViolinCentralStatistic');
+                'HitTest','on','PickableParts','visible', ...
+                'Tag','ViolinCentralStatistic');
 
             obj.ViolinOutlinesVisible = NameValuePairs.ViolinOutlinesVisible;
             obj.ViolinLineWidth = NameValuePairs.ViolinLineWidth;
@@ -197,9 +240,11 @@ classdef Violin < handle
             obj.ErrorStatistic = NameValuePairs.ErrorStatistic;
             obj.setData(NameValuePairs.XData,NameValuePairs.YData,NameValuePairs.CData);
 
+            obj.DataTipFormat = NameValuePairs.DataTipFormat;
             obj.DataTipCell = NameValuePairs.DataTipCell;
 
             obj.ErrorBarsLineWidth = NameValuePairs.ErrorBarsLineWidth;
+            obj.CentralStatLineWidth = NameValuePairs.CentralStatLineWidth;
             obj.ErrorBarsColor = NameValuePairs.ErrorBarsColor;
 
             % The error bars and their central statistic form one visual unit.
@@ -214,7 +259,7 @@ classdef Violin < handle
             delete(obj.violinPoints);
             delete(obj.violinOutlines);
             delete(obj.errorBars);
-            delete(obj.centralStatMarker);
+            delete(obj.centralStatLine);
 
         end
 
@@ -230,6 +275,180 @@ classdef Violin < handle
                 'CData',cData);
             obj.updateViolinOutlines();
             obj.updateErrorBars();
+        end
+
+        function handled = handleEvent(obj,event)
+        %HANDLEEVENT Preview data tips on hover and retain one on click.
+            handled = false;
+            pointsMatch = isequal(event.Target,obj.violinPoints) && ...
+                ~isempty(obj.Parent);
+            summaryMatches = isequal(event.Target,obj.centralStatLine);
+
+            switch event.Kind
+                case "Move"
+                    if pointsMatch
+                        obj.updatePointHoverDataTip();
+                    elseif summaryMatches
+                        obj.updateSummaryHoverDataTip();
+                    else
+                        obj.clearHoverDataTip();
+                        return;
+                    end
+                    handled = true;
+
+                case "Leave"
+                    obj.clearHoverDataTip();
+
+                case "Down"
+                    obj.clearHoverDataTip();
+                    if event.MouseAction ~= "click"
+                        return;
+                    elseif pointsMatch
+                        point = obj.Parent.CurrentPoint;
+                        datatip(obj.violinPoints,point(1,1),point(1,2));
+                    elseif summaryMatches
+                        datatip(obj.centralStatLine,DataIndex=2);
+                    else
+                        return;
+                    end
+                    event.markHandled();
+                    handled = true;
+            end
+        end
+
+    end
+
+    methods (Access=private)
+
+        function updatePointHoverDataTip(obj)
+        %UPDATEPOINTHOVERDATATIP Replace the preview only when its point changes.
+            point = obj.Parent.CurrentPoint;
+            candidate = datatip(obj.violinPoints,point(1,1),point(1,2));
+
+            if isequal(obj.HoverDataTipTarget,obj.violinPoints) && ...
+                    obj.sameDataIndex(candidate,obj.HoverDataTip)
+                delete(candidate);
+                return;
+            end
+
+            obj.replaceHoverDataTip(candidate,obj.violinPoints);
+        end
+
+        function updateSummaryHoverDataTip(obj)
+        %UPDATESUMMARYHOVERDATATIP Keep one preview for the same summary marker.
+            obj.emphasizeCentralStatLine();
+            if isequal(obj.HoverDataTipTarget,obj.centralStatLine) && ...
+                    ~isempty(obj.HoverDataTip) && isgraphics(obj.HoverDataTip)
+                return;
+            end
+            candidate = datatip(obj.centralStatLine,DataIndex=2);
+            obj.replaceHoverDataTip(candidate,obj.centralStatLine);
+        end
+
+        function replaceHoverDataTip(obj,candidate,target)
+        %REPLACEHOVERDATATIP Install a new preview before removing the old one.
+            previous = obj.HoverDataTip;
+            obj.HoverDataTip = candidate;
+            obj.HoverDataTipTarget = target;
+            obj.disableHoverTipHitTesting();
+            if ~isempty(previous) && isgraphics(previous)
+                delete(previous);
+            end
+        end
+
+        function clearHoverDataTip(obj)
+        %CLEARHOVERDATATIP Delete only the temporary pointer-following tip.
+            if ~isempty(obj.HoverDataTip) && isgraphics(obj.HoverDataTip)
+                delete(obj.HoverDataTip);
+            end
+            obj.HoverDataTip = [];
+            obj.HoverDataTipTarget = [];
+            obj.restoreCentralStatLineWidth();
+        end
+
+        function disableHoverTipHitTesting(obj)
+        %DISABLEHOVERTIPHITTESTING Keep the tip from obscuring its plot target.
+            % Data-tip implementation details vary by MATLAB release, so these
+            % presentation-only assignments remain guarded.
+            try
+                obj.HoverDataTip.HitTest = "off";
+            catch
+            end
+            try
+                obj.HoverDataTip.PickableParts = "none";
+            catch
+            end
+        end
+
+        function tf = sameDataIndex(~,first,second)
+        %SAMEDATAINDEX Compare two valid data tips without assuming internals.
+            tf = false;
+            if isempty(first) || isempty(second) || ...
+                    ~isgraphics(first) || ~isgraphics(second)
+                return;
+            end
+            try
+                tf = isequal(first.DataIndex,second.DataIndex);
+            catch
+            end
+        end
+
+        function row = createDataTipRow(obj,label,value)
+        %CREATEDATATIPROW Format numeric values and preserve text defaults.
+            if isnumeric(value)
+                row = dataTipTextRow(label,value,obj.DataTipFormat_);
+            else
+                row = dataTipTextRow(label,value);
+            end
+        end
+
+        function row = createSummaryDataTipRow(obj,label,value)
+        %CREATESUMMARYDATATIPROW Align values with left, center, and right vertices.
+            if ischar(value)
+                value = repmat(string(value),1,3);
+            elseif isscalar(value) && (isnumeric(value) || islogical(value) || ...
+                    isstring(value) || iscell(value) || ...
+                    iscategorical(value) || isdatetime(value) || isduration(value))
+                value = repmat(value,1,3);
+            end
+            row = obj.createDataTipRow(label,value);
+        end
+
+        function emphasizeCentralStatLine(obj)
+        %EMPHASIZECENTRALSTATLINE Thicken the summary line during hover.
+            if isempty(obj.CentralStatLineWidthBeforeHover)
+                obj.CentralStatLineWidthBeforeHover = obj.centralStatLine.LineWidth;
+                obj.centralStatLine.LineWidth = ...
+                    obj.CentralStatLineWidthBeforeHover + 1;
+            end
+        end
+
+        function restoreCentralStatLineWidth(obj)
+        %RESTORECENTRALSTATLINEWIDTH Restore the line width saved on entry.
+            if isempty(obj.CentralStatLineWidthBeforeHover)
+                return;
+            end
+            if isgraphics(obj.centralStatLine)
+                obj.centralStatLine.LineWidth = ...
+                    obj.CentralStatLineWidthBeforeHover;
+            end
+            obj.CentralStatLineWidthBeforeHover = [];
+        end
+
+        function replacePointDataTipRows(obj,val)
+        %REPLACEPOINTDATATIPROWS Rebuild point rows with the current format.
+            dtNames = val{1};
+            dtData = val{2};
+            obj.validateDataTipCell(val,"DataTipCell");
+
+            rows = obj.violinPoints.DataTipTemplate.DataTipRows;
+            for i = 1:numel(dtNames)
+                rows(i) = obj.createDataTipRow(dtNames{i},dtData{i});
+            end
+            for i = numel(rows):-1:numel(dtNames)+1
+                rows(i) = [];
+            end
+            obj.violinPoints.DataTipTemplate.DataTipRows = rows;
         end
 
     end
@@ -249,7 +468,7 @@ classdef Violin < handle
             obj.violinOutlines.Parent = parent;
             obj.violinPoints.Parent = parent;
             obj.errorBars.Parent = parent;
-            obj.centralStatMarker.Parent = parent;
+            obj.centralStatLine.Parent = parent;
         end
 
         function parent = get.Parent(obj)
@@ -426,23 +645,12 @@ classdef Violin < handle
         %% DataTipCell
 
         function set.DataTipCell(obj,val)
-        %SET.DATATIPCELL Set the DataTipCell value on the owned graphics.
+        %SET.DATATIPCELL Replace every point data-tip row, or restore X/Y.
             if any(cellfun(@(x) isempty(x),val))
-                % number of datatiprows in the plot
-                nDataTipRows = numel(obj.violinPoints.DataTipTemplate.DataTipRows);
-                % clear out default datatiprows
-                for i = nDataTipRows:-1:2
-                    obj.violinPoints.DataTipTemplate.DataTipRows(i) = [];
-                end
-
-                return
-            else
-                dtNames = val{1};
-                dtData = val{2};
-                for i = 1:numel(dtNames)
-                    obj.violinPoints.DataTipTemplate.DataTipRows(i) = dataTipTextRow(dtNames{i},dtData{i});
-                end
+                val = {{"X","Y"},{obj.XData,obj.YData}};
             end
+
+            obj.replacePointDataTipRows(val);
         end
 
         function DataTipCell = get.DataTipCell(obj)
@@ -454,6 +662,47 @@ classdef Violin < handle
             dtData = arrayfun(@(x) x.Value,dtRows','UniformOutput',false);
             % cell array of cell arrays with datatip info in violinPoints
             DataTipCell = {dtNames,dtData};
+        end
+
+        %% DataTipFormat
+
+        function set.DataTipFormat(obj,val)
+        %SET.DATATIPFORMAT Apply one format to numeric point and summary rows.
+            obj.DataTipFormat_ = val;
+            obj.replacePointDataTipRows(obj.DataTipCell);
+            obj.updateErrorBars();
+        end
+
+        function val = get.DataTipFormat(obj)
+        %GET.DATATIPFORMAT Return the numeric data-tip format.
+            val = obj.DataTipFormat_;
+        end
+
+        %% SummaryDataTipCell
+
+        function set.SummaryDataTipCell(obj,val)
+        %SET.SUMMARYDATATIPCELL Replace summary rows, or restore generated statistics.
+        %   Values in a custom template are caller-owned and are not
+        %   recalculated when XData, YData, or summary modes change.
+            if any(cellfun(@(x) isempty(x),val))
+                obj.SummaryDataTipCell_ = {{},{}};
+                obj.HasCustomSummaryDataTip = false;
+                obj.updateErrorBars();
+                return;
+            end
+
+            obj.validateDataTipCell(val,"SummaryDataTipCell");
+            obj.SummaryDataTipCell_ = val;
+            obj.HasCustomSummaryDataTip = true;
+            obj.replaceSummaryDataTipRows(val);
+        end
+
+        function val = get.SummaryDataTipCell(obj)
+        %GET.SUMMARYDATATIPCELL Return the active summary-marker template.
+            rows = obj.centralStatLine.DataTipTemplate.DataTipRows;
+            names = arrayfun(@(row) row.Label,rows','UniformOutput',false);
+            values = arrayfun(@(row) row.Value,rows','UniformOutput',false);
+            val = {names,values};
         end
 
         %% name
@@ -583,7 +832,7 @@ classdef Violin < handle
         function set.ErrorBarsVisible(obj,val)
         %SET.ERRORBARSVISIBLE Set the ErrorBarsVisible value on the owned graphics.
             obj.errorBars.Visible = val;
-            obj.centralStatMarker.Visible = val;
+            obj.centralStatLine.Visible = val;
         end
 
         function ErrorBarsVisible = get.ErrorBarsVisible(obj)
@@ -599,8 +848,29 @@ classdef Violin < handle
         end
 
         function ErrorBarsLineWidth = get.ErrorBarsLineWidth(obj)
-        %GET.ERRORBARSLINEWIDTH Return the current ErrorBarsLineWidth value from the owned graphics.
+        %GET.ERRORBARSLINEWIDTH Return the ErrorBarsLineWidth value from the owned graphics.
             ErrorBarsLineWidth = obj.errorBars.LineWidth;
+        end
+
+        %% CentralStatLineWidth
+
+        function set.CentralStatLineWidth(obj,val)
+        %SET.CENTRALSTATLINEWIDTH Set the normal central-statistic line width.
+            if isempty(obj.CentralStatLineWidthBeforeHover)
+                obj.centralStatLine.LineWidth = val;
+            else
+                obj.CentralStatLineWidthBeforeHover = val;
+                obj.centralStatLine.LineWidth = val + 1;
+            end
+        end
+
+        function val = get.CentralStatLineWidth(obj)
+        %GET.CENTRALSTATLINEWIDTH Return the normal central-statistic width.
+            if isempty(obj.CentralStatLineWidthBeforeHover)
+                val = obj.centralStatLine.LineWidth;
+            else
+                val = obj.CentralStatLineWidthBeforeHover;
+            end
         end
 
         %% ErrorBarsColor
@@ -608,7 +878,7 @@ classdef Violin < handle
         function set.ErrorBarsColor(obj,val)
         %SET.ERRORBARSCOLOR Set the ErrorBarsColor value on the owned graphics.
             obj.errorBars.EdgeColor = val;
-            set(obj.centralStatMarker,'MarkerEdgeColor',val,'MarkerFaceColor',val);
+            obj.centralStatLine.Color = val;
         end
 
         function ErrorBarsColor = get.ErrorBarsColor(obj)
@@ -686,7 +956,7 @@ classdef Violin < handle
             if isempty(groupData) || isempty(obj.XData)
                 % An emptied group must not retain the previous summary graphics.
                 set(obj.errorBars,'XData',NaN,'YData',NaN);
-                set(obj.centralStatMarker,'XData',NaN,'YData',NaN);
+                set(obj.centralStatLine,'XData',NaN,'YData',NaN);
                 return
             end
 
@@ -723,25 +993,23 @@ classdef Violin < handle
                     errorValue = std(groupData);
                     lower = center-errorValue;
                     upper = center+errorValue;
-                    intervalRows = dataTipTextRow("SD",errorValue);
+                    intervalRows = obj.createSummaryDataTipRow("SD",errorValue);
                 case "sem"
                     errorValue = std(groupData)/sqrt(groupN);
                     lower = center-errorValue;
                     upper = center+errorValue;
-                    intervalRows = dataTipTextRow("SEM",errorValue);
+                    intervalRows = obj.createSummaryDataTipRow("SEM",errorValue);
                 case "iqr"
                     bounds = prctile(groupData,[25 75]);
                     lower = bounds(1);
                     upper = bounds(2);
-                    intervalRows = [dataTipTextRow("Q1",lower); ...
-                        dataTipTextRow("Q3",upper)];
+                    intervalRows = [obj.createSummaryDataTipRow("Q1",lower); ...
+                        obj.createSummaryDataTipRow("Q3",upper)];
             end
 
             % calculate X and YData for each line of the error bar, separate by NaNs
             errorXData = [...
                 xPosition-minorWidth, xPosition+minorWidth;...
-                NaN, NaN;...
-                xPosition-majorWidth, xPosition+majorWidth;...
                 NaN, NaN;...
                 xPosition-minorWidth, xPosition+minorWidth;...
                 NaN, NaN;...
@@ -750,8 +1018,6 @@ classdef Violin < handle
             errorYData = [...
                 upper, upper;...
                 NaN, NaN;...
-                center, center;...
-                NaN, NaN;...
                 lower, lower;...
                 NaN, NaN;...
                 upper, lower];
@@ -759,22 +1025,50 @@ classdef Violin < handle
             % set X and YData of the error bar line object
             set(obj.errorBars,'XData',errorXData','YData',errorYData');
 
-            % set X and YData of the central stat marker
-            set(obj.centralStatMarker,...
-                'XData',xPosition,...
-                'YData',center,...
-                'HitTest','On',...
-                'PickableParts','Visible');
+            % The center bar is its own pickable line and owns summary tips.
+            set(obj.centralStatLine,...
+                'XData',[xPosition-majorWidth,xPosition,xPosition+majorWidth],...
+                'YData',[center,center,center], ...
+                'HitTest','on', ...
+                'PickableParts','visible');
 
-            % add custom data tip rows for the central stat marker
-            obj.centralStatMarker.DataTipTemplate.DataTipRows = [ ...
-                dataTipTextRow("Group",categorical({groupName})); ...
-                dataTipTextRow("n",groupN); ...
-                dataTipTextRow(centerLabel,center); ...
+            % Add summary rows to the pickable central-statistic line.
+            obj.centralStatLine.DataTipTemplate.DataTipRows = [ ...
+                obj.createSummaryDataTipRow("Series",categorical({groupName})); ...
+                dataTipTextRow("n",repmat(groupN,1,3),"%d"); ...
+                obj.createSummaryDataTipRow(centerLabel,center); ...
                 intervalRows; ...
-                dataTipTextRow("Max",groupMax); ...
-                dataTipTextRow("Min",groupMin)];
+                obj.createSummaryDataTipRow("Max",groupMax); ...
+                obj.createSummaryDataTipRow("Min",groupMin)];
 
+            if obj.HasCustomSummaryDataTip
+                obj.replaceSummaryDataTipRows(obj.SummaryDataTipCell_);
+            end
+
+        end
+
+        function replaceSummaryDataTipRows(obj,val)
+        %REPLACESUMMARYDATATIPROWS Replace every central-line data-tip row.
+            obj.validateDataTipCell(val,"SummaryDataTipCell");
+            names = val{1};
+            values = val{2};
+            rows = obj.centralStatLine.DataTipTemplate.DataTipRows;
+            for i = 1:numel(names)
+                rows(i) = obj.createSummaryDataTipRow(names{i},values{i});
+            end
+            for i = numel(rows):-1:numel(names)+1
+                rows(i) = [];
+            end
+            obj.centralStatLine.DataTipTemplate.DataTipRows = rows;
+        end
+
+        function validateDataTipCell(~,val,propertyName)
+        %VALIDATEDATATIPCELL Require paired, nonempty row labels and values.
+            if numel(val{1}) ~= numel(val{2}) || isempty(val{1})
+                error('matlabx:ui:axes:plot:InvalidDataTipCell', ...
+                    '%s labels and values must have equal, nonzero counts.', ...
+                    propertyName);
+            end
         end
 
     end

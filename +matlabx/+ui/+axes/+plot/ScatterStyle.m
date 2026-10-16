@@ -5,7 +5,7 @@ classdef ScatterStyle
 %
 %   style = matlabx.ui.axes.plot.ScatterStyle( ...
 %       Title="Measurements", LegendVisible=true, ...
-%       MarkerSize=36, HullVisible=true);
+%       MarkerSize=36, HullVisible=true, DataTipFormat="%.3g");
 %
 % See also matlabx.ui.axes.plot.ScatterData,
 % matlabx.ui.axes.plot.ScatterRenderer
@@ -42,6 +42,8 @@ classdef ScatterStyle
         Colormap (:,3) double {mustBeFinite,mustBeInRange(Colormap,0,1)} = parula(256)
         % Color limits applied to scalar CData.
         CLim (1,2) double {mustBeFinite,mustBeIncreasingLimits} = [0 1]
+        % sprintf-style format applied to numeric data-tip values.
+        DataTipFormat (1,1) string = "%.2f"
         % Whether to display a series legend.
         LegendVisible (1,1) logical = false
         % Scatter marker area in points squared.

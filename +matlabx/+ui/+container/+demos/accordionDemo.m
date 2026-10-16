@@ -323,9 +323,7 @@ function accordion = accordionDemo()
     % expand the first accordion item
     accordion.Items(1).expand();
     % move gui to screen center
-    movegui(fH,'center')
-    % then shift 400 px to the left
-    fH.Position(1) = fH.Position(1)-400;
+    movegui(fH,"center")
     % make the figure visible
     fH.Visible = "on";
 
