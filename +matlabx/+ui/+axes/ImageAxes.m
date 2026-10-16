@@ -160,6 +160,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         ContextMenuItems
         % Whether the viewport overview graphics are visible.
         ViewportBoxVisible (1,1) matlab.lang.OnOffSwitchState
+        % Whether the axes toolbar is visible.
+        ToolbarVisible (1,1) matlab.lang.OnOffSwitchState
     end
 
     % Passthrough properties for hosted MATLAB graphics.
@@ -336,6 +338,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         ContextMenuItems_ (1,:) string = ["Image","Display","ResetView","Status"]
         % Backing value for ViewportBoxVisible.
         ViewportBoxVisible_ (1,1) matlab.lang.OnOffSwitchState = "off"
+        % Requested toolbar visibility, independent of temporary startup hiding.
+        ToolbarVisible_ (1,1) matlab.lang.OnOffSwitchState = "on"
     end
 
 
@@ -635,10 +639,15 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
             obj.updateOnResize();
 
-            % Creating constructor-specified buttons can leave the toolbar
-            % focused. Release it once, after all name-value inputs are applied.
-            if isFirstUpdate && ~isempty(fieldnames(obj.ToolbarButtons))
-                obj.releaseToolbarFocus();
+            % Reveal constructor-specified buttons only after the host figure
+            % is visible, then immediately move focus away from the toolbar.
+            if isFirstUpdate
+                if isempty(fieldnames(obj.ToolbarButtons))
+                    obj.mainAxes.Toolbar.Visible = obj.ToolbarVisible_;
+                else
+                    obj.mainAxes.Toolbar.Visible = 'off';
+                    obj.showInitialToolbar();
+                end
             end
 
         end
@@ -1936,6 +1945,26 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     methods (Access=private)
         %% --- UI refresh helpers ---
 
+        function showInitialToolbar(obj)
+        %SHOWINITIALTOOLBAR Reveal the constructed toolbar and release its focus.
+            fig = obj.ParentFig;
+            if isempty(fig) || ~isvalid(fig)
+                return
+            end
+
+            if strcmp(fig.Visible, 'on')
+                obj.clearInitialToolbarFocusListener();
+                obj.mainAxes.Toolbar.Visible = obj.ToolbarVisible_;
+                if strcmp(obj.ToolbarVisible_, 'on')
+                    obj.releaseToolbarFocus();
+                end
+            elseif isempty(obj.InitialToolbarFocusListener) || ...
+                    ~isvalid(obj.InitialToolbarFocusListener)
+                obj.InitialToolbarFocusListener = addlistener(fig, ...
+                    'Visible','PostSet',@(~,~) obj.showInitialToolbar());
+            end
+        end
+
         function releaseToolbarFocus(obj)
         %RELEASETOOLBARFOCUS Return keyboard focus from the axes toolbar to its figure.
             fig = obj.ParentFig;
@@ -1944,12 +1973,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
 
             if strcmp(fig.Visible, 'on')
-                obj.clearInitialToolbarFocusListener();
                 focus(fig);
-            elseif isempty(obj.InitialToolbarFocusListener) || ...
-                    ~isvalid(obj.InitialToolbarFocusListener)
-                obj.InitialToolbarFocusListener = addlistener(fig, ...
-                    'Visible','PostSet',@(~,~) obj.releaseToolbarFocus());
             end
         end
 
@@ -2519,6 +2543,11 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.MaskEnabled = ~obj.MaskEnabled;
         end
 
+        function toggleToolbar(obj)
+        %TOGGLETOOLBAR Show or hide the toolbar without changing installed tools.
+            obj.ToolbarVisible = ~obj.ToolbarVisible;
+        end
+
         % --- RenderSource: selected plane or computed composite ---
         function v = get.RenderSource(obj)
         %GET.RENDERSOURCE Return the current render source value.
@@ -2908,6 +2937,25 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.ComponentCLims = clims;
         end
 
+
+        % --- chooseColormap ---
+        function chooseColormap(obj)
+        %CHOOSECOLORMAP Open the colormap selector for the current component.
+            component = obj.C;
+            previousMap = obj.ComponentColormaps{component};
+            previousMode = obj.ComponentColorMode;
+
+            [cmap, accepted] = matlabx.app.ColormapSelector( ...
+                PreviewFcn=@(preview) obj.setComponentColormap(preview, component));
+
+            if accepted
+                obj.setComponentColormap(cmap, component);
+            elseif ~isequal(obj.ComponentColormaps{component}, previousMap) || ...
+                    ~strcmp(obj.ComponentColorMode, previousMode)
+                obj.setComponentColormap(previousMap, component);
+                obj.ComponentColorMode = previousMode;
+            end
+        end
 
         % --- setComponentColormap ---
         function setComponentColormap(obj, cmap, idx)
@@ -3511,6 +3559,20 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         %SET.VIEWPORTBOXVISIBLE Set viewport box visible and update dependent state.
             obj.ViewportBoxVisible_ = val;
             obj.updateViewportBoxVisibility();
+            obj.refreshContextMenu();
+        end
+        % ToolbarVisible
+        function val = get.ToolbarVisible(obj)
+        %GET.TOOLBARVISIBLE Return the requested toolbar visibility.
+            val = obj.ToolbarVisible_;
+        end
+        function set.ToolbarVisible(obj,val)
+        %SET.TOOLBARVISIBLE Show or hide the toolbar without changing its tools.
+            obj.ToolbarVisible_ = val;
+            if ~isempty(obj.mainAxes) && isvalid(obj.mainAxes) && ...
+                    ~obj.FirstUpdatePending
+                obj.mainAxes.Toolbar.Visible = val;
+            end
             obj.refreshContextMenu();
         end
 

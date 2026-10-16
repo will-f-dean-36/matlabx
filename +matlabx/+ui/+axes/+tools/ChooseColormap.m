@@ -33,10 +33,7 @@ classdef ChooseColormap < matlabx.ui.axes.AxesTool
 
         % Called when button is pushed
         function onPush(obj)
-            % open colormap selector
-            cmap = matlabx.app.ColormapSelector;
-            % Set the colormap for the current channel
-            obj.Host.Colormap = cmap;
+            obj.Host.chooseColormap();
         end
 
         % Called AFTER installed from Host, use for any extra required startup actions

@@ -1,5 +1,9 @@
-function cmap = ColormapSelector(cmap_name)
+function [cmap, accepted] = ColormapSelector(cmap_name, opts)
 %COLORMAPSELECTOR Open a dialog for selecting a registered colormap.
+%   [CMAP,ACCEPTED] = matlabx.app.ColormapSelector opens the selector and
+%   reports whether the user accepted the selected map. Closing the window
+%   or pressing Cancel returns ACCEPTED=false. PreviewFcn, when supplied, is
+%   called with each newly selected colormap.
 
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
@@ -19,6 +23,12 @@ function cmap = ColormapSelector(cmap_name)
 
     arguments
         cmap_name (1,:) char = 'gray'
+        opts.PreviewFcn = []
+    end
+
+    if ~isempty(opts.PreviewFcn) && ~isa(opts.PreviewFcn, 'function_handle')
+        error('ColormapSelector:InvalidPreviewFcn', ...
+            'PreviewFcn must be empty or a function handle.');
     end
 
     if ~matlabx.colors.maps.Registry.has(cmap_name)
@@ -30,14 +40,14 @@ function cmap = ColormapSelector(cmap_name)
     fig = uifigure("WindowStyle","alwaysontop",...
         "Name","Select colormap",...
         "Position",[0 0 300 600],...
-        "CloseRequestFcn",@(~,~) closeAndReturn(),...
+        "CloseRequestFcn",@(~,~) cancelAndReturn(),...
         "Visible","off",...
         "Color",[0.18 0.18 0.18]);
 
     movegui(fig,"center");
 
     grid = uigridlayout(fig,[3,1],...
-        "RowHeight",{30,'1x',20},...
+        "RowHeight",{30,'1x',30},...
         "ColumnWidth",{'1x'},...
         "BackgroundColor",[0.18 0.18 0.18],...
         "RowSpacing",5);
@@ -85,19 +95,35 @@ function cmap = ColormapSelector(cmap_name)
         end
     end
 
+    accepted = false;
+    isInitializing = true;
+
     % select input cmap in the tree
     cmap_tree.SelectedNodes = cmap_tree.findobj("NodeData",cmap_name);
     % get the map data
     cmap = matlabx.colors.maps.Registry.map(cmap_name);
     % and set it in the example colormap axes
     cmap_axes.Colormap = cmap;
+    isInitializing = false;
 
-    % button to select and exit
-    OK_button = uibutton(grid,...
+    % buttons to accept or cancel the selection
+    buttonGrid = uigridlayout(grid,[1,2], ...
+        "ColumnWidth",{'1x','1x'}, ...
+        "Padding",[0 0 0 0], ...
+        "ColumnSpacing",5, ...
+        "BackgroundColor",grid.BackgroundColor);
+    buttonGrid.Layout.Row = 3;
+    buttonGrid.Layout.Column = 1;
+
+    cancelButton = uibutton(buttonGrid, ...
+        "Text","Cancel", ...
+        "ButtonPushedFcn",@(~,~) cancelAndReturn());
+    cancelButton.Layout.Column = 1;
+
+    okButton = uibutton(buttonGrid,...
         "Text","OK",...
         "ButtonPushedFcn",@(~,~) selectAndReturn());
-    OK_button.Layout.Row = 3;
-    OK_button.Layout.Column = 1;
+    okButton.Layout.Column = 2;
 
     % show figure
     fig.Visible = 'on';
@@ -105,13 +131,13 @@ function cmap = ColormapSelector(cmap_name)
     % do not return until figure is closed
     waitfor(fig);
 
-    function closeAndReturn()
-        % delete the figure
+    function cancelAndReturn()
+        accepted = false;
         delete(fig)
     end
 
     function selectAndReturn()
-        cmap = matlabx.colors.maps.Registry.map(cmap_tree.SelectedNodes.NodeData);
+        accepted = true;
         delete(fig);
     end
 
@@ -127,6 +153,9 @@ function cmap = ColormapSelector(cmap_name)
         % update cmap and set it on example colormap axes
         cmap = matlabx.colors.maps.Registry.map(name,catName);
         cmap_axes.Colormap = cmap;
+        if ~isInitializing && ~isempty(opts.PreviewFcn)
+            opts.PreviewFcn(cmap);
+        end
     end
 
 end
