@@ -99,13 +99,13 @@ classdef Line < matlabx.ui.axes.ImageAxesOverlay
                 opts.LineWidth (1,1) double {mustBePositive} = 1
                 opts.LineStyle (1,:) char = '-'
                 opts.HoverLineColor = [1 1 1]
-                opts.HoverLineAlpha (1,1) double {mustBeInRange(opts.HoverLineAlpha,0,1)} = 1
+                opts.HoverLineAlpha (1,1) double {mustBeBetween(opts.HoverLineAlpha,0,1)} = 1
                 opts.HoverLineWidth (1,1) double {mustBePositive} = 1
                 opts.SelectionLineColor = [1 1 0]
-                opts.SelectionLineAlpha (1,1) double {mustBeInRange(opts.SelectionLineAlpha,0,1)} = 1
+                opts.SelectionLineAlpha (1,1) double {mustBeBetween(opts.SelectionLineAlpha,0,1)} = 1
                 opts.SelectionLineWidth (1,1) double {mustBePositive} = 1
                 opts.ActiveLineColor = [1 1 1]
-                opts.ActiveLineAlpha (1,1) double {mustBeInRange(opts.ActiveLineAlpha,0,1)} = 1
+                opts.ActiveLineAlpha (1,1) double {mustBeBetween(opts.ActiveLineAlpha,0,1)} = 1
                 opts.ActiveLineWidth (1,1) double {mustBePositive} = 1
                 opts.HandleMarkerStyle (1,:) char = 's'
                 opts.HandleMarkerSize (1,1) double {mustBePositive} = 4

@@ -29,30 +29,30 @@ classdef Polygon < matlabx.ui.axes.ImageAxesOverlay
     properties (SetObservable, AbortSet)
         % Normal polygon appearance.
         EdgeColor = [1 1 1]
-        EdgeAlpha (1,1) double {mustBeInRange(EdgeAlpha,0,1)} = 1
+        EdgeAlpha (1,1) double {mustBeBetween(EdgeAlpha,0,1)} = 1
         FaceColor = [1 1 1]
-        FaceAlpha (1,1) double {mustBeInRange(FaceAlpha,0,1)} = 0
+        FaceAlpha (1,1) double {mustBeBetween(FaceAlpha,0,1)} = 0
         LineWidth (1,1) double {mustBePositive} = 1
 
         % Hover appearance.
         HoverEdgeColor = [1 1 1]
-        HoverEdgeAlpha (1,1) double {mustBeInRange(HoverEdgeAlpha,0,1)} = 1
+        HoverEdgeAlpha (1,1) double {mustBeBetween(HoverEdgeAlpha,0,1)} = 1
         HoverFaceColor = [1 1 1]
-        HoverFaceAlpha (1,1) double {mustBeInRange(HoverFaceAlpha,0,1)} = 0
+        HoverFaceAlpha (1,1) double {mustBeBetween(HoverFaceAlpha,0,1)} = 0
         HoverLineWidth (1,1) double {mustBePositive} = 1
 
         % Selection appearance.
         SelectionEdgeColor = [1 1 0]
-        SelectionEdgeAlpha (1,1) double {mustBeInRange(SelectionEdgeAlpha,0,1)} = 1
+        SelectionEdgeAlpha (1,1) double {mustBeBetween(SelectionEdgeAlpha,0,1)} = 1
         SelectionFaceColor = [1 1 1]
-        SelectionFaceAlpha (1,1) double {mustBeInRange(SelectionFaceAlpha,0,1)} = 0
+        SelectionFaceAlpha (1,1) double {mustBeBetween(SelectionFaceAlpha,0,1)} = 0
         SelectionLineWidth (1,1) double {mustBePositive} = 1
 
         % Active appearance.
         ActiveEdgeColor = [1 1 1]
-        ActiveEdgeAlpha (1,1) double {mustBeInRange(ActiveEdgeAlpha,0,1)} = 1
+        ActiveEdgeAlpha (1,1) double {mustBeBetween(ActiveEdgeAlpha,0,1)} = 1
         ActiveFaceColor = [1 1 1]
-        ActiveFaceAlpha (1,1) double {mustBeInRange(ActiveFaceAlpha,0,1)} = 0
+        ActiveFaceAlpha (1,1) double {mustBeBetween(ActiveFaceAlpha,0,1)} = 0
         ActiveLineWidth (1,1) double {mustBePositive} = 1
 
         % Center-marker appearance.
@@ -93,24 +93,24 @@ classdef Polygon < matlabx.ui.axes.ImageAxesOverlay
                 opts.Visible (1,1) matlab.lang.OnOffSwitchState = "on"
                 opts.ActivateOnCreate (1,1) logical = false
                 opts.EdgeColor = [1 1 1]
-                opts.EdgeAlpha (1,1) double {mustBeInRange(opts.EdgeAlpha,0,1)} = 1
+                opts.EdgeAlpha (1,1) double {mustBeBetween(opts.EdgeAlpha,0,1)} = 1
                 opts.FaceColor = [1 1 1]
-                opts.FaceAlpha (1,1) double {mustBeInRange(opts.FaceAlpha,0,1)} = 0
+                opts.FaceAlpha (1,1) double {mustBeBetween(opts.FaceAlpha,0,1)} = 0
                 opts.LineWidth (1,1) double {mustBePositive} = 1
                 opts.HoverEdgeColor = [1 1 1]
-                opts.HoverEdgeAlpha (1,1) double {mustBeInRange(opts.HoverEdgeAlpha,0,1)} = 1
+                opts.HoverEdgeAlpha (1,1) double {mustBeBetween(opts.HoverEdgeAlpha,0,1)} = 1
                 opts.HoverFaceColor = [1 1 1]
-                opts.HoverFaceAlpha (1,1) double {mustBeInRange(opts.HoverFaceAlpha,0,1)} = 0
+                opts.HoverFaceAlpha (1,1) double {mustBeBetween(opts.HoverFaceAlpha,0,1)} = 0
                 opts.HoverLineWidth (1,1) double {mustBePositive} = 1
                 opts.SelectionEdgeColor = [1 1 0]
-                opts.SelectionEdgeAlpha (1,1) double {mustBeInRange(opts.SelectionEdgeAlpha,0,1)} = 1
+                opts.SelectionEdgeAlpha (1,1) double {mustBeBetween(opts.SelectionEdgeAlpha,0,1)} = 1
                 opts.SelectionFaceColor = [1 1 1]
-                opts.SelectionFaceAlpha (1,1) double {mustBeInRange(opts.SelectionFaceAlpha,0,1)} = 0
+                opts.SelectionFaceAlpha (1,1) double {mustBeBetween(opts.SelectionFaceAlpha,0,1)} = 0
                 opts.SelectionLineWidth (1,1) double {mustBePositive} = 1
                 opts.ActiveEdgeColor = [1 1 1]
-                opts.ActiveEdgeAlpha (1,1) double {mustBeInRange(opts.ActiveEdgeAlpha,0,1)} = 1
+                opts.ActiveEdgeAlpha (1,1) double {mustBeBetween(opts.ActiveEdgeAlpha,0,1)} = 1
                 opts.ActiveFaceColor = [1 1 1]
-                opts.ActiveFaceAlpha (1,1) double {mustBeInRange(opts.ActiveFaceAlpha,0,1)} = 0
+                opts.ActiveFaceAlpha (1,1) double {mustBeBetween(opts.ActiveFaceAlpha,0,1)} = 0
                 opts.ActiveLineWidth (1,1) double {mustBePositive} = 1
                 opts.HandleMarkerStyle (1,:) char = 's'
                 opts.HandleMarkerSize (1,1) double {mustBePositive} = 4
