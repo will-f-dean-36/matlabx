@@ -30,6 +30,7 @@ classdef ImageAxesOverlayManager < handle
 
     properties (Access=private)
         Registry
+        BoundaryCollections cell = {}
         ActiveID (1,1) string = ""
         HoverID (1,1) string = ""
         SelectedIDs (1,:) string = string.empty(1,0)
@@ -48,6 +49,44 @@ classdef ImageAxesOverlayManager < handle
         %IMAGEAXESOVERLAYMANAGER Create an overlay manager for one host.
             obj.Host = host;
             obj.Registry = containers.Map('KeyType', 'char', 'ValueType', 'any');
+        end
+
+        function delete(obj)
+        %DELETE Release shared renderers owned by this manager.
+            for i=numel(obj.BoundaryCollections):-1:1
+                collection=obj.BoundaryCollections{i};
+                if ~isempty(collection) && isvalid(collection), delete(collection); end
+            end
+            obj.BoundaryCollections={};
+        end
+
+        function collection = createBoundaryCollection(obj)
+        %CREATEBOUNDARYCOLLECTION Create and retain a shared boundary renderer.
+            collection=matlabx.ui.axes.BoundaryCollection(obj.Host);
+            obj.BoundaryCollections{end+1}=collection;
+        end
+
+        function collections = getBoundaryCollections(obj)
+        %GETBOUNDARYCOLLECTIONS Return valid shared boundary renderers.
+            keep=cellfun(@(x) ~isempty(x)&&isvalid(x),obj.BoundaryCollections);
+            obj.BoundaryCollections=obj.BoundaryCollections(keep);
+            collections=obj.BoundaryCollections;
+        end
+
+        function collection = boundaryCollectionForTarget(obj,target)
+        %BOUNDARYCOLLECTIONFORTARGET Resolve a shared patch target.
+            collection=[];
+            collections=obj.getBoundaryCollections();
+            for i=1:numel(collections)
+                if collections{i}.ownsTarget(target), collection=collections{i}; return; end
+            end
+        end
+
+        function setBoundaryCollectionsVisible(obj,value)
+        %SETBOUNDARYCOLLECTIONSVISIBLE Set independent collection visibility.
+            value=matlab.lang.OnOffSwitchState(value);
+            collections=obj.getBoundaryCollections();
+            for i=1:numel(collections), collections{i}.Visible=value; end
         end
 
         function overlay = add(obj, typeOrOverlay, varargin)
