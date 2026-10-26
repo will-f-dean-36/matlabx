@@ -253,6 +253,79 @@ function testUnifiedLineAndPointMarkers(testCase)
     verifyEqual(testCase, pointMarker.MarkerSize, pointOverlay.HandleMarkerSize);
 end
 
+function testOverlayStateColorsFallBackToBase(testCase)
+    ax = testCase.TestData.Axes;
+
+    polygon = ax.Overlays.add('Polygon', 'ID', 'polygon-color-fallback', ...
+        'Vertices', [1 1; 4 1; 4 4; 1 4], ...
+        'EdgeColor', [0.2 0.4 0.6], 'FaceColor', [0.1 0.3 0.5]);
+    polygonPatch = findobj(ax.getAxes(), 'Tag', 'OverlayPolygon');
+    polygon.ActiveEdgeColor = [];
+    polygon.ActiveFaceColor = [];
+    polygon.Active = true;
+    verifyEqual(testCase, polygonPatch.EdgeColor, polygon.EdgeColor);
+    verifyEqual(testCase, polygonPatch.FaceColor, polygon.FaceColor);
+
+    selectionEdgeColor = [0.9 0.7 0.1];
+    selectionFaceColor = [0.8 0.6 0.2];
+    polygon.SelectionEdgeColor = selectionEdgeColor;
+    polygon.SelectionFaceColor = selectionFaceColor;
+    polygon.Selected = true;
+    verifyEqual(testCase, polygonPatch.EdgeColor, selectionEdgeColor);
+    verifyEqual(testCase, polygonPatch.FaceColor, selectionFaceColor);
+
+    polygon.HoverEdgeColor = [];
+    polygon.HoverFaceColor = [];
+    polygon.Hovered = true;
+    verifyEqual(testCase, polygonPatch.EdgeColor, selectionEdgeColor);
+    verifyEqual(testCase, polygonPatch.FaceColor, selectionFaceColor);
+
+    hoverEdgeColor = [0.2 0.9 0.4];
+    hoverFaceColor = [0.3 0.8 0.5];
+    polygon.HoverEdgeColor = hoverEdgeColor;
+    polygon.HoverFaceColor = hoverFaceColor;
+    verifyEqual(testCase, polygonPatch.EdgeColor, hoverEdgeColor);
+    verifyEqual(testCase, polygonPatch.FaceColor, hoverFaceColor);
+
+    rectangle = ax.Overlays.add('Rectangle', 'ID', 'rectangle-color-fallback', ...
+        'Position', [5 5 3 2], ...
+        'EdgeColor', [0.6 0.4 0.2], 'FaceColor', [0.5 0.3 0.1]);
+    rectanglePatch = findobj(ax.getAxes(), 'Tag', 'OverlayRectangle');
+    rectangle.HoverEdgeColor = [];
+    rectangle.HoverFaceColor = [];
+    rectangle.SelectionEdgeColor = [0.9 0.8 0.1];
+    rectangle.SelectionFaceColor = [0.8 0.7 0.2];
+    rectangle.Selected = true;
+    rectangle.Hovered = true;
+    verifyEqual(testCase, rectanglePatch.EdgeColor, rectangle.SelectionEdgeColor);
+    verifyEqual(testCase, rectanglePatch.FaceColor, rectangle.SelectionFaceColor);
+
+    lineOverlay = ax.Overlays.add('Line', 'ID', 'line-color-fallback', ...
+        'Endpoints', [1 8; 5 8], 'LineColor', [0.3 0.5 0.7]);
+    lineGraphic = findobj(ax.getAxes(), 'Tag', 'OverlayLine');
+    lineOverlay.HoverLineColor = [];
+    lineOverlay.ActiveLineColor = [];
+    lineOverlay.SelectionLineColor = [0.9 0.8 0.2];
+    lineOverlay.Selected = true;
+    lineOverlay.Active = true;
+    lineOverlay.Hovered = true;
+    verifyEqual(testCase, lineGraphic.Color(1:3), lineOverlay.SelectionLineColor);
+
+    point = ax.Overlays.add('Point', 'ID', 'point-color-fallback', ...
+        'Position', [8 8], ...
+        'MarkerEdgeColor', [0.7 0.5 0.3], ...
+        'MarkerFaceColor', [0.2 0.3 0.4]);
+    pointGraphic = findobj(ax.getAxes(), 'Tag', 'OverlayPoint');
+    point.HoverMarkerEdgeColor = [];
+    point.HoverMarkerFaceColor = [];
+    point.SelectionMarkerEdgeColor = [0.8 0.7 0.1];
+    point.SelectionMarkerFaceColor = [0.7 0.6 0.2];
+    point.Selected = true;
+    point.Hovered = true;
+    verifyEqual(testCase, pointGraphic.MarkerEdgeColor, point.SelectionMarkerEdgeColor);
+    verifyEqual(testCase, pointGraphic.MarkerFaceColor, point.SelectionMarkerFaceColor);
+end
+
 function testPolygonSelectionAndDeletion(testCase)
     ax = testCase.TestData.Axes;
     tool = ax.Tools.Polygon;
