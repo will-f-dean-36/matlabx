@@ -31,8 +31,8 @@ classdef Point < matlabx.ui.axes.ImageAxesOverlay
         % Normal point appearance.
         Marker (1,:) char = '+'
         MarkerSize (1,1) double {mustBePositive} = 8
-        MarkerEdgeColor (1,3) double {mustBeBetween(MarkerEdgeColor,0,1)} = [1 1 1]
-        MarkerFaceColor (1,3) double {mustBeBetween(MarkerFaceColor,0,1)} = [0 0 0]
+        MarkerEdgeColor {mustBePointMarkerColor} = [1 1 1]
+        MarkerFaceColor {mustBePointMarkerColor} = 'none'
         LineWidth (1,1) double {mustBePositive} = 1
 
         % Hover appearance.
@@ -87,8 +87,8 @@ classdef Point < matlabx.ui.axes.ImageAxesOverlay
                 opts.SelectionMarkerSize (1,1) double {mustBePositive} = 8
                 opts.HandleMarkerSize (1,1) double {mustBePositive} = 4
                 opts.HoverHandleMarkerSize (1,1) double {mustBePositive} = 5
-                opts.MarkerEdgeColor (1,3) double {mustBeBetween(opts.MarkerEdgeColor,0,1)} = [1 1 1]
-                opts.MarkerFaceColor (1,3) double {mustBeBetween(opts.MarkerFaceColor,0,1)} = [0 0 0]
+                opts.MarkerEdgeColor {mustBePointMarkerColor} = [1 1 1]
+                opts.MarkerFaceColor {mustBePointMarkerColor} = 'none'
                 opts.LineWidth (1,1) double {mustBePositive} = 1
                 opts.HoverLineWidth (1,1) double {mustBePositive} = 1.5
                 opts.SelectionLineWidth (1,1) double {mustBePositive} = 1
@@ -319,4 +319,19 @@ classdef Point < matlabx.ui.axes.ImageAxesOverlay
             obj.PendingUpdate = false;
         end
     end
+end
+
+function mustBePointMarkerColor(value)
+%MUSTBEPOINTMARKERCOLOR Accept an RGB triplet or MATLAB's "none" value.
+    if (ischar(value) || (isstring(value) && isscalar(value))) ...
+            && strcmpi(string(value), "none")
+        return
+    end
+
+    if ~isnumeric(value) || ~isreal(value) || ~isequal(size(value), [1 3])
+        error("matlabx:ui:axes:overlays:Point:InvalidMarkerColor", ...
+            "Point marker colors must be a 1-by-3 RGB triplet or 'none'.");
+    end
+    mustBeFinite(value);
+    mustBeBetween(value, 0, 1);
 end

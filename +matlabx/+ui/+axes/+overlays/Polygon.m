@@ -55,7 +55,7 @@ classdef Polygon < matlabx.ui.axes.ImageAxesOverlay
         ActiveFaceAlpha (1,1) double {mustBeBetween(ActiveFaceAlpha,0,1)} = 0
         ActiveLineWidth (1,1) double {mustBePositive} = 1
 
-        % Center-marker appearance.
+        % Vertex-handle appearance.
         HandleMarkerStyle (1,:) char = 's'
         HandleMarkerSize (1,1) double {mustBePositive} = 4
         HoverHandleMarkerSize (1,1) double {mustBePositive} = 5
@@ -134,15 +134,16 @@ classdef Polygon < matlabx.ui.axes.ImageAxesOverlay
                 'HitTest', 'on', 'PickableParts', 'all', ...
                 'Tag', 'OverlayPolygon');
 
-            % Keep the center marker passive so the patch remains the sole
-            % interaction target even when the marker covers its center.
+            % Draw every vertex with one marker primitive. The Polygon tool
+            % resolves the nearest marker after this shared primitive is hit,
+            % avoiding one graphics object per editable vertex.
             obj.HandleMarkerLine = line(obj.TargetAxes, ...
                 'XData', NaN, 'YData', NaN, 'LineStyle', 'none', ...
                 'Marker', opts.HandleMarkerStyle, 'MarkerSize', opts.HandleMarkerSize, ...
                 'MarkerEdgeColor', opts.HandleMarkerEdgeColor, ...
                 'MarkerFaceColor', opts.HandleMarkerFaceColor, ...
                 'LineWidth', opts.HandleMarkerLineWidth, ...
-                'HitTest', 'off', 'PickableParts', 'none', ...
+                'HitTest', 'on', 'PickableParts', 'visible', ...
                 'Visible', 'off', 'Tag', 'OverlayPolygonHandle');
 
             obj.registerGraphics([obj.PolygonPatch; obj.HandleMarkerLine]);
@@ -232,8 +233,16 @@ classdef Polygon < matlabx.ui.axes.ImageAxesOverlay
             if isempty(obj.PolygonPatch) || ~isgraphics(obj.PolygonPatch), return; end
             faces = 1:size(obj.Vertices_,1);
             set(obj.PolygonPatch, 'Faces', faces, 'Vertices', obj.Vertices_);
-            center = obj.Center;
-            set(obj.HandleMarkerLine, 'XData', center(1), 'YData', center(2));
+            vertices = obj.Vertices_;
+            if size(vertices,1) > 1 && isequal(vertices(1,:), vertices(end,:))
+                vertices(end,:) = [];
+            end
+            if isempty(vertices)
+                set(obj.HandleMarkerLine, 'XData', NaN, 'YData', NaN);
+            else
+                set(obj.HandleMarkerLine, ...
+                    'XData', vertices(:,1), 'YData', vertices(:,2));
+            end
         end
 
         function updateAppearance(obj)
@@ -241,33 +250,23 @@ classdef Polygon < matlabx.ui.axes.ImageAxesOverlay
             if obj.Hovered
                 width = obj.HoverLineWidth;
                 alpha = obj.HoverFaceAlpha;
-                edgeColor = obj.HoverEdgeColor;
                 edgeAlpha = obj.HoverEdgeAlpha;
-                faceColor = obj.HoverFaceColor;
             elseif obj.Active && obj.Selected
                 width = obj.ActiveLineWidth;
                 alpha = obj.SelectionFaceAlpha;
-                edgeColor = obj.SelectionEdgeColor;
                 edgeAlpha = obj.SelectionEdgeAlpha;
-                faceColor = obj.SelectionFaceColor;
             elseif obj.Active
                 width = obj.ActiveLineWidth;
                 alpha = obj.ActiveFaceAlpha;
-                edgeColor = obj.ActiveEdgeColor;
                 edgeAlpha = obj.ActiveEdgeAlpha;
-                faceColor = obj.ActiveFaceColor;
             elseif obj.Selected
                 width = obj.SelectionLineWidth;
                 alpha = obj.SelectionFaceAlpha;
-                edgeColor = obj.SelectionEdgeColor;
                 edgeAlpha = obj.SelectionEdgeAlpha;
-                faceColor = obj.SelectionFaceColor;
             else
                 width = obj.LineWidth;
                 alpha = obj.FaceAlpha;
-                edgeColor = obj.EdgeColor;
                 edgeAlpha = obj.EdgeAlpha;
-                faceColor = obj.FaceColor;
             end
             edgeColor = obj.resolveStateColor(obj.EdgeColor, obj.SelectionEdgeColor, ...
                 obj.ActiveEdgeColor, obj.HoverEdgeColor, obj.Selected, obj.Active, obj.Hovered);
@@ -299,7 +298,7 @@ classdef Polygon < matlabx.ui.axes.ImageAxesOverlay
 
     methods (Access=protected)
         function updateVisibility(obj)
-        %UPDATEVISIBILITY Apply polygon and active-handle visibility policy.
+        %UPDATEVISIBILITY Apply polygon and vertex-handle visibility policy.
             if isempty(obj.PolygonPatch) || ~isgraphics(obj.PolygonPatch)
                 return
             end
