@@ -2957,6 +2957,127 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
+        % --- exportView ---
+        function exportView(obj,filename,opts)
+        %EXPORTVIEW Export the currently displayed axes region as an image.
+        %
+        %   AX.exportView(FILENAME) exports the rendered image, native and
+        %   application-mounted overlays, and other visible graphics within
+        %   the current axes limits. Surrounding component UI is excluded.
+        %
+        %   AX.exportView(FILENAME,Name=Value) accepts Units, Width, Height,
+        %   BackgroundColor, PreserveAspectRatio, Resolution, HideToolbar,
+        %   and OverlaySizing. OverlaySizing="physical" compensates native
+        %   overlay sizes so they retain their physical export dimensions.
+            arguments
+                obj (1,1) matlabx.ui.axes.ImageAxes
+                filename (1,1) string {mustBeNonzeroLengthText}
+                opts.Units (1,1) string = "inches"
+                opts.Width (1,1) double {mustBePositive} = 7
+                opts.Height (1,1) double {mustBePositive} = 7
+                opts.BackgroundColor (1,3) double {mustBeBetween(opts.BackgroundColor,0,1)} = [0 0 0]
+                opts.PreserveAspectRatio (1,1) matlab.lang.OnOffSwitchState = "on"
+                opts.Resolution (1,1) double {mustBePositive} = 600
+                opts.HideToolbar (1,1) logical = true
+                opts.OverlaySizing (1,1) string {mustBeMember(opts.OverlaySizing, ...
+                    ["physical","scale"])} = "physical"
+            end
+
+            if opts.OverlaySizing == "physical"
+                styleScale = obj.physicalOverlayExportStyleScale_( ...
+                    opts.Units,opts.Width,opts.Height,opts.Resolution, ...
+                    opts.PreserveAspectRatio);
+                overlayStyleCleanup = ...
+                    obj.OverlayManager.beginExportStyleScale(styleScale); %#ok<NASGU>
+            end
+
+            matlabx.ui.export.axes2image(obj.mainAxes,filename, ...
+                Units=opts.Units, ...
+                Width=opts.Width, ...
+                Height=opts.Height, ...
+                BackgroundColor=opts.BackgroundColor, ...
+                PreserveAspectRatio=opts.PreserveAspectRatio, ...
+                Resolution=opts.Resolution, ...
+                HideToolbar=opts.HideToolbar);
+            clear overlayStyleCleanup
+        end
+
+        % --- chooseExportView ---
+        function filename = chooseExportView(obj)
+        %CHOOSEEXPORTVIEW Choose export options and an output file.
+        %   Returns the selected absolute filename, or an empty string when
+        %   either dialog is cancelled. Interactive exports always omit the
+        %   axes toolbar.
+            filename = "";
+
+            % ParamsDialog is a separate modal figure. Lower an always-on-top
+            % host for the duration of the workflow so neither dialog opens
+            % behind it.
+            fig = obj.ParentFig;
+            previousWindowStyle = fig.WindowStyle;
+            if strcmp(previousWindowStyle,'alwaysontop')
+                fig.WindowStyle = 'normal';
+            end
+            windowStyleCleanup = onCleanup( ...
+                @() restoreFigureWindowStyle_(fig,previousWindowStyle));
+
+            positive = @(value) isnumeric(value) && isscalar(value) && ...
+                isfinite(value) && value > 0;
+            positiveInteger = @(value) positive(value) && value == fix(value);
+            options = matlabx.app.ParamsDialog.prompt( ...
+                'Export Current View', ...
+                {'Units','Units','choice','inches', ...
+                    {'inches','centimeters','pixels','points'}}, ...
+                {'Width','Width','double',7,positive, ...
+                    'Width must be a positive number.'}, ...
+                {'Height','Height','double',7,positive, ...
+                    'Height must be a positive number.'}, ...
+                {'BackgroundColor','Background color','color',[0 0 0]}, ...
+                {'PreserveAspectRatio','Preserve aspect ratio','logical',true}, ...
+                {'OverlaySizing','Overlay sizing','choice', ...
+                    'Preserve physical sizes', ...
+                    {'Preserve physical sizes','Scale with output'}}, ...
+                {'Resolution','Resolution (DPI)','double',600,positiveInteger, ...
+                    'Resolution must be a positive whole number.'});
+
+            if isempty(options), return; end
+
+            [file,path,filterIndex] = uiputfile( ...
+                {'*.png','PNG image (*.png)'; ...
+                 '*.tif;*.tiff','TIFF image (*.tif, *.tiff)'; ...
+                 '*.jpg;*.jpeg','JPEG image (*.jpg, *.jpeg)'}, ...
+                'Export Current View','image-view.png');
+
+            if isequal(file,0)
+                filename = "";
+                return
+            end
+
+            [~,~,extension] = fileparts(file);
+            if isempty(extension)
+                extensions = [".png",".tif",".jpg"];
+                file = char(string(file) + extensions(filterIndex));
+            end
+            filename = string(fullfile(path,file));
+            preserveAspectRatio = "off";
+            if options.PreserveAspectRatio
+                preserveAspectRatio = "on";
+            end
+            overlaySizing = "scale";
+            if strcmp(options.OverlaySizing,'Preserve physical sizes')
+                overlaySizing = "physical";
+            end
+            obj.exportView(filename, ...
+                Units=string(options.Units), ...
+                Width=options.Width, ...
+                Height=options.Height, ...
+                BackgroundColor=options.BackgroundColor, ...
+                PreserveAspectRatio=preserveAspectRatio, ...
+                Resolution=options.Resolution, ...
+                HideToolbar=true, ...
+                OverlaySizing=overlaySizing);
+        end
+
         % --- setComponentColormap ---
         function setComponentColormap(obj, cmap, idx)
         %SETCOMPONENTCOLORMAP Set one colormap on the current component or selected components.
@@ -3003,6 +3124,25 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     %% Private helpers: ImageData/DisplayState/ViewState
     methods (Access=private)
+
+        function styleScale = physicalOverlayExportStyleScale_(obj,units, ...
+                width,height,resolution,preserveAspectRatio)
+        %PHYSICALOVERLAYEXPORTSTYLESCALE_ Compensate exportgraphics scaling.
+            screenSize = obj.getOnScreenSize();
+            screenInches = screenSize.Inches;
+            outputInches = outputSizeInches_( ...
+                [width height],units,resolution);
+            dimensionScale = outputInches ./ screenInches;
+
+            if preserveAspectRatio == "on"
+                renderScale = min(dimensionScale);
+            else
+                % One graphics size cannot follow two independent axis
+                % scales; the geometric mean is a symmetric compromise.
+                renderScale = sqrt(prod(dimensionScale));
+            end
+            styleScale = 1 ./ renderScale;
+        end
     
         function syncViewStateToImageData(obj)
         %SYNCVIEWSTATETOIMAGEDATA Reconcile view and component display state with ImageData.
@@ -3368,6 +3508,30 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     %% Derived getters and setters
     methods
 
+        function S = getOnScreenSize(obj)
+        %GETONSCREENSIZE Return the realized axes size in display units.
+        %
+        %   S = AX.getOnScreenSize() measures the hosted UIAxes inner drawable
+        %   region rather than its outer decoration rectangle or the surrounding
+        %   ImageAxes component. S.Pixels is the realized [width height] in
+        %   logical screen pixels. The physical-unit values use MATLABX's
+        %   calibrated screen pixels-per-inch value and therefore match the
+        %   measurement used by physical overlay export sizing.
+            diagnostics = obj.getSizeDiagnostics();
+            pixels = diagnostics.MainAxesInnerPositionPx(3:4);
+            pixelsPerInch = obj.UICal.PixelsPerInch;
+            if ~isfinite(pixelsPerInch) || pixelsPerInch <= 0
+                pixelsPerInch = get(groot,'ScreenPixelsPerInch');
+            end
+
+            inches = pixels ./ pixelsPerInch;
+            S = struct( ...
+                "Pixels", pixels, ...
+                "Inches", inches, ...
+                "Centimeters", inches .* 2.54, ...
+                "PixelsPerInch", pixelsPerInch);
+        end
+
         function S = getStatusSummary(obj)
         %GETSTATUSSUMMARY Return compact ImageAxes operational status.
         %
@@ -3406,6 +3570,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 "ZoomFactor", viewport.ZoomFactor, ...
                 "ZoomLevel", viewport.ZoomLevel);
             S.Display = struct( ...
+                "AxesSize", obj.getOnScreenSize(), ...
                 "MaskEnabled", string(obj.MaskEnabled), ...
                 "HasMask", ~isempty(obj.Mask), ...
                 "OverlaysVisible", string(obj.OverlaysVisible), ...
@@ -4461,7 +4626,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function names = getDefaultTools()
         %GETDEFAULTTOOLS Return default tools.
-            names = {'Zoom','Colorbar','ChooseColormap','DisplayLimits'};
+            names = {'Zoom','Colorbar','ChooseColormap','DisplayLimits','ExportView'};
         end
 
         function props = getLinkableProperties()
@@ -4781,4 +4946,28 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
+end
+
+function restoreFigureWindowStyle_(fig,windowStyle)
+%RESTOREFIGUREWINDOWSTYLE_ Restore a valid host figure after modal dialogs.
+    if ~isempty(fig) && isvalid(fig)
+        fig.WindowStyle = windowStyle;
+    end
+end
+
+function inches = outputSizeInches_(value,units,resolution)
+%OUTPUTSIZEINCHES_ Convert export canvas dimensions to physical inches.
+    switch string(units)
+        case "pixels"
+            inches = value ./ resolution;
+        case "inches"
+            inches = value;
+        case "centimeters"
+            inches = value ./ 2.54;
+        case "points"
+            inches = value ./ 72;
+        otherwise
+            error('matlabx:ui:axes:ImageAxes:InvalidExportUnits', ...
+                'Unsupported export units "%s".',string(units));
+    end
 end
