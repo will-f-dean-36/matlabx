@@ -3,7 +3,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 %
 %   matlabx.ui.axes.ImageAxes displays a selected 2-D plane or RGB
 %   composite from a matlabx.image.Image5D object. It also hosts
-%   AxesTool subclasses and receives figure-level mouse/key events
+%   ImageAxesTool subclasses and receives figure-level mouse/key events
 %   through matlabx.ui.interaction.FigureEventHub.
 %
 %   Create an ImageAxes in a UI figure and assign a MATLAB image array:
@@ -22,7 +22,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 %       ax.T = 1;
 %
 %   Properties can also be supplied during construction. Tools may be named
-%   built-ins or application-owned AxesTool instances installed afterward:
+%   built-ins or application-owned ImageAxesTool instances installed afterward:
 %
 %       ax = matlabx.ui.axes.ImageAxes(fig, ...
 %           "CData", I, ...
@@ -81,7 +81,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 %   property. Setting ContextMenu directly is not recommended because it
 %   bypasses the built-in menu, dynamic state refresh, and tool cleanup.
 %   Choose built-in entries with ContextMenuItems. Application tools can add
-%   entries by overriding AxesTool.contributeContextMenu and using the supplied
+%   entries by overriding ImageAxesTool.contributeContextMenu and using the supplied
 %   ImageAxesContextMenuManager:
 %
 %       function contributeContextMenu(obj, menu)
@@ -93,7 +93,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 %   are then removed automatically when the tool is uninstalled.
 %
 %   See also matlabx.image.Image5D, matlabx.app.quickshow,
-%   matlabx.ui.axes.AxesTool, matlabx.ui.axes.ImageAxesToolManager,
+%   matlabx.ui.axes.ImageAxesTool, matlabx.ui.axes.ImageAxesToolManager,
 %   matlabx.ui.axes.ImageAxesHotkeyRegistry,
 %   matlabx.ui.axes.ImageAxesContextMenuManager,
 %   matlabx.ui.axes.ImageAxesOverlayManager,
@@ -139,8 +139,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         HotkeyRegistry matlabx.ui.axes.ImageAxesHotkeyRegistry
     end
 
-    % Shared tool state accessible to AxesTool and ImageAxesToolManager.
-    properties (Access={?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxesToolManager})
+    % Shared tool state accessible to ImageAxesTool and ImageAxesToolManager.
+    properties (Access={?matlabx.ui.axes.ImageAxesTool, ?matlabx.ui.axes.ImageAxesToolManager})
         % the currently enabled tool with IsExclusive=true (if it exists)
         ActiveExclusiveTool
         % struct() of ToolbarButtons, fieldnames match tool Name
@@ -311,7 +311,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     % Primary UIAxes shared with tools and the tool manager.
-    properties (Access={?matlabx.ui.axes.AxesTool, ?matlabx.ui.axes.ImageAxesToolManager})
+    properties (Access={?matlabx.ui.axes.ImageAxesTool, ?matlabx.ui.axes.ImageAxesToolManager})
         % Primary axes containing the image and overlay graphics.
         mainAxes matlab.ui.control.UIAxes
     end
@@ -385,7 +385,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     %% Tool-facing geometry and event-routing state
     % Derived host geometry and cursor information exposed to tools.
-    properties (Access=?matlabx.ui.axes.AxesTool, Dependent)
+    properties (Access=?matlabx.ui.axes.ImageAxesTool, Dependent)
         % Ancestor figure that owns this component.
         ParentFig
         % Spatial size of the current render source.
@@ -407,7 +407,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     % Optional tool-provided overrides for restored image limits.
-    properties (Access=?matlabx.ui.axes.AxesTool)
+    properties (Access=?matlabx.ui.axes.ImageAxesTool)
         % control XLim and YLim of axes holding the image (if empty, lims will be set to default)
         XLim = []
         % Optional Y-limit override used when restoring the view.
@@ -3490,7 +3490,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     %% Tool-accessible helpers
-    methods (Access=?matlabx.ui.axes.AxesTool, Hidden=true)
+    methods (Access=?matlabx.ui.axes.ImageAxesTool, Hidden=true)
         
         function updateFromTool(obj)
         %UPDATEFROMTOOL Refresh cursor-dependent host UI after tool interaction.
@@ -4012,7 +4012,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.ToolManager.unregister(tool);
         end
 
-        % load all tools in matlabx.ui.axes.tools
+        % load all tools in matlabx.ui.axes.tools.image
         function loadAllTools(obj)
         %LOADALLTOOLS Load all tools.
             obj.ToolManager.loadAll();
@@ -4050,7 +4050,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         % install tool specified by name
         function installTool(obj,name)
-        %INSTALLTOOL Install a loaded built-in name or an application AxesTool.
+        %INSTALLTOOL Install a loaded built-in name or an application ImageAxesTool.
         %   Object inputs must belong to this host and remain application-owned.
             obj.ToolManager.install(name);
         end
@@ -4574,8 +4574,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
         function names = getToolClassNames()
         %GETTOOLCLASSNAMES Return fully qualified built-in tool class names.
-            % get cell array of char vectors of tool class names in matlabx.ui.axes.tools
-            names = {matlab.metadata.Namespace.fromName("matlabx.ui.axes.tools").ClassList.Name}';
+            % get cell array of char vectors of tool class names in matlabx.ui.axes.tools.image
+            names = {matlab.metadata.Namespace.fromName("matlabx.ui.axes.tools.image").ClassList.Name}';
         end
 
         function names = getToolNames()
