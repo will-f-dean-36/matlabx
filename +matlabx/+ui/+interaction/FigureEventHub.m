@@ -21,7 +21,8 @@ classdef FigureEventHub < handle
 %   alt+shift followed by releasing alt first can leave the hub believing
 %   shift is still down. To preserve alt as a usable tool modifier, the hub
 %   temporarily disables top-level figure menus while alt/option is held and
-%   restores their exact previous Enable states on alt/option release.
+%   restores their exact previous Enable states on alt/option release
+%   or when a later key event reports alt up.
 %
 % Notes/Definitions
 %
@@ -462,10 +463,15 @@ classdef FigureEventHub < handle
                     if isempty(obj.ModifierState)
                         obj.ShortcutModifierStateTimestamp = NaT;
                     end
+            end
 
-                    if obj.isAltKey_(key)
-                        obj.restoreFigureMenusAfterAlt_();
-                    end
+            % A focus change can prevent Alt release from reaching the hub.
+            % On KeyPress, the normalized state includes the pressed key
+            % even if the event's Modifier field is empty.
+            if ~isempty(obj.AltDisabledMenus) ...
+                    && (~any(obj.ModifierState == "alt") ...
+                    || (string(kind) == "KeyRelease" && obj.isAltKey_(key)))
+                obj.restoreFigureMenusAfterAlt_();
             end
 
             obj.LastKey = key;
