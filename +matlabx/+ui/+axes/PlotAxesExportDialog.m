@@ -59,20 +59,29 @@ classdef PlotAxesExportDialog
                 ItemSpacing=5,BorderWidth=0,BorderColor=paneColor, ...
                 Padding=0,BackgroundColor=background);
 
-            filePane = addSection("File Options",8);
+            filePane = addSection("File Options",10);
             outputType = addDropDown(filePane,1,"Output type", ...
                 {'Vector','Image'},'Vector');
             format = addDropDown(filePane,2,"Format",{'PDF','SVG'},'SVG');
             units = addDropDown(filePane,3,"Units", ...
-                {'inches','centimeters','pixels','points'},'inches');
-            width = addNumeric(filePane,4,"Width",7);
-            height = addNumeric(filePane,5,"Height",5);
-            preserveAspect = addCheckBox(filePane,6,"Preserve aspect ratio",false);
-            resolution = addNumeric(filePane,7,"Resolution (DPI)",300);
+                {'inches','centimeters','points'},'inches');
+            dimensions = addDropDown(filePane,4,"Set dimensions", ...
+                {'Width only','Height only','Width and height'},'Width only');
+            widthValue = "7";
+            heightValue = "5";
+            width = addDimension(filePane,5,"Width",widthValue);
+            height = addDimension(filePane,6,"Height",heightValue);
+            styleSizing = addDropDown(filePane,7,"Style sizing", ...
+                {'Preserve physical sizes','Scale with output'},'Preserve physical sizes');
+            styleSizing.Tooltip = "Physical sizing applies to axes text and participating plot content.";
+            preserveAspect = addCheckBox(filePane,8,"Preserve aspect ratio",true);
+            preserveAspect.Tooltip = ...
+                "Required for physical sizing or when only one dimension is specified.";
+            resolution = addNumeric(filePane,9,"Resolution (DPI)",300);
             [useExportBackground,exportBackground] = addOptionalColor( ...
-                filePane,8,"Background color",host.BackgroundColor,false);
+                filePane,10,"Background color",host.BackgroundColor,false);
 
-            stylePane = addSection("Axes Styling",10);
+            stylePane = addSection("Axes Styling",9);
             [useAxesColor,axesColorPicker] = addOptionalColor( ...
                 stylePane,1,"Axes color", ...
                 pickerColor(host.Color,host.BackgroundColor),false);
@@ -83,18 +92,23 @@ classdef PlotAxesExportDialog
             end
             fontName = addDropDown(stylePane,3,"Font name", ...
                 cellstr(fontNames),char(host.FontName));
-            fontUnits = addDropDown(stylePane,4,"Font units", ...
-                {'points','pixels'},char(host.FontUnits));
-            fontSize = addNumeric(stylePane,5,"Tick-label font size",host.FontSize);
-            labelMultiplier = addNumeric(stylePane,6,"Label size multiplier", ...
+            initialFontSize = host.FontSize;
+            if host.FontUnits == "pixels"
+                initialFontSize = initialFontSize * 72 / get(groot,'ScreenPixelsPerInch');
+            end
+            fontSize = addNumeric(stylePane,4,"Tick-label font size (pt)",initialFontSize);
+            labelMultiplier = addNumeric(stylePane,5,"Label size multiplier", ...
                 host.LabelFontSizeMultiplier);
-            titleMultiplier = addNumeric(stylePane,7,"Title size multiplier", ...
+            titleMultiplier = addNumeric(stylePane,6,"Title size multiplier", ...
                 host.TitleFontSizeMultiplier);
-            gridVisible = addCheckBox(stylePane,8,"Show grid",logical(host.GridVisible));
-            boxVisible = addCheckBox(stylePane,9,"Show box",logical(host.BoxVisible));
-            titleVisible = addCheckBox(stylePane,10,"Show title", ...
+            gridVisible = addCheckBox(stylePane,7,"Show grid",logical(host.GridVisible));
+            boxVisible = addCheckBox(stylePane,8,"Show box",logical(host.BoxVisible));
+            titleVisible = addCheckBox(stylePane,9,"Show title", ...
                 logical(host.TitleVisible));
 
+            dimensions.ValueChangedFcn = @(~,~) updateSizing();
+            styleSizing.ValueChangedFcn = @(~,~) updateSizing();
+            updateSizing();
             outputType.ValueChangedFcn = @(~,~) updateOutputType();
             useExportBackground.ValueChangedFcn = ...
                 @(~,~) updateColorPicker(useExportBackground,exportBackground);
@@ -159,6 +173,14 @@ classdef PlotAxesExportDialog
                 control.Layout.Column = 2;
             end
 
+            function control = addDimension(pane,row,label,value)
+                addLabel(pane,row,label);
+                control = uieditfield(pane,"text",Value=value, ...
+                    BackgroundColor=controlColor,FontColor=controlFontColor);
+                control.Layout.Row = row;
+                control.Layout.Column = 2;
+            end
+
             function control = addCheckBox(pane,row,label,value)
                 addLabel(pane,row,label);
                 control = uicheckbox(pane,Text="",Value=value, ...
@@ -192,13 +214,38 @@ classdef PlotAxesExportDialog
 
             function updateOutputType()
                 if string(outputType.Value) == "Vector"
+                    units.Items = {'inches','centimeters','points'};
                     format.Items = {'PDF','SVG'};
                     format.Value = 'SVG';
                     resolution.Enable = 'off';
                 else
+                    units.Items = {'inches','centimeters','points','pixels'};
                     format.Items = {'PNG','TIFF'};
                     format.Value = 'PNG';
                     resolution.Enable = 'on';
+                end
+            end
+
+            function updateSizing()
+                widthValue = updateDimension(width,widthValue, ...
+                    string(dimensions.Value) ~= "Height only");
+                heightValue = updateDimension(height,heightValue, ...
+                    string(dimensions.Value) ~= "Width only");
+                forceAspect = string(dimensions.Value) ~= "Width and height" ...
+                    || string(styleSizing.Value) == "Preserve physical sizes";
+                preserveAspect.Enable = matlab.lang.OnOffSwitchState(~forceAspect);
+                if forceAspect, preserveAspect.Value = true; end
+            end
+
+            function value = updateDimension(control,value,enabled)
+                if strcmp(control.Enable,'on')
+                    value = control.Value;
+                end
+                control.Enable = matlab.lang.OnOffSwitchState(enabled);
+                if enabled
+                    control.Value = value;
+                else
+                    control.Value = "Auto";
                 end
             end
 
@@ -207,9 +254,17 @@ classdef PlotAxesExportDialog
             end
 
             function acceptDialog()
-                positive = [width.Value,height.Value,fontSize.Value, ...
+                outputWidth = [];
+                outputHeight = [];
+                if strcmp(width.Enable,'on'), outputWidth = str2double(width.Value); end
+                if strcmp(height.Enable,'on'), outputHeight = str2double(height.Value); end
+                sizing = "scale";
+                if string(styleSizing.Value) == "Preserve physical sizes"
+                    sizing = "physical";
+                end
+                positive = [outputWidth,outputHeight,fontSize.Value, ...
                     labelMultiplier.Value,titleMultiplier.Value];
-                if any(~isfinite(positive)) || any(positive <= 0)
+                if ~isreal(positive) || any(~isfinite(positive)) || any(positive <= 0)
                     uialert(fig,"Sizes and font multipliers must be positive finite values.", ...
                         "Invalid Export Options");
                     return;
@@ -237,15 +292,16 @@ classdef PlotAxesExportDialog
                     "Format",string(format.Value), ...
                     "Extension",extension, ...
                     "Units",string(units.Value), ...
-                    "Width",width.Value, ...
-                    "Height",height.Value, ...
+                    "Width",outputWidth, ...
+                    "Height",outputHeight, ...
+                    "StyleSizing",sizing, ...
                     "PreserveAspectRatio",preserve, ...
                     "Resolution",resolution.Value, ...
                     "BackgroundColor",backgroundColor, ...
                     "Color",axesColor, ...
                     "ForegroundColor",foregroundPicker.Value, ...
                     "FontName",string(fontName.Value), ...
-                    "FontUnits",string(fontUnits.Value), ...
+                    "FontUnits","points", ...
                     "FontSize",fontSize.Value, ...
                     "LabelFontSizeMultiplier",labelMultiplier.Value, ...
                     "TitleFontSizeMultiplier",titleMultiplier.Value, ...

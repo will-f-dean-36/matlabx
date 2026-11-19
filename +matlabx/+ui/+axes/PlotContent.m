@@ -46,6 +46,14 @@ classdef PlotContent < handle
 
     methods
 
+        function cleanup = beginExportStyleScale(~,~)
+        %BEGINEXPORTSTYLESCALE Optionally scale owned graphics for one export.
+        %   Overrides return an onCleanup that restores rendered styling.
+        %   Keep model settings and data positions intact. Each graphic
+        %   should be scaled once by its owner.
+            cleanup = [];
+        end
+
         function attach(obj,host)
         %ATTACH Transfer content to a host and attach its primitive graphics.
 

@@ -47,6 +47,7 @@ classdef DrawRectangle < matlabx.ui.axes.ImageAxesTool
         AnnotationLineWidth (1,1) double
         RotationAngleVisible (1,1) matlab.lang.OnOffSwitchState
 
+        % Label font size in points.
         FontSize (1,1) double
         FontColor (1,3) double
     end
@@ -256,6 +257,13 @@ classdef DrawRectangle < matlabx.ui.axes.ImageAxesTool
     %% Active event hooks (only when Enabled==true && IsInterceptor==true)
     methods
 
+        function cleanup = beginExportStyleScale(obj,scale)
+        %BEGINEXPORTSTYLESCALE Scale the tool-owned ROI and angle annotation.
+            graphics = {obj.RectROI,obj.WidthMidline,obj.XRay, ...
+                obj.ArcPolyline,obj.AngleLabel};
+            cleanup = matlabx.ui.axes.internal.scaleExportGraphics(graphics,scale);
+        end
+
         function onDown(obj, E)
             obj.beginDrawingFromEvent(E);
         end
@@ -409,6 +417,7 @@ classdef DrawRectangle < matlabx.ui.axes.ImageAxesTool
                     "HorizontalAlignment","center",...
                     "HitTest","off",...
                     "PickableParts","none",...
+                    "FontUnits","points", ...
                     "FontSize",obj.FontSize_);
 
                 % attach listeners

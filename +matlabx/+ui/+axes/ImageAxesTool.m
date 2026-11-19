@@ -132,6 +132,14 @@ classdef ImageAxesTool < handle
     end
 
     methods
+
+        function cleanup = beginExportStyleScale(~,~)
+        %BEGINEXPORTSTYLESCALE Optionally scale owned graphics for one export.
+        %   Overrides return an onCleanup that restores rendered styling.
+        %   Keep model settings and data positions intact. Each graphic
+        %   should be scaled once by its owner.
+            cleanup = [];
+        end
         function obj = ImageAxesTool(host, name, varargin)
             obj.Host = host;
             obj.Name = string(name);

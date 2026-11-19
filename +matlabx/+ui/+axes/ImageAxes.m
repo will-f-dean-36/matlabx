@@ -326,7 +326,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
 
     % Public typography configuration.
     properties (Dependent, AbortSet)
-        % Font size used by the panel title and bottom label.
+        % Panel title size in pixels and bottom label size in points.
         FontSize (1,1) double
     end
 
@@ -587,6 +587,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 'Color',[1 1 1],...
                 'BackgroundColor',[0 0 0 0.5],...
                 'String','',...
+                'FontUnits','points',...
                 'FontSize',obj.FontSize_,...
                 'Clipping','on',...
                 'Margin',3,...
@@ -2973,8 +2974,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
         %
         %   AX.exportView(FILENAME,Name=Value) accepts Units, Width, Height,
         %   BackgroundColor, PreserveAspectRatio, Resolution, HideToolbar,
-        %   and OverlaySizing. OverlaySizing="physical" compensates native
-        %   overlay sizes so they retain their physical export dimensions.
+        %   and OverlaySizing. OverlaySizing="physical" approximately preserves
+        %   physical sizes for registered overlays and participating tools.
             arguments
                 obj (1,1) matlabx.ui.axes.ImageAxes
                 filename (1,1) string {mustBeNonzeroLengthText}
@@ -2994,7 +2995,12 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                     opts.Units,opts.Width,opts.Height,opts.Resolution, ...
                     opts.PreserveAspectRatio);
                 overlayStyleCleanup = ...
-                    obj.OverlayManager.beginExportStyleScale(styleScale); %#ok<NASGU>
+                    obj.OverlayManager.beginExportStyleScale(styleScale);
+                tools = struct2cell(obj.Tools);
+                toolStyleCleanup = cell(size(tools));
+                for i = 1:numel(tools)
+                    toolStyleCleanup{i} = tools{i}.beginExportStyleScale(styleScale);
+                end
             end
 
             matlabx.ui.export.axes2image(obj.mainAxes,filename, ...
@@ -3005,7 +3011,7 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 PreserveAspectRatio=opts.PreserveAspectRatio, ...
                 Resolution=opts.Resolution, ...
                 HideToolbar=opts.HideToolbar);
-            clear overlayStyleCleanup
+            clear toolStyleCleanup overlayStyleCleanup
         end
 
         % --- chooseExportView ---
@@ -3111,19 +3117,8 @@ classdef ImageAxes < matlab.ui.componentcontainer.ComponentContainer
                 width,height,resolution,preserveAspectRatio)
         %PHYSICALOVERLAYEXPORTSTYLESCALE_ Compensate exportgraphics scaling.
             screenSize = obj.getOnScreenSize();
-            screenInches = screenSize.Inches;
-            outputInches = outputSizeInches_( ...
-                [width height],units,resolution);
-            dimensionScale = outputInches ./ screenInches;
-
-            if preserveAspectRatio == "on"
-                renderScale = min(dimensionScale);
-            else
-                % One graphics size cannot follow two independent axis
-                % scales; the geometric mean is a symmetric compromise.
-                renderScale = sqrt(prod(dimensionScale));
-            end
-            styleScale = 1 ./ renderScale;
+            styleScale = matlabx.ui.axes.internal.exportStyleScale( ...
+                screenSize.Inches,[width height],units,resolution,preserveAspectRatio);
         end
     
         function syncViewStateToImageData(obj)
@@ -4953,22 +4948,5 @@ function restoreFigureWindowStyle_(fig,windowStyle)
 %RESTOREFIGUREWINDOWSTYLE_ Restore a valid host figure after modal dialogs.
     if ~isempty(fig) && isvalid(fig)
         fig.WindowStyle = windowStyle;
-    end
-end
-
-function inches = outputSizeInches_(value,units,resolution)
-%OUTPUTSIZEINCHES_ Convert export canvas dimensions to physical inches.
-    switch string(units)
-        case "pixels"
-            inches = value ./ resolution;
-        case "inches"
-            inches = value;
-        case "centimeters"
-            inches = value ./ 2.54;
-        case "points"
-            inches = value ./ 72;
-        otherwise
-            error('matlabx:ui:axes:ImageAxes:InvalidExportUnits', ...
-                'Unsupported export units "%s".',string(units));
     end
 end

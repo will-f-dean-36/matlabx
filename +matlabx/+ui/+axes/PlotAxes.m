@@ -415,7 +415,11 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         %EXPORTPLOT Export the assembled plot axes as vector or raster graphics.
         %   Units, dimensions, background, and aspect-ratio settings apply to
         %   both output types. Resolution controls raster output and embedded
-        %   raster content in otherwise vector-capable formats.
+        %   raster content in otherwise vector-capable formats. Set Width
+        %   or Height to [] to derive it from the captured aspect ratio.
+        %   StyleSizing="physical" approximately preserves physical sizes
+        %   for host text and participating content and requires aspect
+        %   preservation. "scale" retains ordinary exportgraphics sizing.
             arguments
                 obj (1,1) matlabx.ui.axes.PlotAxes
                 filename (1,1) string {mustBeNonzeroLengthText}
@@ -423,8 +427,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                     ["auto","vector","image"])} = "auto"
                 opts.Units (1,1) string {mustBeMember(opts.Units, ...
                     ["inches","centimeters","pixels","points"])} = "inches"
-                opts.Width (1,1) double {mustBePositive,mustBeFinite} = 7
-                opts.Height (1,1) double {mustBePositive,mustBeFinite} = 5
+                opts.Width double {mustBeExportDimension_} = 7
+                opts.Height double {mustBeExportDimension_} = 5
                 opts.BackgroundColor {mustBeAxesColor_(opts.BackgroundColor)} = "none"
                 opts.Color {mustBeAxesColor_(opts.Color)} = "none"
                 opts.ForegroundColor (1,3) double ...
@@ -440,9 +444,40 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 opts.GridVisible (1,1) matlab.lang.OnOffSwitchState = obj.GridVisible
                 opts.BoxVisible (1,1) matlab.lang.OnOffSwitchState = obj.BoxVisible
                 opts.TitleVisible (1,1) matlab.lang.OnOffSwitchState = obj.TitleVisible
-                opts.PreserveAspectRatio (1,1) matlab.lang.OnOffSwitchState = "off"
+                opts.StyleSizing (1,1) string {mustBeMember(opts.StyleSizing, ...
+                    ["physical","scale"])} = "scale"
+                opts.PreserveAspectRatio = []
                 opts.Resolution (1,1) double {mustBePositive} = 300
                 opts.HideToolbar (1,1) logical = true
+            end
+
+            dimensions = struct();
+            outputSize = [NaN NaN];
+            if ~isempty(opts.Width)
+                dimensions.Width = opts.Width;
+                outputSize(1) = opts.Width;
+            end
+            if ~isempty(opts.Height)
+                dimensions.Height = opts.Height;
+                outputSize(2) = opts.Height;
+            end
+            if isempty(fieldnames(dimensions))
+                error('matlabx:ui:axes:PlotAxes:MissingExportSize', ...
+                    'Specify at least one export dimension.');
+            end
+
+            preserveAspect = opts.PreserveAspectRatio;
+            if isempty(preserveAspect)
+                preserveAspect = opts.StyleSizing == "physical";
+            end
+            preserveAspect = matlab.lang.OnOffSwitchState(preserveAspect);
+            validateattributes(preserveAspect,{'matlab.lang.OnOffSwitchState'},{'scalar'});
+            preserveAspect = char(preserveAspect);
+            if any(isnan(outputSize))
+                preserveAspect = 'on';
+            elseif opts.StyleSizing == "physical" && strcmp(preserveAspect,'off')
+                error('matlabx:ui:axes:PlotAxes:PhysicalSizingRequiresAspect', ...
+                    'Physical sizing requires preserving the aspect ratio.');
             end
 
             appearance = struct( ...
@@ -477,13 +512,36 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                     @() restoreToolbar_(toolbar,toolbarVisible));
                 toolbar.Visible = 'off';
             end
-            exportgraphics(obj.MainAxes,filename, ...
-                ContentType=opts.ContentType, ...
-                Units=opts.Units,Width=opts.Width,Height=opts.Height, ...
-                Colorspace="rgb",Padding=0, ...
-                PreserveAspectRatio=char(opts.PreserveAspectRatio), ...
-                BackgroundColor=opts.BackgroundColor, ...
-                Resolution=opts.Resolution);
+            dimensionArgs = namedargs2cell(dimensions);
+            exportWithSizing();
+
+            function exportWithSizing()
+                ax = obj.MainAxes;
+                if opts.StyleSizing == "physical"
+                    innerSize = ax.InnerPosition(3:4);
+                    inset = ax.TightInset;
+                    capturedPixels = innerSize + inset(1:2) + inset(3:4);
+                    sourceInches = capturedPixels ./ get(groot,'ScreenPixelsPerInch');
+                    scale = matlabx.ui.axes.internal.exportStyleScale( ...
+                        sourceInches,outputSize,opts.Units,opts.Resolution,preserveAspect);
+                    % Automatic labels and titles follow the axes font size.
+                    labels = [ax.XLabel,ax.YLabel,ax.ZLabel,ax.Title,ax.Subtitle];
+                    manual = strcmp({labels.FontSizeMode},'manual');
+                    ownedText = [{ax},arrayfun(@(h) h,labels(manual),UniformOutput=false)];
+                    textCleanup = matlabx.ui.axes.internal.scaleExportGraphics(ownedText,scale,"FontSize");
+                    if ~isempty(obj.Content_) && isvalid(obj.Content_)
+                        contentCleanup = obj.Content_.beginExportStyleScale(scale);
+                    end
+                end
+
+                exportgraphics(ax,filename,dimensionArgs{:}, ...
+                    ContentType=opts.ContentType,Units=opts.Units, ...
+                    Colorspace="rgb",Padding=0, ...
+                    PreserveAspectRatio=preserveAspect, ...
+                    BackgroundColor=opts.BackgroundColor, ...
+                    Resolution=opts.Resolution);
+                clear contentCleanup textCleanup
+            end
         end
 
         function filename = chooseExportPlot(obj)
@@ -530,6 +588,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 TitleFontSizeMultiplier=options.TitleFontSizeMultiplier, ...
                 GridVisible=options.GridVisible,BoxVisible=options.BoxVisible, ...
                 TitleVisible=options.TitleVisible, ...
+                StyleSizing=options.StyleSizing, ...
                 PreserveAspectRatio=options.PreserveAspectRatio, ...
                 Resolution=options.Resolution,HideToolbar=true);
         end
@@ -858,8 +917,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
 
             obj.MainAxes = uiaxes(obj.Grid, ...
                 'Box','off','NextPlot','add','TickDir','in', ...
-                'FontSize',obj.FontSize,'Color',obj.Color, ...
-                'XColor',obj.ForegroundColor,'YColor',obj.ForegroundColor);
+                'Color',obj.Color);
             obj.MainAxes.Layout.Row = 1;
             obj.MainAxes.Layout.Column = 1;
             obj.MainAxes.Interactions = dataTipInteraction;
@@ -868,6 +926,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 'Expanded',obj.ToolbarExpanded_);
             obj.MainAxes.Toolbar.Visible = 'off';
             obj.MainAxes.Tag = char(obj.Name);
+            % Apply point-based typography before the first deferred update.
+            obj.applyHostAppearance();
 
             obj.ToolManager = matlabx.ui.axes.PlotAxesToolManager(obj);
             obj.HotkeyRegistry = matlabx.ui.axes.PlotAxesHotkeyRegistry();
@@ -1067,4 +1127,11 @@ function value = normalizeAxesColor_(value,name)
     validateattributes(value,{'numeric'}, ...
         {'real','finite','size',[1 3],'>=',0,'<=',1},mfilename,name);
     value = double(value);
+end
+
+function mustBeExportDimension_(value)
+%MUSTBEEXPORTDIMENSION_ Allow [] to derive this dimension at export time.
+    if ~isempty(value)
+        validateattributes(value,{'double'},{'real','scalar','positive','finite'});
+    end
 end
