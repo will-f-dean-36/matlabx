@@ -166,6 +166,14 @@ classdef Violin < handle
         CentralStatLineWidthBeforeHover = []
     end
 
+    methods (Access=?matlabx.ui.axes.plot.ViolinRenderer)
+        function graphics = exportGraphics(obj)
+        %EXPORTGRAPHICS Return the owned data marks for export styling.
+            graphics = {obj.violinPoints,obj.violinOutlines, ...
+                obj.errorBars,obj.centralStatLine};
+        end
+    end
+
     methods
 
         function obj = Violin(Parent,NameValuePairs)

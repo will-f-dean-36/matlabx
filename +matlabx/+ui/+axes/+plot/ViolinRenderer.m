@@ -354,6 +354,16 @@ classdef ViolinRenderer < matlabx.ui.axes.PlotContent
             end
         end
 
+        function cleanup = beginExportStyleScale(obj,scale)
+        %BEGINEXPORTSTYLESCALE Compensate rendered marker areas and strokes.
+            plots = obj.Plots(isvalid(obj.Plots));
+            graphics = cell(1,0);
+            for k = 1:numel(plots)
+                graphics = [graphics,plots(k).exportGraphics()]; %#ok<AGROW>
+            end
+            cleanup = matlabx.ui.axes.internal.scaleExportGraphics(graphics,scale);
+        end
+
         function delete(obj)
         %DELETE Release renderer-owned violin primitives.
 

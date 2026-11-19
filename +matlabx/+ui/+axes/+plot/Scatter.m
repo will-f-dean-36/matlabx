@@ -122,6 +122,13 @@ classdef Scatter < handle & matlab.mixin.SetGet
         HoverDataTip = []
     end
 
+    methods (Access=?matlabx.ui.axes.plot.ScatterRenderer)
+        function graphics = exportGraphics(obj)
+        %EXPORTGRAPHICS Return the owned data marks for export styling.
+            graphics = {obj.scatterPoints,obj.Hull};
+        end
+    end
+
     methods
 
         function obj = Scatter(Parent,NameValuePairs)
