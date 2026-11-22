@@ -36,7 +36,7 @@ classdef PlotAxesContextMenuManager < handle
         % Stable insertion order for contributed entries.
         ItemOrder_ (1,:) string = string.empty(1,0)
         % Requested built-in root items in display order.
-        BuiltinItems_ (1,:) string = ["Display","ResetView","Status"]
+        BuiltinItems_ (1,:) string = ["Display","AxesProperties","ResetView","Status"]
     end
 
     methods
@@ -57,6 +57,10 @@ classdef PlotAxesContextMenuManager < handle
                 switch obj.BuiltinItems_(i)
                     case "Display"
                         S = obj.buildDisplayMenu(S,obj.Menu);
+                    case "AxesProperties"
+                        S.AxesProperties = uimenu(obj.Menu, ...
+                            "Text","Axes Properties...", ...
+                            "MenuSelectedFcn",@(~,~) obj.Host.openAxesProperties());
                     case "ResetView"
                         S.ResetView = uimenu(obj.Menu, ...
                             "Text","Reset View", ...
@@ -82,16 +86,24 @@ classdef PlotAxesContextMenuManager < handle
 
         function refresh(obj)
         %REFRESH Synchronize checked state and contributed refresh callbacks.
+            capabilities = obj.Host.getAxesCapabilities();
+            if isfield(obj.BuiltinUI,"AxesProperties")
+                obj.BuiltinUI.AxesProperties.Visible = ...
+                    matlab.lang.OnOffSwitchState(~isempty(capabilities));
+            end
             if isfield(obj.BuiltinUI,"Toolbar")
                 obj.BuiltinUI.Toolbar.Checked = obj.Host.ToolbarVisible;
             end
             if isfield(obj.BuiltinUI,"Grid")
+                obj.BuiltinUI.Grid.Visible = matlab.lang.OnOffSwitchState(any(capabilities == "Grid"));
                 obj.BuiltinUI.Grid.Checked = obj.Host.GridVisible;
             end
             if isfield(obj.BuiltinUI,"Box")
+                obj.BuiltinUI.Box.Visible = matlab.lang.OnOffSwitchState(any(capabilities == "Box"));
                 obj.BuiltinUI.Box.Checked = obj.Host.BoxVisible;
             end
             if isfield(obj.BuiltinUI,"Title")
+                obj.BuiltinUI.Title.Visible = matlab.lang.OnOffSwitchState(any(capabilities == "Typography"));
                 obj.BuiltinUI.Title.Checked = obj.Host.TitleVisible;
             end
 
@@ -206,7 +218,7 @@ classdef PlotAxesContextMenuManager < handle
     methods (Static)
         function items = availableBuiltinItems()
         %AVAILABLEBUILTINITEMS Return valid PlotAxes built-in menu tokens.
-            items = ["Display","Toolbar","Grid","Box","Title","ResetView","Status"];
+            items = ["Display","Toolbar","Grid","Box","Title","AxesProperties","ResetView","Status"];
         end
 
         function items = validateBuiltinItems(items)

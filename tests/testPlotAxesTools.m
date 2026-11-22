@@ -46,9 +46,11 @@ function testDefaultBuiltinsAndContextMenu(testCase)
     testCase.verifyNumElements(findall(host.Axes.Toolbar, ...
         'Tooltip','Export plot'),1);
     testCase.verifyNumElements(findall(host.ContextMenu, ...
-        'Text','Export Plot...'),1);
+        'Text','Export...'),1);
     testCase.verifyNumElements(findall(host.ContextMenu, ...
-        'Text','Copy as Vector Graphics'),1);
+        'Text','Copy'),1);
+    testCase.verifyNumElements(findall(host.ContextMenu, ...
+        'Text','Axes Properties...'),1);
 end
 
 function testExternalToolLifecycleAndReinstall(testCase)

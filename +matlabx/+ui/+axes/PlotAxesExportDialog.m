@@ -2,14 +2,9 @@ classdef PlotAxesExportDialog
 %PLOTAXESEXPORTDIALOG Collect PlotAxes file and host-style export options.
 %
 %   OPTIONS = matlabx.ui.axes.PlotAxesExportDialog.prompt(HOST) opens a
-%   compact accordion dialog. Vector and raster output types expose only
+%   tabbed dialog. Vector and raster output types expose only
 %   compatible formats, and raster resolution is enabled only for images.
-%   Host styling is returned as export-scoped data; the dialog does not
-%   permanently modify HOST.
-%
-% The dialog intentionally owns only host-level and file options. A future
-% content contribution contract can add a third accordion section without
-% requiring PlotAxes to reflect arbitrary renderer style properties.
+%   The shared axes tabs return settings for the export copy.
 
 % matlabx - MATLAB utilities for app building, image display, and analysis.
 % Copyright (C) 2026 William Dean
@@ -29,11 +24,15 @@ classdef PlotAxesExportDialog
 
     methods (Static)
 
-        function options = prompt(host)
+        function options = prompt(host,previewFcn,previewAxes)
         %PROMPT Open the modal export dialog and return accepted options.
+        %   A preview callback receives valid options and a visibility flag.
+        %   An empty options value leaves the previous preview layout intact.
 
             arguments
                 host (1,1) matlabx.ui.axes.PlotAxes
+                previewFcn = []
+                previewAxes = host.Axes
             end
 
             background = [.12 .12 .12];
@@ -51,72 +50,26 @@ classdef PlotAxesExportDialog
                 RowSpacing=10,ColumnSpacing=0,BackgroundColor=background, ...
                 RowHeight={'1x','fit'},ColumnWidth={'1x'});
 
-            accordionHost = uigridlayout(root,[1 1],Padding=0, ...
-                RowSpacing=0,ColumnSpacing=0,BackgroundColor=background, ...
-                RowHeight={'fit'},ColumnWidth={'1x'},Scrollable="on");
-            accordionHost.Layout.Row = 1;
-            accordion = matlabx.ui.container.Accordion(accordionHost, ...
-                ItemSpacing=5,BorderWidth=0,BorderColor=paneColor, ...
-                Padding=0,BackgroundColor=background);
-
-            filePane = addSection("File Options",10);
+            tabs = uitabgroup(root);
+            tab = uitab(tabs,Title="Export Options",BackgroundColor=paneColor, ...
+                ForegroundColor=fontColor);
+            filePane = uigridlayout(tab,[8 2],ColumnWidth={'fit','1x'}, ...
+                RowHeight=[repmat({'fit'},1,7),{'1x'}],Padding=[5 5 5 5], ...
+                ColumnSpacing=5,RowSpacing=5,BackgroundColor=paneColor,Scrollable="on");
             outputType = addDropDown(filePane,1,"Output type", ...
                 {'Vector','Image'},'Vector');
             format = addDropDown(filePane,2,"Format",{'PDF','SVG'},'SVG');
             units = addDropDown(filePane,3,"Units", ...
                 {'inches','centimeters','points'},'inches');
-            dimensions = addDropDown(filePane,4,"Set dimensions", ...
-                {'Width only','Height only','Width and height'},'Width only');
-            widthValue = "7";
-            heightValue = "5";
-            width = addDimension(filePane,5,"Width",widthValue);
-            height = addDimension(filePane,6,"Height",heightValue);
-            styleSizing = addDropDown(filePane,7,"Style sizing", ...
-                {'Preserve physical sizes','Scale with output'},'Preserve physical sizes');
-            styleSizing.Tooltip = "Physical sizing applies to axes text and participating plot content.";
-            preserveAspect = addCheckBox(filePane,8,"Preserve aspect ratio",true);
-            preserveAspect.Tooltip = ...
-                "Required for physical sizing or when only one dimension is specified.";
-            resolution = addNumeric(filePane,9,"Resolution (DPI)",300);
-            [useExportBackground,exportBackground] = addOptionalColor( ...
-                filePane,10,"Background color",host.BackgroundColor,false);
-
-            stylePane = addSection("Axes Styling",9);
-            [useAxesColor,axesColorPicker] = addOptionalColor( ...
-                stylePane,1,"Axes color", ...
-                pickerColor(host.Color,host.BackgroundColor),false);
-            foregroundPicker = addColor(stylePane,2,"Foreground",host.ForegroundColor);
-            fontNames = string(listfonts);
-            if ~any(fontNames == host.FontName)
-                fontNames = [host.FontName;fontNames(:)];
-            end
-            fontName = addDropDown(stylePane,3,"Font name", ...
-                cellstr(fontNames),char(host.FontName));
-            initialFontSize = host.FontSize;
-            if host.FontUnits == "pixels"
-                initialFontSize = initialFontSize * 72 / get(groot,'ScreenPixelsPerInch');
-            end
-            fontSize = addNumeric(stylePane,4,"Tick-label font size (pt)",initialFontSize);
-            labelMultiplier = addNumeric(stylePane,5,"Label size multiplier", ...
-                host.LabelFontSizeMultiplier);
-            titleMultiplier = addNumeric(stylePane,6,"Title size multiplier", ...
-                host.TitleFontSizeMultiplier);
-            gridVisible = addCheckBox(stylePane,7,"Show grid",logical(host.GridVisible));
-            boxVisible = addCheckBox(stylePane,8,"Show box",logical(host.BoxVisible));
-            titleVisible = addCheckBox(stylePane,9,"Show title", ...
-                logical(host.TitleVisible));
-
-            dimensions.ValueChangedFcn = @(~,~) updateSizing();
-            styleSizing.ValueChangedFcn = @(~,~) updateSizing();
-            updateSizing();
-            outputType.ValueChangedFcn = @(~,~) updateOutputType();
-            useExportBackground.ValueChangedFcn = ...
-                @(~,~) updateColorPicker(useExportBackground,exportBackground);
-            useAxesColor.ValueChangedFcn = ...
-                @(~,~) updateColorPicker(useAxesColor,axesColorPicker);
+            width = addDimension(filePane,4,"Width","7");
+            height = addDimension(filePane,5,"Height","");
+            dimensionHint = addLabel(filePane,6, ...
+                "Leave one dimension blank to preserve the plot’s shape.");
+            dimensionHint.Layout.Column = [1 2];
+            resolution = addNumeric(filePane,7,"Resolution (DPI)",300);
+            [readAxes,refreshLimits] = matlabx.ui.axes.internal.plotAxesControlTabs(tabs,host,@updatePreview,true);
+            outputType.ValueChangedFcn = @(~,~) outputTypeChanged();
             updateOutputType();
-            updateColorPicker(useExportBackground,exportBackground);
-            updateColorPicker(useAxesColor,axesColorPicker);
 
             buttons = uigridlayout(root,[1 3],Padding=0,RowSpacing=0, ...
                 ColumnSpacing=5,ColumnWidth={'1x',80,80},RowHeight={'fit'}, ...
@@ -131,25 +84,22 @@ classdef PlotAxesExportDialog
                 ButtonPushedFcn=@(~,~) acceptDialog());
             export.Layout.Column = 3;
 
+            if ~isempty(previewFcn)
+                showPreview = uicheckbox(buttons,Text="Show preview", ...
+                    Value=false,FontColor=controlFontColor, ...
+                    ValueChangedFcn=@(~,~) previewVisibilityChanged());
+                showPreview.Layout.Column = 1;
+                controls = {format,units,width,height,resolution};
+                for k = 1:numel(controls)
+                    controls{k}.ValueChangedFcn = @(~,~) updatePreview();
+                end
+            end
+
             movegui(fig,"center");
             fig.Visible = "on";
+            updatePreview();
             uiwait(fig);
             if isgraphics(fig), delete(fig); end
-
-            function pane = addSection(title,rowCount)
-                accordion.addItem(Title=title,BorderColor=[.49 .49 .49], ...
-                    TitleBackgroundColor=background, ...
-                    HoverTitleBackgroundColor=controlColor, ...
-                    PaneBackgroundColor=paneColor,FontColor=fontColor, ...
-                    BorderWidth=1,ExpandedBorderWidth=1,TitlePadding=1);
-                item = accordion.getItem(title);
-                item.expand();
-                pane = item.Pane;
-                set(pane,ColumnWidth={'fit','1x'}, ...
-                    RowHeight=repmat({'fit'},1,rowCount), ...
-                    Padding=[5 5 5 5],ColumnSpacing=5,RowSpacing=5, ...
-                    BackgroundColor=paneColor);
-            end
 
             function label = addLabel(pane,row,text)
                 label = uilabel(pane,Text=text,FontColor=fontColor);
@@ -175,7 +125,7 @@ classdef PlotAxesExportDialog
 
             function control = addDimension(pane,row,label,value)
                 addLabel(pane,row,label);
-                control = uieditfield(pane,"text",Value=value, ...
+                control = uieditfield(pane,"text",Value=value,Placeholder="Auto", ...
                     BackgroundColor=controlColor,FontColor=controlFontColor);
                 control.Layout.Row = row;
                 control.Layout.Column = 2;
@@ -187,29 +137,6 @@ classdef PlotAxesExportDialog
                     FontColor=controlFontColor);
                 control.Layout.Row = row;
                 control.Layout.Column = 2;
-            end
-
-            function control = addColor(pane,row,label,value)
-                addLabel(pane,row,label);
-                control = uicolorpicker(pane,Value=value);
-                control.Layout.Row = row;
-                control.Layout.Column = 2;
-            end
-
-            function [toggle,picker] = addOptionalColor(pane,row,label,value,enabled)
-            %ADDOPTIONALCOLOR Add a checkbox and color picker in one form row.
-                addLabel(pane,row,label);
-                colorGrid = uigridlayout(pane,[1 2], ...
-                    ColumnWidth={'fit','1x'},RowHeight={'fit'}, ...
-                    Padding=0,RowSpacing=0,ColumnSpacing=5, ...
-                    BackgroundColor=paneColor);
-                colorGrid.Layout.Row = row;
-                colorGrid.Layout.Column = 2;
-                toggle = uicheckbox(colorGrid,Text="",Value=enabled, ...
-                    FontColor=controlFontColor);
-                toggle.Layout.Column = 1;
-                picker = uicolorpicker(colorGrid,Value=value);
-                picker.Layout.Column = 2;
             end
 
             function updateOutputType()
@@ -226,100 +153,81 @@ classdef PlotAxesExportDialog
                 end
             end
 
-            function updateSizing()
-                widthValue = updateDimension(width,widthValue, ...
-                    string(dimensions.Value) ~= "Height only");
-                heightValue = updateDimension(height,heightValue, ...
-                    string(dimensions.Value) ~= "Width only");
-                forceAspect = string(dimensions.Value) ~= "Width and height" ...
-                    || string(styleSizing.Value) == "Preserve physical sizes";
-                preserveAspect.Enable = matlab.lang.OnOffSwitchState(~forceAspect);
-                if forceAspect, preserveAspect.Value = true; end
+            function value = readDimension(control)
+                input = strip(string(control.Value));
+                value = [];
+                if strlength(input) > 0, value = str2double(input); end
             end
 
-            function value = updateDimension(control,value,enabled)
-                if strcmp(control.Enable,'on')
-                    value = control.Value;
-                end
-                control.Enable = matlab.lang.OnOffSwitchState(enabled);
-                if enabled
-                    control.Value = value;
-                else
-                    control.Value = "Auto";
-                end
+            function outputTypeChanged()
+                updateOutputType();
+                updatePreview();
             end
 
-            function updateColorPicker(toggle,picker)
-                picker.Enable = matlab.lang.OnOffSwitchState(toggle.Value);
+            function previewVisibilityChanged()
+                if showPreview.Value, movegui(fig,"east"); end
+                updatePreview();
+            end
+
+            function updatePreview()
+                if ~isempty(previewFcn)
+                    previewOptions = readOptions();
+                    previewFcn(previewOptions,showPreview.Value);
+                    drawnow nocallbacks;
+                end
+                refreshLimits(previewAxes);
             end
 
             function acceptDialog()
-                outputWidth = [];
-                outputHeight = [];
-                if strcmp(width.Enable,'on'), outputWidth = str2double(width.Value); end
-                if strcmp(height.Enable,'on'), outputHeight = str2double(height.Value); end
-                sizing = "scale";
-                if string(styleSizing.Value) == "Preserve physical sizes"
-                    sizing = "physical";
+                [accepted,message] = readOptions();
+                if isempty(accepted)
+                    uialert(fig,message,"Invalid Export Options");
+                    return;
                 end
-                positive = [outputWidth,outputHeight,fontSize.Value, ...
-                    labelMultiplier.Value,titleMultiplier.Value];
+                options = accepted;
+                uiresume(fig);
+            end
+
+            function [selected,message] = readOptions()
+                selected = [];
+                message = "";
+                outputWidth = readDimension(width);
+                outputHeight = readDimension(height);
+                if isempty(outputWidth) && isempty(outputHeight)
+                    message = "Enter a width or height.";
+                    return;
+                end
+                positive = [outputWidth,outputHeight];
                 if ~isreal(positive) || any(~isfinite(positive)) || any(positive <= 0)
-                    uialert(fig,"Sizes and font multipliers must be positive finite values.", ...
-                        "Invalid Export Options");
+                    message = "Width and height must be positive finite values.";
                     return;
                 end
                 if string(outputType.Value) == "Image" && ...
                         (~isfinite(resolution.Value) || resolution.Value <= 0 || ...
                         resolution.Value ~= fix(resolution.Value))
-                    uialert(fig,"Resolution must be a positive whole number.", ...
-                        "Invalid Export Options");
+                    message = "Resolution must be a positive whole number.";
                     return;
                 end
+                [style,view,message] = readAxes();
+                if strlength(message) > 0, return; end
                 [extension,contentType] = selectedFormat();
-                preserve = "off";
-                if preserveAspect.Value, preserve = "on"; end
-                backgroundColor = "none";
-                if useExportBackground.Value
-                    backgroundColor = exportBackground.Value;
+                exportBackground = host.BackgroundColor;
+                if ~isempty(host.BackgroundColorOverride)
+                    exportBackground = host.BackgroundColorOverride;
                 end
-                axesColor = "none";
-                if useAxesColor.Value
-                    axesColor = axesColorPicker.Value;
+                if isfield(style,"BackgroundColorOverride") && ~isempty(style.BackgroundColorOverride)
+                    exportBackground = style.BackgroundColorOverride;
                 end
-                options = struct( ...
+                selected = struct( ...
                     "ContentType",contentType, ...
                     "Format",string(format.Value), ...
                     "Extension",extension, ...
                     "Units",string(units.Value), ...
                     "Width",outputWidth, ...
                     "Height",outputHeight, ...
-                    "StyleSizing",sizing, ...
-                    "PreserveAspectRatio",preserve, ...
                     "Resolution",resolution.Value, ...
-                    "BackgroundColor",backgroundColor, ...
-                    "Color",axesColor, ...
-                    "ForegroundColor",foregroundPicker.Value, ...
-                    "FontName",string(fontName.Value), ...
-                    "FontUnits","points", ...
-                    "FontSize",fontSize.Value, ...
-                    "LabelFontSizeMultiplier",labelMultiplier.Value, ...
-                    "TitleFontSizeMultiplier",titleMultiplier.Value, ...
-                    "GridVisible",matlab.lang.OnOffSwitchState(gridVisible.Value), ...
-                    "BoxVisible",matlab.lang.OnOffSwitchState(boxVisible.Value), ...
-                    "TitleVisible",matlab.lang.OnOffSwitchState(titleVisible.Value));
-                uiresume(fig);
-            end
-
-
-            function tf = isNoneColor(value)
-                tf = (ischar(value) || isstring(value)) && ...
-                    strcmpi(string(value),"none");
-            end
-
-            function value = pickerColor(color,fallback)
-                value = color;
-                if isNoneColor(color), value = fallback; end
+                    "BackgroundColor",exportBackground, ...
+                    "AxesAppearance",style,"AxesView",view);
             end
 
             function [extension,contentType] = selectedFormat()

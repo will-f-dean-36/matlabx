@@ -3,8 +3,8 @@ classdef PlotContent < handle
 %
 % PlotContent defines the ownership boundary between a stable PlotAxes host
 % and application-owned renderer state. Subclasses override attachGraphics,
-% hideGraphics, and refresh while this base class coordinates transfer,
-% detachment, and host identity.
+% hideGraphics, and refreshGraphics while this base class coordinates
+% transfer, detachment, host identity, and shared axes view settings.
 %
 % A content object can be mounted, cleared, and mounted again without being
 % deleted:
@@ -107,8 +107,23 @@ classdef PlotContent < handle
             obj.detach();
         end
 
-        function refresh(~)
-        %REFRESH Render stored content state when attached; subclasses override.
+        function refresh(obj)
+        %REFRESH Render content, then apply host-owned view overrides.
+            if isempty(obj.Host), return; end
+            obj.refreshGraphics();
+            obj.Host.applyAxesView();
+        end
+
+        function capabilities = axesCapabilities(~)
+        %AXESCAPABILITIES Return shared settings with meaning for this chart.
+        %   Override to omit controls for specialized axes representations.
+            capabilities = matlabx.ui.axes.PlotAxes.cartesianAxesCapabilities();
+        end
+
+        function limits = automaticAxesLimits(~,~)
+        %AUTOMATICAXESLIMITS Return chart-specific Auto limits for "X" or "Y".
+        %   An empty result delegates automatic limits to MATLAB.
+            limits = [];
         end
 
         function handleEvent(~,~,~)
@@ -126,6 +141,10 @@ classdef PlotContent < handle
     end
 
     methods (Access=protected)
+
+        function refreshGraphics(~)
+        %REFRESHGRAPHICS Render stored content and set chart-defined defaults.
+        end
 
         function attachGraphics(~,~)
         %ATTACHGRAPHICS Move owned primitives to the supplied UIAxes.

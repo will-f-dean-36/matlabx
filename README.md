@@ -799,7 +799,7 @@ application tools can be installed as objects:
 
 ```matlab
 host.Tools = ["Export","CopyGraphics"];
-host.ContextMenuItems = ["Display","ResetView","Status"];
+host.ContextMenuItems = ["Display","AxesProperties","ResetView","Status"];
 host.installTool(myapp.ui.axes.CustomPlotTool(host));
 ```
 
@@ -808,6 +808,66 @@ to the selected filename. `CopyGraphics` places vector graphics on the system
 clipboard. Both contribute toolbar buttons and owner-scoped context-menu
 commands. Hub events pass through installed plot tools before unconsumed events
 reach the mounted renderer.
+
+#### Shared axes appearance and view
+
+Open **Axes Properties…** from the plot context menu, or call
+`host.openAxesProperties()`. The dialog groups typography and visibility
+under **Appearance**, stroke width and tick settings under **Ticks and Lines**,
+and axis ranges under **Limits**. It shows controls supported by the mounted
+plot. For example, Violin keeps its data-defined category ticks on the X axis,
+and Scatter provides a legend visibility setting. Renderer styles still
+provide chart-specific defaults, including marker and outline styling.
+The PlotAxes export dialog uses the same tabs for temporary changes to the
+export copy and adds a tab for file options.
+Axes Properties previews edits on the live plot. Apply keeps them, while
+Cancel or closing the window restores the opening state. Disabled limit
+fields show the effective limits in both dialogs.
+
+Set host typography, grid, box, and ruler styling directly on `PlotAxes`.
+Use `setAxesView` for view overrides that survive renderer refreshes and stay
+with the host when content is transferred.
+
+```matlab
+host.FontUnits = "points";
+host.FontSize = 10;
+host.GridVisible = "on";
+host.AxisLineWidth = 0.75;           % Points
+host.TickLength = [0.015 0.025];     % Fractions of axes size for 2-D and 3-D
+host.TickDirection = "out";          % "in", "out", "both", or "none"
+host.BackgroundColorOverride = [0.95 0.95 0.95];
+host.AxesColorOverride = "none";      % Transparent plotting area
+host.ForegroundColorOverride = [0.15 0.15 0.15];
+host.setAxesView(XLim=[0 10], YLim="auto", XTickInterval=2);
+host.setAxesView(LegendVisible="off");  % For a plot that supports legends
+host.setAxesView(XLim=[], XTickInterval=[], LegendVisible="default");
+```
+
+Set a color override to `[]` to restore the renderer or host color. The
+background color covers the plot container, the axes color covers the data
+area, and the foreground applies to axes rulers and annotations.
+
+Omitted options keep their previous values. A two-element limit fixes that
+range. **Auto** uses MATLAB's automatic limits or a renderer's automatic
+framing. **Plot default** (`[]` in the API) delegates to the renderer's
+configured limits, including existing Scatter and Violin style values.
+Tick intervals are positive distances in data units for linear axes and are
+anchored at zero. Use `[]` to restore plot-defined ticks. Legend visibility
+accepts `"on"`, `"off"`, or `"default"`. Read the current overrides from
+`host.AxesView` and the displayed limits from `host.Axes.XLim` and
+`host.Axes.YLim`.
+
+New renderers should implement the protected `PlotContent.refreshGraphics`
+method. The inherited `refresh` calls it and then applies the host's view.
+Use `axesCapabilities()` to customize which controls a renderer exposes.
+Start with `PlotAxes.cartesianAxesCapabilities()` and omit tokens that do
+not apply. For example, a polar chart drawn on Cartesian axes can return
+`"Typography"` to expose typography alone. Override
+`automaticAxesLimits(axisName)` to return renderer-defined automatic bounds,
+or return `[]` for MATLAB automatic limits. For legend-aware renderers, declare
+`"Legend"` and use `host.resolveLegendVisibility(default)` when constructing
+the chart's legend. Existing renderers that override `refresh` directly may
+call `host.applyAxesView()` after applying their defaults.
 
 Low-level `matlabx.ui.axes.plot.Scatter` and `Violin` each own one logical dataset
 and several graphics primitives. `setParent(axes)` moves every owned primitive;

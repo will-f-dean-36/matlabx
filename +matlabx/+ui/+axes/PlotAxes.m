@@ -55,6 +55,10 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         ForegroundColor (1,3) double {mustBeBetween(ForegroundColor,0,1)} = [0 0 0]
         % Plotting-area color, or "none" for a transparent axes background.
         Color = [1 1 1]
+        % Shared color overrides. [] uses the renderer or host color.
+        BackgroundColorOverride double {mustBeOptionalRGB_} = []
+        AxesColorOverride {mustBeOptionalAxesColor_} = []
+        ForegroundColorOverride double {mustBeOptionalRGB_} = []
         % Font family applied to axes text.
         FontName (1,1) string = "Helvetica"
         % Units used for tick-label, title, subtitle, and axes-label font sizes.
@@ -65,6 +69,12 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         LabelFontSizeMultiplier (1,1) double {mustBePositive,mustBeFinite} = 1
         % Native multiplier used by MATLAB for title font size.
         TitleFontSizeMultiplier (1,1) double {mustBePositive,mustBeFinite} = 1
+        % Axes frame and tick stroke width in points.
+        AxisLineWidth (1,1) double {mustBePositive,mustBeFinite} = 0.5
+        % Tick lengths as fractions of the longest axes dimension (2-D, 3-D).
+        TickLength (1,2) double {mustBeNonnegative,mustBeFinite} = [0.01 0.025]
+        % Direction of major and minor ticks.
+        TickDirection (1,1) string {mustBeMember(TickDirection,["in","out","both","none"])} = "in"
     end
 
     % Configurable host UI and installed-tool state.
@@ -91,6 +101,12 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         Content
         % Stable UIAxes used by renderers and future tools.
         Axes
+    end
+
+    properties (SetAccess=private)
+        % Host view overrides. Empty fields inherit the plot defaults.
+        AxesView struct = struct("XLim",[],"YLim",[], ...
+            "XTickInterval",[],"YTickInterval",[],"LegendVisible","default")
     end
 
     % Graphics, listener, and content references owned by the host lifecycle.
@@ -124,7 +140,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
 
     properties (Access=private, AbortSet)
         % Backing built-in context-menu configuration.
-        ContextMenuItems_ (1,:) string = ["Display","ResetView","Status"]
+        ContextMenuItems_ (1,:) string = ["Display","AxesProperties","ResetView","Status"]
         % Backing requested toolbar visibility.
         ToolbarVisible_ (1,1) matlab.lang.OnOffSwitchState = "on"
         % Backing expanded or collapsed toolbar state.
@@ -135,6 +151,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         BoxVisible_ (1,1) matlab.lang.OnOffSwitchState = "off"
         % Backing axes-title visibility.
         TitleVisible_ (1,1) matlab.lang.OnOffSwitchState = "off"
+        % Shared axes properties dialog for this host.
+        AxesPropertiesDialog = []
         % Whether the status report window is currently open.
         StatusWindowOpen_ (1,1) logical = false
         % Whether tool teardown has already run for this host.
@@ -234,7 +252,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         function set.GridVisible(obj,value)
         %SET.GRIDVISIBLE Show or hide both major Cartesian grid directions.
             obj.GridVisible_ = value;
-            if ~isempty(obj.MainAxes) && isvalid(obj.MainAxes)
+            if ~isempty(obj.MainAxes) && isvalid(obj.MainAxes) ...
+                    && any(obj.getAxesCapabilities() == "Grid")
                 obj.MainAxes.XGrid = value;
                 obj.MainAxes.YGrid = value;
             end
@@ -249,7 +268,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         function set.BoxVisible(obj,value)
         %SET.BOXVISIBLE Show or hide the Cartesian axes box.
             obj.BoxVisible_ = value;
-            if ~isempty(obj.MainAxes) && isvalid(obj.MainAxes)
+            if ~isempty(obj.MainAxes) && isvalid(obj.MainAxes) ...
+                    && any(obj.getAxesCapabilities() == "Box")
                 obj.MainAxes.Box = value;
             end
             obj.refreshContextMenu();
@@ -263,7 +283,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         function set.TitleVisible(obj,value)
         %SET.TITLEVISIBLE Show or hide the hosted axes title.
             obj.TitleVisible_ = value;
-            if ~isempty(obj.MainAxes) && isvalid(obj.MainAxes)
+            if ~isempty(obj.MainAxes) && isvalid(obj.MainAxes) ...
+                    && any(obj.getAxesCapabilities() == "Typography")
                 obj.MainAxes.Title.Visible = value;
             end
             obj.refreshContextMenu();
@@ -350,6 +371,129 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             if ~isempty(obj.Content_) && isvalid(obj.Content_)
                 obj.Content_.refresh();
             end
+            obj.applyAxesView();
+        end
+
+        function capabilities = getAxesCapabilities(obj)
+        %GETAXESCAPABILITIES Return supported shared controls for the current plot.
+            if isempty(obj.Content_)
+                capabilities = obj.cartesianAxesCapabilities();
+            else
+                capabilities = string(obj.Content_.axesCapabilities());
+            end
+        end
+
+        function setAxesView(obj,opts)
+        %SETAXESVIEW Override selected limits, tick intervals, or legend visibility.
+        %   SETAXESVIEW(XLim=[min max]) holds that view across renderer updates.
+        %   Use "auto" for automatic framing or [] to inherit the plot default.
+        %   Tick intervals are positive distances in data units on linear axes.
+        %   [] restores plot-defined ticks. LegendVisible accepts "on", "off",
+        %   or "default". Omitted options retain their values.
+            arguments
+                obj (1,1) matlabx.ui.axes.PlotAxes
+                opts.XLim {mustBeViewLimits_}
+                opts.YLim {mustBeViewLimits_}
+                opts.XTickInterval double {mustBeTickInterval_}
+                opts.YTickInterval double {mustBeTickInterval_}
+                opts.LegendVisible (1,1) string ...
+                    {mustBeMember(opts.LegendVisible,["default","on","off"])}
+            end
+
+            names = string(fieldnames(opts));
+            capabilities = obj.getAxesCapabilities();
+            if any(capabilities == "Legend")
+                capabilities(end+1) = "LegendVisible";
+            end
+            unsupported = setdiff(names,capabilities);
+            for name = reshape(unsupported,1,[])
+                if ~isempty(opts.(name)) && ~isequal(opts.(name),"default")
+                    error('matlabx:ui:axes:UnsupportedAxesSetting', ...
+                        'The current plot does not support %s.',name);
+                end
+            end
+
+            oldView = obj.AxesView;
+            view = oldView;
+            for name = reshape(names,1,[])
+                view.(name) = opts.(name);
+            end
+            if isequal(view,oldView), return; end
+            ax = obj.MainAxes;
+            for axisName = ["X","Y"]
+                limits = axisName + "Lim";
+                interval = axisName + "TickInterval";
+                if isempty(view.(limits)) && ~isempty(oldView.(limits))
+                    ax.(limits + "Mode") = 'auto';
+                end
+                if isempty(view.(interval)) && ~isempty(oldView.(interval))
+                    ax.(axisName + "TickMode") = 'auto';
+                end
+            end
+
+            obj.AxesView = view;
+            refresh = (isempty(view.XLim) && ~isempty(oldView.XLim)) ...
+                || (isempty(view.YLim) && ~isempty(oldView.YLim)) ...
+                || (isempty(view.XTickInterval) && ~isempty(oldView.XTickInterval)) ...
+                || (isempty(view.YTickInterval) && ~isempty(oldView.YTickInterval)) ...
+                || view.LegendVisible ~= oldView.LegendVisible;
+            if refresh && ~isempty(obj.Content_) && isvalid(obj.Content_)
+                obj.Content_.refresh();
+            end
+            obj.applyAxesView();
+        end
+
+        function applyAxesView(obj)
+        %APPLYAXESVIEW Reapply host overrides after rendering chart defaults.
+        %   PlotContent.refresh does this automatically for refreshGraphics
+        %   implementations. Legacy refresh overrides can call it last.
+            ax = obj.MainAxes;
+            if isempty(ax) || ~isvalid(ax) || ax.BeingDeleted == "on", return; end
+            capabilities = obj.getAxesCapabilities();
+            for axisName = ["X","Y"]
+                property = axisName + "Lim";
+                limits = obj.AxesView.(property);
+                if isempty(limits) || ~any(capabilities == property), continue; end
+                if ischar(limits) || isstring(limits)
+                    limits = [];
+                    if ~isempty(obj.Content_)
+                        limits = obj.Content_.automaticAxesLimits(axisName);
+                    end
+                end
+                if isempty(limits)
+                    ax.(property + "Mode") = 'auto';
+                else
+                    ax.(property) = limits;
+                end
+            end
+            obj.applyTickInterval_("X");
+            obj.applyTickInterval_("Y");
+            obj.applyRulerStyle();
+            if any(capabilities == "Legend") && obj.AxesView.LegendVisible ~= "default"
+                if isempty(ax.Legend)
+                    if obj.AxesView.LegendVisible == "on", legend(ax,'show'); end
+                else
+                    ax.Legend.Visible = obj.AxesView.LegendVisible;
+                end
+            end
+        end
+
+        function visible = resolveLegendVisibility(obj,default)
+        %RESOLVELEGENDVISIBILITY Let renderers create their own legend entries.
+            visible = default;
+            setting = obj.AxesView.LegendVisible;
+            if setting ~= "default" && any(obj.getAxesCapabilities() == "Legend")
+                visible = setting == "on";
+            end
+        end
+
+        function openAxesProperties(obj)
+        %OPENAXESPROPERTIES Open shared appearance and view controls.
+            if isgraphics(obj.AxesPropertiesDialog)
+                figure(obj.AxesPropertiesDialog);
+                return;
+            end
+            obj.AxesPropertiesDialog = matlabx.ui.axes.PlotAxesPropertiesDialog.open(obj);
         end
 
         function toggleToolbar(obj)
@@ -418,8 +562,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         %   raster content in otherwise vector-capable formats. Set Width
         %   or Height to [] to derive it from the captured aspect ratio.
         %   StyleSizing="physical" approximately preserves physical sizes
-        %   for host text and participating content and requires aspect
-        %   preservation. "scale" retains ordinary exportgraphics sizing.
+        %   for host typography, ruler strokes, and participating content.
+        %   It requires aspect preservation. "scale" retains ordinary sizing.
             arguments
                 obj (1,1) matlabx.ui.axes.PlotAxes
                 filename (1,1) string {mustBeNonzeroLengthText}
@@ -432,7 +576,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 opts.BackgroundColor {mustBeAxesColor_(opts.BackgroundColor)} = "none"
                 opts.Color {mustBeAxesColor_(opts.Color)} = "none"
                 opts.ForegroundColor (1,3) double ...
-                    {mustBeBetween(opts.ForegroundColor,0,1)} = obj.ForegroundColor
+                    {mustBeBetween(opts.ForegroundColor,0,1)} = ...
+                    colorOverride_(obj.ForegroundColor,obj.ForegroundColorOverride)
                 opts.FontName (1,1) string = obj.FontName
                 opts.FontUnits (1,1) string {mustBeMember(opts.FontUnits, ...
                     ["points","pixels"])} = obj.FontUnits
@@ -482,6 +627,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
 
             appearance = struct( ...
                 "Color",obj.Color, ...
+                "AxesColorOverride",obj.AxesColorOverride, ...
+                "ForegroundColorOverride",obj.ForegroundColorOverride, ...
                 "ForegroundColor",obj.ForegroundColor, ...
                 "FontName",obj.FontName, ...
                 "FontUnits",obj.FontUnits, ...
@@ -493,6 +640,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 "TitleVisible",obj.TitleVisible);
             appearanceCleanup = onCleanup( ...
                 @() restorePlotAppearance_(obj,appearance));
+            obj.AxesColorOverride = [];
+            obj.ForegroundColorOverride = [];
             obj.Color = opts.Color;
             obj.ForegroundColor = opts.ForegroundColor;
             obj.FontName = opts.FontName;
@@ -527,20 +676,16 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                     % Automatic labels and titles follow the axes font size.
                     labels = [ax.XLabel,ax.YLabel,ax.ZLabel,ax.Title,ax.Subtitle];
                     manual = strcmp({labels.FontSizeMode},'manual');
-                    ownedText = [{ax},arrayfun(@(h) h,labels(manual),UniformOutput=false)];
-                    textCleanup = matlabx.ui.axes.internal.scaleExportGraphics(ownedText,scale,"FontSize");
+                    ownedGraphics = [{ax},arrayfun(@(h) h,labels(manual),UniformOutput=false)];
+                    axesStyleCleanup = matlabx.ui.axes.internal.scaleExportGraphics( ...
+                        ownedGraphics,scale,["FontSize","LineWidth"]);
                     if ~isempty(obj.Content_) && isvalid(obj.Content_)
                         contentCleanup = obj.Content_.beginExportStyleScale(scale);
                     end
                 end
 
-                exportgraphics(ax,filename,dimensionArgs{:}, ...
-                    ContentType=opts.ContentType,Units=opts.Units, ...
-                    Colorspace="rgb",Padding=0, ...
-                    PreserveAspectRatio=preserveAspect, ...
-                    BackgroundColor=opts.BackgroundColor, ...
-                    Resolution=opts.Resolution);
-                clear contentCleanup textCleanup
+                writePlotExport_(ax,filename,opts,dimensionArgs,preserveAspect);
+                clear contentCleanup axesStyleCleanup
             end
         end
 
@@ -559,8 +704,29 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             windowStyleCleanup = onCleanup( ...
                 @() restoreFigureWindowStyle_(fig,previousWindowStyle));
 
-            options = matlabx.ui.axes.PlotAxesExportDialog.prompt(obj);
+            drawnow;
+            % Resolve automatic limits after the initial component update.
+            drawnow;
+            source = obj.MainAxes;
+            inset = source.TightInset;
+            capturedSize = source.InnerPosition(3:4) + inset(1:2) + inset(3:4);
+            aspectRatio = capturedSize(1) / capturedSize(2);
+            previewBackground = obj.Grid.BackgroundColor;
+            exportFigure = uifigure(Visible="off",Name="Export Preview", ...
+                Resize="off",CloseRequestFcn=@(~,~) [], ...
+                InnerPosition=[100 100 capturedSize],Color=previewBackground);
+            exportCleanup = onCleanup(@() delete(exportFigure));
+            exportAxes = copyPlotAxes_(source,exportFigure);
+            copyDefaults = snapshotPlotCopy_(exportAxes);
+            if ~isempty(obj.Content_)
+                copyDefaults.XAutoLim = obj.Content_.automaticAxesLimits("X");
+                copyDefaults.YAutoLim = obj.Content_.automaticAxesLimits("Y");
+            end
+            drawnow;
+
+            options = matlabx.ui.axes.PlotAxesExportDialog.prompt(obj,@updatePreview,exportAxes);
             if isempty(options), return; end
+            exportFigure.Visible = 'off';
 
             pattern = "*" + options.Extension;
             description = options.Format + " (" + pattern + ")";
@@ -576,21 +742,32 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 file = char(string(name) + options.Extension);
             end
             filename = string(fullfile(path,file));
-            obj.exportPlot(filename,ContentType=options.ContentType, ...
-                Units=options.Units,Width=options.Width, ...
-                Height=options.Height, ...
-                BackgroundColor=options.BackgroundColor, ...
-                Color=options.Color, ...
-                ForegroundColor=options.ForegroundColor, ...
-                FontName=options.FontName,FontUnits=options.FontUnits, ...
-                FontSize=options.FontSize, ...
-                LabelFontSizeMultiplier=options.LabelFontSizeMultiplier, ...
-                TitleFontSizeMultiplier=options.TitleFontSizeMultiplier, ...
-                GridVisible=options.GridVisible,BoxVisible=options.BoxVisible, ...
-                TitleVisible=options.TitleVisible, ...
-                StyleSizing=options.StyleSizing, ...
-                PreserveAspectRatio=options.PreserveAspectRatio, ...
-                Resolution=options.Resolution,HideToolbar=true);
+            dimensions = applyPlotCopyOptions_(exportFigure,exportAxes,options,aspectRatio,copyDefaults);
+            % A resized hidden figure can export using its old renderer bounds.
+            % Start the export figure at the final dimensions.
+            finalFigure = uifigure(Visible="off", ...
+                InnerPosition=exportFigure.InnerPosition,Color=previewBackground);
+            finalCleanup = onCleanup(@() delete(finalFigure));
+            finalAxes = copyPlotAxes_(exportAxes,finalFigure);
+            applyPlotCopyView_(finalAxes,options.AxesView,copyDefaults);
+            drawnow;
+            drawnow;
+            % Explicit dimensions preserve the requested page bounds in vector files.
+            writePlotExport_(finalAxes,filename,options,dimensions,'on');
+
+            function updatePreview(previewOptions,visible)
+                if ~isempty(previewOptions)
+                    applyPlotCopyOptions_(exportFigure,exportAxes,previewOptions,aspectRatio,copyDefaults);
+                    exportFigure.Color = previewBackground;
+                    if isnumeric(previewOptions.BackgroundColor)
+                        exportFigure.Color = previewOptions.BackgroundColor;
+                    end
+                end
+                if visible && strcmp(exportFigure.Visible,'off')
+                    movegui(exportFigure,"west");
+                end
+                exportFigure.Visible = matlab.lang.OnOffSwitchState(visible);
+            end
         end
 
         function copyPlot(obj,opts)
@@ -612,9 +789,11 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
 
             if ~isempty(obj.Content_) && obj.Content_ == content
                 content.refresh();
+                obj.applyAxesView();
                 return;
             end
 
+            if isgraphics(obj.AxesPropertiesDialog), close(obj.AxesPropertiesDialog); end
             obj.clear();
 
             % Remove axes presentation left by the previous renderer. Graphics
@@ -632,6 +811,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
 
             try
                 content.attach(obj);
+                obj.applyAxesView();
                 % Content-specific commands share the host menu but remain
                 % scoped to the mounted content's lifecycle.
                 content.contributeContextMenu(obj.ContextMenuManager);
@@ -655,12 +835,14 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 return;
             end
 
+            if isgraphics(obj.AxesPropertiesDialog), close(obj.AxesPropertiesDialog); end
             mounted = obj.Content_;
             obj.Content_ = matlabx.ui.axes.PlotContent.empty(0,1);
             % Remove callbacks which retain the content before detaching it.
             obj.ContextMenuManager.removeOwner(mounted);
             mounted.detach(obj);
             obj.resetAxes();
+            obj.applyRulerStyle();
             notify(obj,'ContentChanged');
         end
 
@@ -819,11 +1001,13 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             axes.YAxisLocation = 'left';
             axes.Box = obj.BoxVisible_;
             axes.TickDir = 'in';
+            axes.TickLength = [0.01 0.025];
+            axes.LineWidth = 0.5;
             axes.View = [0 90];
             axes.NextPlot = 'add';
             axes.ColorOrderIndex = 1;
 
-            obj.applyHostAppearance();
+            obj.applyHostAppearance(false);
         end
 
         function delete(obj)
@@ -831,6 +1015,9 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
 
             for k = 1:numel(obj)
 
+                if isgraphics(obj(k).AxesPropertiesDialog)
+                    delete(obj(k).AxesPropertiesDialog);
+                end
                 obj(k).clearInitialToolbarFocusListener_();
                 obj(k).teardownTools_();
 
@@ -852,6 +1039,12 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
     end
 
     methods (Static)
+
+        function capabilities = cartesianAxesCapabilities()
+        %CARTESIANAXESCAPABILITIES Shared controls for ordinary Cartesian plots.
+            capabilities = ["Colors","Typography","Grid","Box","Rulers", ...
+                "XLim","YLim","XTickInterval","YTickInterval"];
+        end
 
         function names = getToolNames()
         %GETTOOLNAMES Return short names of built-in PlotAxes tools.
@@ -926,6 +1119,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 'Expanded',obj.ToolbarExpanded_);
             obj.MainAxes.Toolbar.Visible = 'off';
             obj.MainAxes.Tag = char(obj.Name);
+            addlistener(obj.MainAxes,'XLim','PostSet',@(~,~) obj.applyTickInterval_("X"));
+            addlistener(obj.MainAxes,'YLim','PostSet',@(~,~) obj.applyTickInterval_("Y"));
             % Apply point-based typography before the first deferred update.
             obj.applyHostAppearance();
 
@@ -1013,40 +1208,62 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             obj.InitialToolbarFocusListener = event.listener.empty;
         end
 
-        function applyHostAppearance(obj)
+        function applyHostAppearance(obj,applyRulers)
         %APPLYHOSTAPPEARANCE Restore colors and typography owned by PlotAxes.
+            if nargin < 2, applyRulers = true; end
             if isempty(obj.MainAxes) || ~isvalid(obj.MainAxes) || ...
                     obj.MainAxes.BeingDeleted == "on"
                 return;
             end
 
-            obj.Grid.BackgroundColor = obj.BackgroundColor;
-            obj.MainAxes.Color = obj.Color;
-            obj.MainAxes.XColor = obj.ForegroundColor;
-            obj.MainAxes.YColor = obj.ForegroundColor;
-            obj.MainAxes.ZColor = obj.ForegroundColor;
-            obj.MainAxes.XLabel.Color = obj.ForegroundColor;
-            obj.MainAxes.YLabel.Color = obj.ForegroundColor;
-            obj.MainAxes.ZLabel.Color = obj.ForegroundColor;
-            obj.MainAxes.Title.Color = obj.ForegroundColor;
-            obj.MainAxes.Subtitle.Color = obj.ForegroundColor;
-            obj.MainAxes.FontName = char(obj.FontName);
-            obj.MainAxes.FontUnits = char(obj.FontUnits);
-            textObjects = [obj.MainAxes.Title,obj.MainAxes.Subtitle, ...
-                obj.MainAxes.XLabel,obj.MainAxes.YLabel,obj.MainAxes.ZLabel];
-            set(textObjects,'FontUnits',char(obj.FontUnits));
-            obj.MainAxes.FontSize = obj.FontSize;
-            obj.MainAxes.LabelFontSizeMultiplier = obj.LabelFontSizeMultiplier;
-            obj.MainAxes.TitleFontSizeMultiplier = obj.TitleFontSizeMultiplier;
-            obj.MainAxes.Title.Visible = obj.TitleVisible_;
+            obj.Grid.BackgroundColor = colorOverride_(obj.BackgroundColor,obj.BackgroundColorOverride);
+            obj.MainAxes.Color = colorOverride_(obj.Color,obj.AxesColorOverride);
+            setAxesForeground_(obj.MainAxes,colorOverride_( ...
+                obj.ForegroundColor,obj.ForegroundColorOverride));
+            capabilities = obj.getAxesCapabilities();
+            if any(capabilities == "Typography")
+                obj.MainAxes.FontName = char(obj.FontName);
+                obj.MainAxes.FontUnits = char(obj.FontUnits);
+                textObjects = [obj.MainAxes.Title,obj.MainAxes.Subtitle, ...
+                    obj.MainAxes.XLabel,obj.MainAxes.YLabel,obj.MainAxes.ZLabel];
+                set(textObjects,'FontUnits',char(obj.FontUnits));
+                obj.MainAxes.FontSize = obj.FontSize;
+                obj.MainAxes.LabelFontSizeMultiplier = obj.LabelFontSizeMultiplier;
+                obj.MainAxes.TitleFontSizeMultiplier = obj.TitleFontSizeMultiplier;
+                obj.MainAxes.Title.Visible = obj.TitleVisible_;
+            end
             obj.MainAxes.ToolbarLocation = 'inside';
-            obj.MainAxes.XGrid = obj.GridVisible_;
-            obj.MainAxes.YGrid = obj.GridVisible_;
-            obj.MainAxes.Box = obj.BoxVisible_;
+            if any(capabilities == "Grid")
+                obj.MainAxes.XGrid = obj.GridVisible_;
+                obj.MainAxes.YGrid = obj.GridVisible_;
+            end
+            if any(capabilities == "Box")
+                obj.MainAxes.Box = obj.BoxVisible_;
+            end
+            if applyRulers, obj.applyRulerStyle(); end
             if ~isempty(obj.MainAxes.Toolbar) && isvalid(obj.MainAxes.Toolbar) && ...
                     ~obj.FirstUpdatePending_
                 obj.MainAxes.Toolbar.Visible = obj.ToolbarVisible_;
             end
+        end
+
+        function applyRulerStyle(obj)
+            if any(obj.getAxesCapabilities() == "Rulers")
+                obj.MainAxes.TickLength = obj.TickLength;
+                obj.MainAxes.TickDir = obj.TickDirection;
+                obj.MainAxes.LineWidth = obj.AxisLineWidth;
+            end
+        end
+
+        function applyTickInterval_(obj,axisName)
+            intervalName = axisName + "TickInterval";
+            interval = obj.AxesView.(intervalName);
+            if isempty(interval) || ~any(obj.getAxesCapabilities() == intervalName)
+                return;
+            end
+            ax = obj.MainAxes;
+            if ax.BeingDeleted == "on", return; end
+            setPlotTickInterval_(ax,axisName,interval);
         end
 
         function refreshContextMenu(obj)
@@ -1100,6 +1317,8 @@ function restorePlotAppearance_(host,appearance)
 %RESTOREPLOTAPPEARANCE_ Restore host styling after scoped plot export.
     if isempty(host) || ~isvalid(host), return; end
     host.Color = appearance.Color;
+    host.AxesColorOverride = appearance.AxesColorOverride;
+    host.ForegroundColorOverride = appearance.ForegroundColorOverride;
     host.ForegroundColor = appearance.ForegroundColor;
     host.FontName = appearance.FontName;
     host.FontUnits = appearance.FontUnits;
@@ -1134,4 +1353,176 @@ function mustBeExportDimension_(value)
     if ~isempty(value)
         validateattributes(value,{'double'},{'real','scalar','positive','finite'});
     end
+end
+
+function ax = copyPlotAxes_(source,fig)
+%COPYPLOTAXES_ Copy the axes and its linked legend and colorbar together.
+    objects = copyobj([source,source.Legend,source.Colorbar],fig);
+    ax = objects(1);
+    % Preserve the displayed ranges while leaving tick modes as copied.
+    set(ax,XLim=source.XLim,YLim=source.YLim,ZLim=source.ZLim);
+    if ~isempty(ax.Toolbar)
+        ax.Toolbar.Visible = 'off';
+    end
+    ax.Units = 'normalized';
+    ax.OuterPosition = [0 0 1 1];
+end
+
+function dimensions = applyPlotCopyOptions_(fig,ax,opts,aspectRatio,defaults)
+%APPLYPLOTCOPYOPTIONS_ Lay out the temporary copy for preview or export.
+    width = opts.Width;
+    height = opts.Height;
+    if isempty(width), width = height * aspectRatio; end
+    if isempty(height), height = width / aspectRatio; end
+
+    pixelsPerInch = get(groot,'ScreenPixelsPerInch');
+    switch opts.Units
+        case "inches"
+            scale = pixelsPerInch;
+        case "centimeters"
+            scale = pixelsPerInch / 2.54;
+        case "points"
+            scale = pixelsPerInch / 72;
+        case "pixels"
+            scale = pixelsPerInch / opts.Resolution;
+    end
+    fig.InnerPosition(3:4) = max(1,round([width height] * scale));
+
+    style = opts.AxesAppearance;
+    if isfield(style,"AxesColorOverride")
+        ax.Color = colorOverride_(defaults.Color,style.AxesColorOverride);
+        setAxesForeground_(ax,colorOverride_(defaults.ForegroundColor,style.ForegroundColorOverride));
+    end
+    if isfield(style,"FontName")
+        ax.FontUnits = style.FontUnits;
+        labels = [ax.Title,ax.Subtitle,ax.XLabel,ax.YLabel,ax.ZLabel];
+        set(labels,FontUnits=style.FontUnits);
+        set(ax,FontName=style.FontName,FontSize=style.FontSize, ...
+            LabelFontSizeMultiplier=style.LabelFontSizeMultiplier, ...
+            TitleFontSizeMultiplier=style.TitleFontSizeMultiplier);
+        ax.Title.Visible = style.TitleVisible;
+    end
+    if isfield(style,"GridVisible")
+        set(ax,XGrid=style.GridVisible,YGrid=style.GridVisible);
+    end
+    if isfield(style,"BoxVisible"), ax.Box = style.BoxVisible; end
+    if isfield(style,"AxisLineWidth")
+        set(ax,LineWidth=style.AxisLineWidth,TickLength=style.TickLength,TickDir=style.TickDirection);
+    end
+    applyPlotCopyView_(ax,opts.AxesView,defaults);
+    dimensions = {'Width',width,'Height',height};
+end
+
+function writePlotExport_(ax,filename,opts,dimensions,preserveAspect)
+%WRITEPLOTEXPORT_ Write a native axes with the requested canvas options.
+    exportgraphics(ax,filename,dimensions{:}, ...
+        ContentType=opts.ContentType,Units=opts.Units, ...
+        Colorspace="rgb",Padding=0,PreserveAspectRatio=preserveAspect, ...
+        BackgroundColor=opts.BackgroundColor,Resolution=opts.Resolution);
+end
+
+function mustBeViewLimits_(value)
+    if isempty(value) || isequal(value,"auto") || isequal(value,'auto'), return; end
+    validateattributes(value,{'numeric'},{'real','finite','size',[1 2],'increasing'});
+end
+
+function mustBeTickInterval_(value)
+    if ~isempty(value)
+        validateattributes(value,{'double'},{'real','finite','scalar','positive'});
+    end
+end
+
+function defaults = snapshotPlotCopy_(ax)
+%SNAPSHOTPLOTCOPY_ Retain the source view for reversible preview edits.
+    defaults = struct("XLim",ax.XLim,"YLim",ax.YLim, ...
+        "XTick",ax.XTick,"YTick",ax.YTick, ...
+        "XTickMode",ax.XTickMode,"YTickMode",ax.YTickMode, ...
+        "Color",stringOrRGB_(ax.Color),"ForegroundColor",ax.XColor, ...
+        "XAutoLim",[],"YAutoLim",[],"LegendVisible","off");
+    if ~isempty(ax.Legend), defaults.LegendVisible = string(ax.Legend.Visible); end
+end
+
+function value = stringOrRGB_(value)
+    if ischar(value), value = string(value); end
+end
+
+function applyPlotCopyView_(ax,view,defaults)
+    for axisName = ["X","Y"]
+        property = axisName + "Lim";
+        if isfield(view,property)
+            limits = view.(property);
+            if isempty(limits)
+                ax.(property) = defaults.(property);
+            elseif isstring(limits)
+                autoLimits = defaults.(axisName + "AutoLim");
+                if isempty(autoLimits)
+                    ax.(property + "Mode") = 'auto';
+                else
+                    ax.(property) = autoLimits;
+                end
+            else
+                ax.(property) = limits;
+            end
+        end
+        intervalName = axisName + "TickInterval";
+        if isfield(view,intervalName)
+            interval = view.(intervalName);
+            tick = axisName + "Tick";
+            if isempty(interval)
+                if strcmp(defaults.(tick + "Mode"),'manual'), ax.(tick) = defaults.(tick); end
+                ax.(tick + "Mode") = defaults.(tick + "Mode");
+            else
+                setPlotTickInterval_(ax,axisName,interval);
+            end
+        end
+    end
+    if isfield(view,"LegendVisible")
+        visibility = view.LegendVisible;
+        if visibility == "default", visibility = defaults.LegendVisible; end
+        if isempty(ax.Legend)
+            if visibility == "on"
+                points = flipud(findobj(ax,'Type','scatter'));
+                if isempty(points), legend(ax,'show'); else, legend(ax,points); end
+            end
+        else
+            ax.Legend.Visible = visibility;
+        end
+    end
+end
+
+function setPlotTickInterval_(ax,axisName,interval)
+    tickName = axisName + "Tick";
+    if strcmp(ax.(axisName + "Scale"),'log')
+        ax.(tickName + "Mode") = 'auto';
+        return;
+    end
+    bounds = ax.(axisName + "Lim") ./ interval;
+    tolerance = min(1e-8,4*eps(max(abs(bounds))));
+    endpoints = [ceil(bounds(1)-tolerance),floor(bounds(2)+tolerance)];
+    % Retain readable ticks when a zoom-out would create a huge list.
+    if any(~isfinite(endpoints)) || diff(endpoints) >= 1000
+        ax.(tickName + "Mode") = 'auto';
+    else
+        ax.(tickName) = (endpoints(1):endpoints(2)) .* interval;
+    end
+end
+
+function setAxesForeground_(ax,color)
+    set(ax,XColor=color,YColor=color,ZColor=color);
+    set([ax.Title,ax.Subtitle,ax.XLabel,ax.YLabel,ax.ZLabel],Color=color);
+end
+
+function color = colorOverride_(default,override)
+    color = default;
+    if ~isempty(override), color = override; end
+end
+
+function mustBeOptionalRGB_(value)
+    if ~isempty(value)
+        validateattributes(value,{'double'},{'real','finite','size',[1 3],'>=',0,'<=',1});
+    end
+end
+
+function mustBeOptionalAxesColor_(value)
+    if ~isempty(value), mustBeAxesColor_(value); end
 end

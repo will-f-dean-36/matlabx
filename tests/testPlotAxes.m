@@ -252,7 +252,7 @@ function testScatterStyleAxesLimitsAndModes(t)
     host.mount(renderer);
     t.verifyEqual(host.Axes.XLim,[0 5]);
     t.verifyEqual(host.Axes.YLim,[1 6]);
-    t.verifyEqual(countMenuItems(host,"Properties..."),1);
+    t.verifyEqual(countMenuItems(host,"Axes Properties..."),1);
 
     style.XLimMode="auto";
     style.YLimMode="auto";
@@ -270,20 +270,58 @@ function testScatterStyleAxesLimitsAndModes(t)
     t.verifyEqual(autoWins.XLimMode,"auto");
 end
 
-function testMountedContentOwnsContextMenuContributions(t)
+function testSharedAxesPropertiesMenuStaysWithHost(t)
     a=t.TestData.A; b=t.TestData.B; renderer=t.TestData.Violin;
 
     a.mount(renderer);
-    t.verifyEqual(countMenuItems(a,"Properties..."),1);
-
-    % Transferring content removes its command from the old host and creates
-    % exactly one contribution in the new host.
     b.mount(renderer);
-    t.verifyEqual(countMenuItems(a,"Properties..."),0);
-    t.verifyEqual(countMenuItems(b,"Properties..."),1);
-
     b.clear();
+
+    t.verifyEqual(countMenuItems(a,"Axes Properties..."),1);
+    t.verifyEqual(countMenuItems(b,"Axes Properties..."),1);
     t.verifyEqual(countMenuItems(b,"Properties..."),0);
+end
+
+function testSharedAxesViewPersistsAcrossRendererRefresh(t)
+    host=t.TestData.A; renderer=t.TestData.Scatter;
+    renderer.setStyle(matlabx.ui.axes.plot.ScatterStyle(XLim=[0 10],LegendVisible=false));
+    host.mount(renderer);
+    host.setAxesView(XLim=[1 5],YLim=[0 8],XTickInterval=2,LegendVisible="on");
+    host.AxisLineWidth=1.25;
+    host.TickLength=[0.02 0.03];
+    host.TickDirection="out";
+    renderer.refresh();
+    drawnow;
+
+    t.verifyEqual(host.Axes.XLim,[1 5]);
+    t.verifyEqual(host.Axes.YLim,[0 8]);
+    t.verifyEqual(host.Axes.XTick,[2 4]);
+    t.verifyEqual(host.Axes.LineWidth,1.25);
+    t.verifyEqual(host.Axes.TickLength,[0.02 0.03]);
+    t.verifyEqual(string(host.Axes.TickDir),"out");
+    t.verifyTrue(isgraphics(host.Axes.Legend));
+    t.verifyFalse(renderer.Style.LegendVisible);
+
+    host.Axes.XLim=[3 7];
+    t.verifyEqual(host.Axes.XTick,[4 6]);
+    host.setAxesView(XLim=[],YLim=[],XTickInterval=[],LegendVisible="default");
+    t.verifyEqual(host.Axes.XLim,[0 10]);
+    t.verifyEqual(string(host.Axes.YLimMode),"auto");
+    t.verifyEqual(string(host.Axes.XTickMode),"auto");
+    t.verifyEmpty(host.Axes.Legend);
+end
+
+function testSharedViolinViewKeepsCategoryTicks(t)
+    host=t.TestData.A; renderer=t.TestData.Violin;
+    renderer.setStyle(matlabx.ui.axes.plot.ViolinStyle(XLim=[0.5 2.5]));
+    host.mount(renderer);
+    host.setAxesView(XLim="auto",YTickInterval=2);
+    t.verifyEqual(host.Axes.XLim,[0 3]);
+    t.verifyEqual(host.Axes.XTick,[1 2]);
+    t.verifyError(@() host.setAxesView(XTickInterval=1), ...
+        'matlabx:ui:axes:UnsupportedAxesSetting');
+    host.setAxesView(XLim=[]);
+    t.verifyEqual(host.Axes.XLim,[0.5 2.5]);
 end
 
 function testClearRestoresHostAxesBaseline(t)
