@@ -30,15 +30,19 @@ function [fig,host] = exportSizeTest()
 % You should have received a copy of the GNU General Public License along
 % with this program; if not, see <https://www.gnu.org/licenses/>.
 
+    % Window holding the calibration chart.
     fig = uifigure(Name="PlotAxes export size test", ...
         Position=[100 100 820 560],Color=[1 1 1]);
+    % Single-cell layout that fills the calibration window.
     layout = uigridlayout(fig,[1 1],Padding=[0 0 0 0]);
+    % PlotAxes used to exercise the production export path.
     host = matlabx.ui.axes.PlotAxes(layout, ...
         BackgroundColor=[1 1 1],Color=[1 1 1], ...
         FontUnits="points",FontSize=10,LabelFontSizeMultiplier=1.2, ...
         TitleFontSizeMultiplier=1.4,TitleVisible="on");
     host.mount(matlabx.ui.axes.internal.ExportSizeContent());
 
+    % Native axes that display the calibration chart.
     ax = host.Axes;
     ax.XLim = [0 12];
     ax.YLim = [0 7];

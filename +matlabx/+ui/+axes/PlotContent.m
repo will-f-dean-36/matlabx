@@ -120,6 +120,12 @@ classdef PlotContent < handle
             capabilities = matlabx.ui.axes.PlotAxes.cartesianAxesCapabilities();
         end
 
+        function defaults = axesViewDefaults(~)
+        %AXESVIEWDEFAULTS Report configured limits, intervals, and legend defaults.
+        %   Use "auto" for automatic limits or tick spacing. Omit unknown fields.
+            defaults = struct();
+        end
+
         function limits = automaticAxesLimits(~,~)
         %AUTOMATICAXESLIMITS Return chart-specific Auto limits for "X" or "Y".
         %   An empty result delegates automatic limits to MATLAB.

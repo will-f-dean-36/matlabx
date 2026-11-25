@@ -46,6 +46,7 @@ classdef ControlTableRowOperationData < event.EventData
         function obj = ControlTableRowOperationData(operation,rowIDs,rows, ...
                 sourceRow,destinationRow,proposedData)
         %CONTROLTABLEROWOPERATIONDATA Construct a normalized request payload.
+            % Canonical operation name shared by the preflight listeners.
             operation = string(operation);
             mustBeMember(operation,["add","duplicate","remove","reorder"]);
             obj.Operation = operation;

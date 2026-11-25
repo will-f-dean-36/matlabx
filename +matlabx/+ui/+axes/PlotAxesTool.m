@@ -71,66 +71,97 @@ classdef PlotAxesTool < handle
 % with this program; if not, see <https://www.gnu.org/licenses/>.
 
     properties (SetAccess=protected)
-        Host                                                    % axes.PlotAxes
-        Name (1,1) string = ""                                  % name of the tool
-        Tooltip (1,:) = ''                                      % tooltip for toolbar buttons
-        Icon (1,:) char = matlabx.internal.Paths.icons('QuestionMark.png')   % icon for toolbar buttons, question mark by default
+        % PlotAxes host that owns this tool’s installation and event routing.
+        Host
+        % Name of the tool.
+        Name (1,1) string = ""
+        % Tooltip for toolbar buttons.
+        Tooltip (1,:) = ''
+        % Icon for toolbar buttons, question mark by default.
+        Icon (1,:) char = matlabx.internal.Paths.icons('QuestionMark.png')
+        % Hotkey that invokes or toggles the installed tool.
         ToggleHotkey (1,1) string = ""
 
+        % Toolbar interaction style for this tool.
         Style (1,:) char {mustBeMember(Style,{'push','state'})} = 'state'
 
-        Priority (1,1) double = 1               % priority for event routing to tools, highest priority claims event
-        IsExclusive (1,1) logical = false       % enabling tool will disable tools with Enabled=true && IsExclusive=true
+        % Priority for event routing to tools, highest priority claims event.
+        Priority (1,1) double = 1
+        % Enabling tool will disable tools with Enabled=true && IsExclusive=true.
+        IsExclusive (1,1) logical = false
 
-        InterceptsDown (1,1) logical = false      % this tool actively receives 'Down' events when Enabled=true
-        InterceptsMove (1,1) logical = false      % this tool actively receives 'Move' events when Enabled=true
-        InterceptsUp (1,1) logical = false        % this tool actively receives 'Up' events when Enabled=true
-        InterceptsScroll (1,1) logical = false    % this tool actively receives 'Scroll' events when Enabled=true
-        InterceptsKeyPress (1,1) logical = false       % this tool actively receives 'KeyPress' events when Enabled=true
-        InterceptsKeyRelease (1,1) logical = false     % this tool actively receives 'KeyRelease' events when Enabled=true
+        % This tool actively receives 'Down' events when Enabled=true.
+        InterceptsDown (1,1) logical = false
+        % This tool actively receives 'Move' events when Enabled=true.
+        InterceptsMove (1,1) logical = false
+        % This tool actively receives 'Up' events when Enabled=true.
+        InterceptsUp (1,1) logical = false
+        % This tool actively receives 'Scroll' events when Enabled=true.
+        InterceptsScroll (1,1) logical = false
+        % This tool actively receives 'KeyPress' events when Enabled=true.
+        InterceptsKeyPress (1,1) logical = false
+        % This tool actively receives 'KeyRelease' events when Enabled=true.
+        InterceptsKeyRelease (1,1) logical = false
 
-        PassivelyInterceptsDown (1,1) logical = false     % this tool passively receives 'Down' events
-        PassivelyInterceptsMove (1,1) logical = false     % this tool passively receives 'Move' events
-        PassivelyInterceptsUp (1,1) logical = false       % this tool passively receives 'Up' events
-        PassivelyInterceptsScroll (1,1) logical = false   % this tool passively receives 'Scroll' events
-        PassivelyInterceptsKeyPress (1,1) logical = false      % this tool passively receives 'KeyPress' events
-        PassivelyInterceptsKeyRelease (1,1) logical = false    % this tool passively receives 'KeyRelease' events
+        % This tool passively receives 'Down' events.
+        PassivelyInterceptsDown (1,1) logical = false
+        % This tool passively receives 'Move' events.
+        PassivelyInterceptsMove (1,1) logical = false
+        % This tool passively receives 'Up' events.
+        PassivelyInterceptsUp (1,1) logical = false
+        % This tool passively receives 'Scroll' events.
+        PassivelyInterceptsScroll (1,1) logical = false
+        % This tool passively receives 'KeyPress' events.
+        PassivelyInterceptsKeyPress (1,1) logical = false
+        % This tool passively receives 'KeyRelease' events.
+        PassivelyInterceptsKeyRelease (1,1) logical = false
 
-        L event.listener                        % listens to host events
+        % Listeners for host axes and interaction events.
+        L event.listener
     end
 
     properties
         % These switches affect only UI contributed during installation. A
         % headless tool remains installed and keeps its hotkeys, lifecycle,
         % callbacks, and event-routing behavior.
+        % Whether installation creates a toolbar button.
         ContributeToolbar (1,1) logical = true
+        % Whether installation contributes context-menu commands.
         ContributeContextMenu (1,1) logical = true
     end
 
     properties (Dependent)
-        IsInterceptor (1,1) logical     % this tool actively receives at least one type of event when Enabled=true
-        IsPassiveInterceptor (1,1) logical      % this tool passively receives at least one type of event
+        % This tool actively receives at least one type of event when Enabled=true.
+        IsInterceptor (1,1) logical
+        % This tool passively receives at least one type of event.
+        IsPassiveInterceptor (1,1) logical
     end
 
     properties (SetAccess=protected)
-        Enabled (1,1) logical = false       % true/false (set by toggling toolbar buttons)
-        Installed (1,1) logical = false     % true/false (whether the tool is installed in the Host)
-        Mode struct = struct()              % tool-owned logical states for subclasses
+        % True/false (set by toggling toolbar buttons).
+        Enabled (1,1) logical = false
+        % True/false (whether the tool is installed in the Host).
+        Installed (1,1) logical = false
+        % Tool-owned logical states for subclasses.
+        Mode struct = struct()
     end
 
     % special properties for development/debugging purposes
     properties (Access=protected)
+        % Whether lifecycle transitions are logged for development.
         PrintStatusUpdates (1,1) logical = false
     end
 
     methods
         function obj = PlotAxesTool(host, name, varargin)
+        %PLOTAXESTOOL Configure the tool and register its host event listeners.
             obj.Host = host;
             obj.Name = string(name);
 
             % print status update
             obj.printStatus(sprintf('Loading "%s" tool...', obj.Name));
 
+            % Parser for the tool’s appearance and event-routing options.
             p = inputParser;
             p.addParameter('Tooltip', '', @(x)ischar(x));
             p.addParameter('Icon', obj.Icon, @(x)ischar(x));
@@ -178,11 +209,13 @@ classdef PlotAxesTool < handle
 
         % Lifecycle toggles (host calls these)
         function push(obj) % "push" tools only
+        %PUSH Dispatch a push-style toolbar action.
             % forward to subclass hook
             obj.onPush();
         end
 
         function enable(obj) % "state" tools only
+        %ENABLE Activate the tool and synchronize the toolbar state.
             % if already enabled, exit
             if obj.Enabled, return; end
             % if tool is exclusive
@@ -204,6 +237,7 @@ classdef PlotAxesTool < handle
         end
 
         function disable(obj) % "state" tools only
+        %DISABLE Deactivate the tool and release exclusive routing.
             % if already disabled, exit
             if ~obj.Enabled, return; end
             % if tool is exclusive
@@ -223,6 +257,7 @@ classdef PlotAxesTool < handle
         end
 
         function install(obj)
+        %INSTALL Register the tool with its host and run the installation hook.
             if obj.Installed, return; end
             % indicate status in command window
             obj.printStatus(sprintf('Installing "%s" tool...', obj.Name));
@@ -250,6 +285,7 @@ classdef PlotAxesTool < handle
 
 
         function uninstall(obj)
+        %UNINSTALL Release host registrations and run teardown hooks.
             if ~obj.Installed, return; end
             % indicate status in command window
             obj.printStatus(sprintf('Uninstalling "%s" tool...', obj.Name));
@@ -277,39 +313,86 @@ classdef PlotAxesTool < handle
         end
 
         % Hooks for subclasses (no-ops by default)
-        function onPush(~),       end
-        function onEnabled(~),    end
-        function onDisabled(~),   end
-        function onInstall(~),    end
-        function onUninstall(~),  end
-        function onDelete(~),     end
+        function onPush(~)
+        %ONPUSH Handle a toolbar push.
+        end
+        function onEnabled(~)
+        %ONENABLED Handle tool activation.
+        end
+        function onDisabled(~)
+        %ONDISABLED Handle tool deactivation.
+        end
+        function onInstall(~)
+        %ONINSTALL Create resources needed while the tool is installed.
+        end
+        function onUninstall(~)
+        %ONUNINSTALL Release resources associated with installation.
+        end
+        function onDelete(~)
+        %ONDELETE Release subclass resources during deletion.
+        end
 
         % Pointer routing (only active Interceptors get these)
-        function onDown(~,~),     end
-        function onMove(~,~),     end
-        function onUp(~,~),       end
-        function onScroll(~,~),   end
-        function onKeyPress(~,~),      end
-        function onKeyRelease(~,~),    end
+        function onDown(~,~)
+        %ONDOWN Handle a press event claimed by this tool.
+        end
+        function onMove(~,~)
+        %ONMOVE Handle a movement event claimed by this tool.
+        end
+        function onUp(~,~)
+        %ONUP Handle a release event claimed by this tool.
+        end
+        function onScroll(~,~)
+        %ONSCROLL Handle a scroll event claimed by this tool.
+        end
+        function onKeyPress(~,~)
+        %ONKEYPRESS Handle a key press event claimed by this tool.
+        end
+        function onKeyRelease(~,~)
+        %ONKEYRELEASE Handle a key release event claimed by this tool.
+        end
 
         % Pointer routing (only PassiveInterceptors get these)
-        function onPassiveDown(~,~),   end
-        function onPassiveMove(~,~),   end
-        function onPassiveUp(~,~),     end
-        function onPassiveScroll(~,~), end
-        function onPassiveKeyPress(~,~),    end
-        function onPassiveKeyRelease(~,~),  end
+        function onPassiveDown(~,~)
+        %ONPASSIVEDOWN Observe a press event without claiming it.
+        end
+        function onPassiveMove(~,~)
+        %ONPASSIVEMOVE Observe a movement event without claiming it.
+        end
+        function onPassiveUp(~,~)
+        %ONPASSIVEUP Observe a release event without claiming it.
+        end
+        function onPassiveScroll(~,~)
+        %ONPASSIVESCROLL Observe a scroll event without claiming it.
+        end
+        function onPassiveKeyPress(~,~)
+        %ONPASSIVEKEYPRESS Observe a key press event without claiming it.
+        end
+        function onPassiveKeyRelease(~,~)
+        %ONPASSIVEKEYRELEASE Observe a key release event without claiming it.
+        end
 
         % Adjust pointer shape (override in subclass to set pointer - if empty, Host will set)
-        function pointer = getPreferredPointer(~), pointer = ''; end
+        function pointer = getPreferredPointer(~)
+        %GETPREFERREDPOINTER Return an optional pointer shape while the tool is active.
+            pointer = '';
+        end
 
         % Optional host notification hooks
-        function onHostAxesChanged(~,~),   end   % e.g., XLim/YLim/CLim changed
-        function onHostEnter(~,~), end
-        function onHostLeave(~,~), end
+        function onHostAxesChanged(~,~)
+        %ONHOSTAXESCHANGED Handle changes to host axes properties.
+        end
+        function onHostEnter(~,~)
+        %ONHOSTENTER Handle pointer entry into the host.
+        end
+        function onHostLeave(~,~)
+        %ONHOSTLEAVE Handle pointer exit from the host.
+        end
 
         % Optional context-menu contribution hook
-        function contributeContextMenu(~,~), end
+        function contributeContextMenu(~,~)
+        %CONTRIBUTECONTEXTMENU Add owner-scoped commands to the host context menu.
+        end
 
         function S = getHelpInfo(obj)
             %GETHELPINFO Return user-facing help information for this tool.
@@ -354,11 +437,13 @@ classdef PlotAxesTool < handle
     methods
 
         function value = get.IsInterceptor(obj)
+        %GET.ISINTERCEPTOR Return whether the tool claims any active event kind.
             value = obj.InterceptsDown || obj.InterceptsMove || obj.InterceptsUp || ...
                 obj.InterceptsScroll || obj.InterceptsKeyPress || obj.InterceptsKeyRelease;
         end
 
         function value = get.IsPassiveInterceptor(obj)
+        %GET.ISPASSIVEINTERCEPTOR Return whether the tool observes any event kind.
             value = obj.PassivelyInterceptsDown || obj.PassivelyInterceptsMove || ...
                 obj.PassivelyInterceptsUp || obj.PassivelyInterceptsScroll || ...
                 obj.PassivelyInterceptsKeyPress || obj.PassivelyInterceptsKeyRelease;
@@ -436,6 +521,7 @@ classdef PlotAxesTool < handle
 
         % subclass delete() will be called before this runs
         function delete(obj)
+        %DELETE Release the tool’s host registrations and listeners.
             obj.printStatus(sprintf('Unloading "%s" tool...', obj.Name));
 
             % perform tool-specific teardown if needed (i.e. if subclass implements teardown())

@@ -29,8 +29,12 @@ matlabx.setup.uiCalibration()
 - Prefer package names and class names that are descriptive, MATLAB-friendly,
   and consistent with the existing `matlabx` organization.
 - Keep public APIs small and documented.
-- Add method help headers in MATLAB files so `help`, `doc`, and editor hints
-  remain useful.
+- Use MATLAB help headers for classes, functions, and methods, including
+  private helpers. Describe responsibilities, arguments, outputs, and side
+  effects that callers need to know.
+- Put a one-line description above each property. Introduce variables with
+  comments that explain their purpose, units, or relationship to other state.
+  Explain the steps in longer workflows and why their order matters.
 - Preserve existing app-facing behavior unless an API change is intentional.
 - Avoid adding third-party code or data without also updating `NOTICE`,
   `LICENSE` references, and any required attribution.

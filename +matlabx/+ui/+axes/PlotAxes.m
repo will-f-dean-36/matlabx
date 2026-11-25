@@ -55,9 +55,11 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         ForegroundColor (1,3) double {mustBeBetween(ForegroundColor,0,1)} = [0 0 0]
         % Plotting-area color, or "none" for a transparent axes background.
         Color = [1 1 1]
-        % Shared color overrides. [] uses the renderer or host color.
+        % Plot container fill override. [] uses the renderer or host color.
         BackgroundColorOverride double {mustBeOptionalRGB_} = []
+        % Plotting-area fill override. [] uses the renderer or host color.
         AxesColorOverride {mustBeOptionalAxesColor_} = []
+        % Ruler and label color override. [] uses the renderer or host color.
         ForegroundColorOverride double {mustBeOptionalRGB_} = []
         % Font family applied to axes text.
         FontName (1,1) string = "Helvetica"
@@ -383,19 +385,39 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
+        function [defaults,declared] = getAxesViewDefaults(obj)
+        %GETAXESVIEWDEFAULTS Resolve renderer defaults over the host defaults.
+        %   DECLARED lists settings supplied by the renderer. A live reset
+        %   can inherit those settings and explicitly apply the host fallback
+        %   for properties the renderer leaves unspecified.
+            defaults = struct("XLim","auto","YLim","auto", ...
+                "XTickInterval","auto","YTickInterval","auto","LegendVisible","off");
+            declared = string.empty;
+            if isempty(obj.Content_), return; end
+
+            % Accept renderer values only for recognized, supplied settings.
+            rendererDefaults = obj.Content_.axesViewDefaults();
+            for name = reshape(string(fieldnames(defaults)),1,[])
+                if isfield(rendererDefaults,name) && ~isempty(rendererDefaults.(name))
+                    defaults.(name) = rendererDefaults.(name);
+                    declared(end+1) = name; %#ok<AGROW>
+                end
+            end
+        end
+
         function setAxesView(obj,opts)
         %SETAXESVIEW Override selected limits, tick intervals, or legend visibility.
         %   SETAXESVIEW(XLim=[min max]) holds that view across renderer updates.
         %   Use "auto" for automatic framing or [] to inherit the plot default.
         %   Tick intervals are positive distances in data units on linear axes.
-        %   [] restores plot-defined ticks. LegendVisible accepts "on", "off",
+        %   Use "auto" for automatic ticks or [] for plot-defined ticks. LegendVisible accepts "on", "off",
         %   or "default". Omitted options retain their values.
             arguments
                 obj (1,1) matlabx.ui.axes.PlotAxes
                 opts.XLim {mustBeViewLimits_}
                 opts.YLim {mustBeViewLimits_}
-                opts.XTickInterval double {mustBeTickInterval_}
-                opts.YTickInterval double {mustBeTickInterval_}
+                opts.XTickInterval {mustBeTickInterval_}
+                opts.YTickInterval {mustBeTickInterval_}
                 opts.LegendVisible (1,1) string ...
                     {mustBeMember(opts.LegendVisible,["default","on","off"])}
             end
@@ -1248,6 +1270,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function applyRulerStyle(obj)
+        %APPLYRULERSTYLE Apply host stroke and tick styling to supported axes.
             if any(obj.getAxesCapabilities() == "Rulers")
                 obj.MainAxes.TickLength = obj.TickLength;
                 obj.MainAxes.TickDir = obj.TickDirection;
@@ -1256,6 +1279,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         end
 
         function applyTickInterval_(obj,axisName)
+        %APPLYTICKINTERVAL_ Refresh the configured tick interval after a limit change.
             intervalName = axisName + "TickInterval";
             interval = obj.AxesView.(intervalName);
             if isempty(interval) || ~any(obj.getAxesCapabilities() == intervalName)
@@ -1376,16 +1400,7 @@ function dimensions = applyPlotCopyOptions_(fig,ax,opts,aspectRatio,defaults)
     if isempty(height), height = width / aspectRatio; end
 
     pixelsPerInch = get(groot,'ScreenPixelsPerInch');
-    switch opts.Units
-        case "inches"
-            scale = pixelsPerInch;
-        case "centimeters"
-            scale = pixelsPerInch / 2.54;
-        case "points"
-            scale = pixelsPerInch / 72;
-        case "pixels"
-            scale = pixelsPerInch / opts.Resolution;
-    end
+    scale = pixelsPerInch / matlabx.ui.axes.internal.exportUnitsPerInch(opts.Units,opts.Resolution);
     fig.InnerPosition(3:4) = max(1,round([width height] * scale));
 
     style = opts.AxesAppearance;
@@ -1422,11 +1437,14 @@ function writePlotExport_(ax,filename,opts,dimensions,preserveAspect)
 end
 
 function mustBeViewLimits_(value)
+%MUSTBEVIEWLIMITS_ Accept inherited, automatic, or finite increasing view limits.
     if isempty(value) || isequal(value,"auto") || isequal(value,'auto'), return; end
     validateattributes(value,{'numeric'},{'real','finite','size',[1 2],'increasing'});
 end
 
 function mustBeTickInterval_(value)
+%MUSTBETICKINTERVAL_ Accept an inherited, automatic, or positive manual interval.
+    if isequal(value,"auto") || isequal(value,'auto'), return; end
     if ~isempty(value)
         validateattributes(value,{'double'},{'real','finite','scalar','positive'});
     end
@@ -1443,10 +1461,12 @@ function defaults = snapshotPlotCopy_(ax)
 end
 
 function value = stringOrRGB_(value)
+%STRINGORRGB_ Normalize a text color token while preserving numeric RGB.
     if ischar(value), value = string(value); end
 end
 
 function applyPlotCopyView_(ax,view,defaults)
+%APPLYPLOTCOPYVIEW_ Apply export-only view overrides against the source snapshot.
     for axisName = ["X","Y"]
         property = axisName + "Lim";
         if isfield(view,property)
@@ -1491,8 +1511,9 @@ function applyPlotCopyView_(ax,view,defaults)
 end
 
 function setPlotTickInterval_(ax,axisName,interval)
+%SETPLOTTICKINTERVAL_ Place ticks at fixed intervals on linear axes.
     tickName = axisName + "Tick";
-    if strcmp(ax.(axisName + "Scale"),'log')
+    if ischar(interval) || isstring(interval) || strcmp(ax.(axisName + "Scale"),'log')
         ax.(tickName + "Mode") = 'auto';
         return;
     end
@@ -1508,21 +1529,25 @@ function setPlotTickInterval_(ax,axisName,interval)
 end
 
 function setAxesForeground_(ax,color)
+%SETAXESFOREGROUND_ Apply a foreground color to the rulers and axes labels.
     set(ax,XColor=color,YColor=color,ZColor=color);
     set([ax.Title,ax.Subtitle,ax.XLabel,ax.YLabel,ax.ZLabel],Color=color);
 end
 
 function color = colorOverride_(default,override)
+%COLOROVERRIDE_ Resolve a base color and optional explicit override.
     color = default;
     if ~isempty(override), color = override; end
 end
 
 function mustBeOptionalRGB_(value)
+%MUSTBEOPTIONALRGB_ Validate an RGB override when supplied.
     if ~isempty(value)
         validateattributes(value,{'double'},{'real','finite','size',[1 3],'>=',0,'<=',1});
     end
 end
 
 function mustBeOptionalAxesColor_(value)
+%MUSTBEOPTIONALAXESCOLOR_ Validate an optional fill override or transparency token.
     if ~isempty(value), mustBeAxesColor_(value); end
 end

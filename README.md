@@ -823,6 +823,11 @@ export copy and adds a tab for file options.
 Axes Properties previews edits on the live plot. Apply keeps them, while
 Cancel or closing the window restores the opening state. Disabled limit
 fields show the effective limits in both dialogs.
+Both dialogs have **Restore defaults**, which uses renderer defaults where
+supplied and host defaults for the other supported settings. **Revert changes**
+restores the complete opening state. These
+actions keep the dialog open. Export settings affect the copy, and restoring
+plot defaults leaves the export dimensions, format, and resolution in place.
 
 Set host typography, grid, box, and ruler styling directly on `PlotAxes`.
 Use `setAxesView` for view overrides that survive renderer refreshes and stay
@@ -852,7 +857,11 @@ range. **Auto** uses MATLAB's automatic limits or a renderer's automatic
 framing. **Plot default** (`[]` in the API) delegates to the renderer's
 configured limits, including existing Scatter and Violin style values.
 Tick intervals are positive distances in data units for linear axes and are
-anchored at zero. Use `[]` to restore plot-defined ticks. Legend visibility
+anchored at zero. Use `"auto"` for MATLAB tick placement or `[]` to restore
+plot-defined ticks. The dialogs show Auto and Manual modes for ranges and
+tick spacing, and a checkbox for legend visibility. Canvas background is
+under Export Options.
+Legend visibility
 accepts `"on"`, `"off"`, or `"default"`. Read the current overrides from
 `host.AxesView` and the displayed limits from `host.Axes.XLim` and
 `host.Axes.YLim`.
@@ -868,6 +877,10 @@ or return `[]` for MATLAB automatic limits. For legend-aware renderers, declare
 `"Legend"` and use `host.resolveLegendVisibility(default)` when constructing
 the chart's legend. Existing renderers that override `refresh` directly may
 call `host.applyAxesView()` after applying their defaults.
+Implement `axesViewDefaults()` to expose configured limits, tick intervals,
+and legend visibility. Omitted fields use automatic limits, automatic tick
+spacing, or a hidden legend when the user restores defaults. Renderer
+capabilities determine which controls are available.
 
 Low-level `matlabx.ui.axes.plot.Scatter` and `Violin` each own one logical dataset
 and several graphics primitives. `setParent(axes)` moves every owned primitive;

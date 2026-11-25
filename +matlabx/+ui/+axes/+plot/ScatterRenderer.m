@@ -202,7 +202,22 @@ classdef ScatterRenderer < matlabx.ui.axes.PlotContent
             end
         end
 
+        function defaults = axesViewDefaults(obj)
+        %AXESVIEWDEFAULTS Report configured limits and tick modes for the dialogs.
+            % Start with automatic framing and replace any configured ranges.
+            defaults = struct("XLim","auto","YLim","auto","YTickInterval","auto");
+            for property = ["XLim","YLim"]
+                if ~isempty(obj.Style.(property))
+                    defaults.(property) = obj.Style.(property);
+                end
+            end
+            defaults.XTickInterval = "auto";
+            defaults.LegendVisible = "off";
+            if obj.Style.LegendVisible, defaults.LegendVisible = "on"; end
+        end
+
         function capabilities = axesCapabilities(obj)
+        %AXESCAPABILITIES List the shared controls supported by this renderer.
             capabilities = [axesCapabilities@matlabx.ui.axes.PlotContent(obj),"Legend"];
         end
 

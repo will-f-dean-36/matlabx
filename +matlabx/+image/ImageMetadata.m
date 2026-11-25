@@ -92,6 +92,7 @@ classdef ImageMetadata
 end
 
 function mustBePositiveOrNaN_(value)
+%MUSTBEPOSITIVEORNAN_ Validate physical metadata that may be unknown.
     if ~(isnan(value) || (isfinite(value) && value > 0))
         error('matlabx:image:ImageMetadata:InvalidPhysicalSize', ...
             'Physical sizes must be positive finite values or NaN.');
@@ -99,6 +100,7 @@ function mustBePositiveOrNaN_(value)
 end
 
 function mustBeNonnegativeOrNaN_(value)
+%MUSTBENONNEGATIVEORNAN_ Validate timing metadata that may be unknown.
     if ~(isnan(value) || (isfinite(value) && value >= 0))
         error('matlabx:image:ImageMetadata:InvalidTimeIncrement', ...
             'TimeIncrement must be a nonnegative finite value or NaN.');
@@ -106,6 +108,7 @@ function mustBeNonnegativeOrNaN_(value)
 end
 
 function unit = chooseUnit_(axisUnit, commonUnit)
+%CHOOSEUNIT_ Prefer the axis-specific unit when one was supplied.
     if strlength(axisUnit) > 0
         unit = axisUnit;
     else

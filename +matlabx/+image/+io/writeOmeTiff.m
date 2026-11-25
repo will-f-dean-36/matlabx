@@ -55,6 +55,7 @@ function writeOmeTiff(filename, image, opts)
     end
 
     filename = string(filename);
+    % Lowercase name used to validate the compound TIFF extension.
     lowerFilename = lower(filename);
     if ~(endsWith(lowerFilename,".ome.tif") || endsWith(lowerFilename,".ome.tiff"))
         error('matlabx:image:io:writeOmeTiff:InvalidExtension', ...
@@ -66,10 +67,13 @@ function writeOmeTiff(filename, image, opts)
     end
 
     metadata = mergeMetadata_(image.Metadata,opts.Metadata);
+    % Validated dimensions, pixel layout, and metadata used by the writer.
     plan = describe_(image,metadata,opts,filename);
 
+    % Directory shared by the temporary and final files.
     destinationFolder = string(fileparts(filename));
     if strlength(destinationFolder) == 0
+        % Directory shared by the temporary and final files.
         destinationFolder = string(pwd);
         filename = fullfile(destinationFolder,filename);
     elseif ~isfolder(destinationFolder)
@@ -79,13 +83,20 @@ function writeOmeTiff(filename, image, opts)
 
     ensureBioFormats_();
 
+    % Staging file written before replacing the requested destination.
     temporaryFile = string(tempname(destinationFolder)) + ".ome.tiff";
+    % Cleanup guard for a staged export that does not complete.
     cleanupTemporary = onCleanup(@() deleteIfPresent_(temporaryFile));
 
+    % Bio-Formats metadata model supplied to the TIFF writer.
     omeMetadata = createMetadata_(plan);
+    % Validated XML retained before the writer changes its model.
     originalOmeXml = char(omeMetadata.dumpXML());
+    % Bio-Formats writer factory used to select the TIFF implementation.
     imageWriter = javaObject('loci.formats.ImageWriter');
+    % Concrete writer selected for the staged OME-TIFF file.
     writer = imageWriter.getWriter(char(temporaryFile));
+    % Cleanup guard that releases an open writer on failure.
     cleanupWriter = onCleanup(@() closeWriterQuietly_(writer));
 
     writer.setWriteSequentially(true);
@@ -100,20 +111,26 @@ function writeOmeTiff(filename, image, opts)
 
     colorModels = createColorModels_(plan,opts.EmbedLUTs);
 
+    % Reader that streams planes without loading the entire image.
     planeReader = image.openPlaneReader();
+    % Cleanup guard for the image plane reader.
     cleanupReader = onCleanup(@() delete(planeReader));
+    % Zero-based plane number expected by Bio-Formats.
     planeIndex = 0;
 
     for t = 1:plan.SizeT
         for z = 1:plan.SizeZ
             for c = 1:plan.LogicalChannelCount
+                % MATLAB samples at the current channel, Z, and time indices.
                 plane = planeReader.getPlane(c,z,t);
                 validatePlane_(plane,plan,c,z,t);
+                % Encoded sample bytes for the current TIFF plane.
                 bytes = encodePlane_(plane,plan);
                 if opts.EmbedLUTs
                     writer.setColorModel(colorModels{c});
                 end
                 savePlane_(writer,planeIndex,bytes,plan);
+                % Zero-based plane number expected by Bio-Formats.
                 planeIndex = planeIndex + 1;
             end
         end
@@ -141,6 +158,7 @@ end
 
 
 function colorModels = createColorModels_(plan,embedLUTs)
+%CREATECOLORMODELS_ Build optional indexed color models for scalar components.
     colorModels = {};
     if ~embedLUTs
         return
@@ -175,6 +193,7 @@ end
 
 
 function lut = normalizeLUT_(component)
+%NORMALIZELUT_ Validate and normalize the component lookup table for TIFF.
     lut = component.LUT;
     if isempty(lut)
         if isempty(component.Color)
@@ -226,15 +245,20 @@ end
 
 
 function plan = describe_(image,metadata,opts,filename)
+%DESCRIBE_ Build a validated export plan from the image and requested metadata.
     components = image.Components;
     if isempty(components)
         error('matlabx:image:io:writeOmeTiff:EmptyImage', ...
             'Image5D must contain at least one component.');
     end
 
+    % Component kinds used to distinguish scalar data from RGB data.
     kinds = string({components.Kind});
+    % MATLAB storage classes reported by the image components.
     classes = string({components.Class});
+    % Component dimensions used to check a consistent output layout.
     sizes = vertcat(components.Size);
+    % MATLAB sample types that the writer can encode.
     supportedClasses = ["uint8","int8","uint16","int16", ...
         "uint32","int32","single","double","logical"];
 
@@ -300,6 +324,7 @@ function plan = describe_(image,metadata,opts,filename)
             '(?i)\.ome\.tiff?$','');
     end
 
+    % Validated dimensions, pixel layout, and metadata used by the writer.
     plan = struct( ...
         'SizeX',double(sizes(1,2)), ...
         'SizeY',double(sizes(1,1)), ...
@@ -321,6 +346,7 @@ end
 
 
 function metadata = createMetadata_(plan)
+%CREATEMETADATA_ Translate the export plan into the Bio-Formats OME model.
     service = javaObject('loci.formats.services.OMEXMLServiceImpl');
     metadata = service.createOMEXMLMetadata();
     metadata.createRoot();
@@ -393,6 +419,7 @@ end
 
 
 function setLength_(metadata,axisName,value,unitName)
+%SETLENGTH_ Set physical calibration for one image dimension.
     if isnan(value)
         return
     end
@@ -408,6 +435,7 @@ end
 
 
 function setChannelWavelength_(metadata,componentMetadata,valueField,unitField,methodName,channelIndex)
+%SETCHANNELWAVELENGTH_ Copy a channel wavelength into the OME metadata.
     if ~isstruct(componentMetadata) || ...
             ~isfield(componentMetadata,valueField) || ...
             ~isfield(componentMetadata,unitField)
@@ -426,6 +454,7 @@ end
 
 
 function unit = omeUnit_(name,kind)
+%OMEUNIT_ Resolve a metadata unit name to the corresponding OME unit.
     key = lower(strtrim(string(name)));
     key = replace(key,"μ","µ");
     if strlength(key) == 0
@@ -459,7 +488,9 @@ end
 
 
 function bytes = encodePlane_(plane,plan)
+%ENCODEPLANE_ Pack one MATLAB plane into the writer’s expected byte order.
     if plan.InputClass == "logical"
+        % MATLAB samples at the current channel, Z, and time indices.
         plane = uint8(plane) .* uint8(255);
     end
     if plan.IsRGB
@@ -474,20 +505,26 @@ function bytes = encodePlane_(plane,plan)
     values = values(:);
     switch plan.PixelClass
         case {"uint8","int8"}
+            % Encoded sample bytes for the current TIFF plane.
             bytes = values;
         case {"uint16","int16"}
+            % Encoded sample bytes for the current TIFF plane.
             bytes = javaMethod('shortsToBytes','loci.common.DataTools',values,true);
         case {"uint32","int32"}
+            % Encoded sample bytes for the current TIFF plane.
             bytes = javaMethod('intsToBytes','loci.common.DataTools',values,true);
         case "single"
+            % Encoded sample bytes for the current TIFF plane.
             bytes = javaMethod('floatsToBytes','loci.common.DataTools',values,true);
         case "double"
+            % Encoded sample bytes for the current TIFF plane.
             bytes = javaMethod('doublesToBytes','loci.common.DataTools',values,true);
     end
 end
 
 
 function validatePlane_(plane,plan,c,z,t)
+%VALIDATEPLANE_ Check that a plane matches its position in the export plan.
     expected = [plan.SizeY plan.SizeX];
     if plan.IsRGB
         expected(3) = 3;
@@ -502,6 +539,7 @@ end
 
 
 function savePlane_(writer,index,bytes,plan)
+%SAVEPLANE_ Write a plane with the TIFF tags required by its sample layout.
     if ~plan.IsRGB
         writer.saveBytes(index,bytes);
         return
@@ -517,6 +555,7 @@ end
 
 
 function validateCompression_(writer,compression)
+%VALIDATECOMPRESSION_ Check that the selected writer accepts the requested compression.
     if strlength(compression) == 0
         return
     end
@@ -531,6 +570,7 @@ end
 
 
 function metadata = mergeMetadata_(base,override)
+%MERGEMETADATA_ Apply supplied metadata fields over stored image metadata.
     if isempty(override)
         metadata = base;
         return
@@ -558,18 +598,21 @@ end
 
 
 function value = positiveInteger_(value)
+%POSITIVEINTEGER_ Validate an integer metadata value greater than zero.
     value = javaObject('ome.xml.model.primitives.PositiveInteger', ...
         javaObject('java.lang.Integer',value));
 end
 
 
 function value = nonnegativeInteger_(value)
+%NONNEGATIVEINTEGER_ Validate an integer metadata value of zero or greater.
     value = javaObject('ome.xml.model.primitives.NonNegativeInteger', ...
         javaObject('java.lang.Integer',value));
 end
 
 
 function n = bytesPerSample_(className)
+%BYTESPERSAMPLE_ Return the storage width of one sample for the pixel class.
     switch className
         case {"uint8","int8"}, n = 1;
         case {"uint16","int16"}, n = 2;
@@ -580,6 +623,7 @@ end
 
 
 function deleteIfPresent_(file)
+%DELETEIFPRESENT_ Remove an incomplete temporary export during cleanup.
     if isfile(file)
         delete(file);
     end
@@ -600,6 +644,7 @@ end
 
 
 function closeWriterQuietly_(writer)
+%CLOSEWRITERQUIETLY_ Release the writer during cleanup without masking an export error.
     try
         writer.close();
     catch
@@ -608,6 +653,7 @@ end
 
 
 function overwriteOmeXml_(file,xml)
+%OVERWRITEOMEXML_ Replace the writer-generated OME description with the validated XML.
     stream = javaObject('loci.common.RandomAccessInputStream',char(file));
     cleanupStream = onCleanup(@() stream.close());
     saver = javaObject('loci.formats.tiff.TiffSaver',char(file));

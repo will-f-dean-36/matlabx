@@ -43,7 +43,7 @@ classdef PlotAxesExportDialog
             options = [];
 
             fig = uifigure(Visible="off",Name="Export Plot", ...
-                InnerPosition=[0 0 470 600],Resize="off", ...
+                InnerPosition=[0 0 520 600],Resize="off", ...
                 WindowStyle="modal",Color=background, ...
                 CloseRequestFcn=@(~,~) closeDialog());
             root = uigridlayout(fig,[2 1],Padding=[10 10 10 10], ...
@@ -67,33 +67,49 @@ classdef PlotAxesExportDialog
                 "Leave one dimension blank to preserve the plot’s shape.");
             dimensionHint.Layout.Column = [1 2];
             resolution = addNumeric(filePane,7,"Resolution (DPI)",300);
-            [readAxes,refreshLimits] = matlabx.ui.axes.internal.plotAxesControlTabs(tabs,host,@updatePreview,true);
+            [readAxes,refreshLimits,restoreDefaults,revert] = matlabx.ui.axes.internal.plotAxesControlTabs(tabs,host,@updatePreview,true,filePane);
             outputType.ValueChangedFcn = @(~,~) outputTypeChanged();
+            % Units in which the existing dimension entries are expressed.
+            currentUnits = string(units.Value);
+            units.ValueChangedFcn = @(~,~) unitsChanged();
             updateOutputType();
 
-            buttons = uigridlayout(root,[1 3],Padding=0,RowSpacing=0, ...
-                ColumnSpacing=5,ColumnWidth={'1x',80,80},RowHeight={'fit'}, ...
+            buttons = uigridlayout(root,[1 5],Padding=0,RowSpacing=0, ...
+                ColumnSpacing=5,ColumnWidth={'1x',105,105,70,70},RowHeight={'fit'}, ...
                 BackgroundColor=background);
             buttons.Layout.Row = 2;
+            restoreButton = uibutton(buttons,Text="Restore defaults", ...
+                BackgroundColor=controlColor,FontColor=controlFontColor, ...
+                ButtonPushedFcn=@(~,~) restorePlotDefaults());
+            restoreButton.Layout.Column = 2;
+            revertButton = uibutton(buttons,Text="Revert changes", ...
+                BackgroundColor=controlColor,FontColor=controlFontColor, ...
+                ButtonPushedFcn=@(~,~) revertChanges());
+            revertButton.Layout.Column = 3;
             cancel = uibutton(buttons,Text="Cancel", ...
                 BackgroundColor=controlColor,FontColor=controlFontColor, ...
                 ButtonPushedFcn=@(~,~) closeDialog());
-            cancel.Layout.Column = 2;
+            cancel.Layout.Column = 4;
             export = uibutton(buttons,Text="Continue", ...
                 BackgroundColor=[.18 .42 .68],FontColor=[1 1 1], ...
                 ButtonPushedFcn=@(~,~) acceptDialog());
-            export.Layout.Column = 3;
+            export.Layout.Column = 5;
 
             if ~isempty(previewFcn)
                 showPreview = uicheckbox(buttons,Text="Show preview", ...
                     Value=false,FontColor=controlFontColor, ...
-                    ValueChangedFcn=@(~,~) previewVisibilityChanged());
+                    ValueChangedFcn=@(~,~) updatePreview());
                 showPreview.Layout.Column = 1;
-                controls = {format,units,width,height,resolution};
+                controls = {format,width,height,resolution};
                 for k = 1:numel(controls)
                     controls{k}.ValueChangedFcn = @(~,~) updatePreview();
                 end
             end
+
+            % File settings restored separately from the shared appearance and view tabs.
+            fileControls = {outputType,format,units,width,height,resolution};
+            % Initial export options before changing the format or dimensions.
+            openingFileValues = cellfun(@(h) h.Value,fileControls,UniformOutput=false);
 
             movegui(fig,"center");
             fig.Visible = "on";
@@ -102,12 +118,14 @@ classdef PlotAxesExportDialog
             if isgraphics(fig), delete(fig); end
 
             function label = addLabel(pane,row,text)
+            %ADDLABEL Create a left-column caption for a settings row.
                 label = uilabel(pane,Text=text,FontColor=fontColor);
                 label.Layout.Row = row;
                 label.Layout.Column = 1;
             end
 
             function control = addDropDown(pane,row,label,items,value)
+            %ADDDROPDOWN Create a styled dropdown and bind its change callback.
                 addLabel(pane,row,label);
                 control = uidropdown(pane,Items=items,Value=value, ...
                     BackgroundColor=controlColor,FontColor=controlFontColor);
@@ -116,6 +134,7 @@ classdef PlotAxesExportDialog
             end
 
             function control = addNumeric(pane,row,label,value)
+            %ADDNUMERIC Create a styled numeric field for an export setting.
                 addLabel(pane,row,label);
                 control = uieditfield(pane,"numeric",Value=value, ...
                     BackgroundColor=controlColor,FontColor=controlFontColor);
@@ -124,6 +143,7 @@ classdef PlotAxesExportDialog
             end
 
             function control = addDimension(pane,row,label,value)
+            %ADDDIMENSION Create an optional dimension field with an Auto placeholder.
                 addLabel(pane,row,label);
                 control = uieditfield(pane,"text",Value=value,Placeholder="Auto", ...
                     BackgroundColor=controlColor,FontColor=controlFontColor);
@@ -132,6 +152,7 @@ classdef PlotAxesExportDialog
             end
 
             function control = addCheckBox(pane,row,label,value)
+            %ADDCHECKBOX Create a checkbox and its settings caption.
                 addLabel(pane,row,label);
                 control = uicheckbox(pane,Text="",Value=value, ...
                     FontColor=controlFontColor);
@@ -140,6 +161,7 @@ classdef PlotAxesExportDialog
             end
 
             function updateOutputType()
+            %UPDATEOUTPUTTYPE Select the formats and units supported by the output type.
                 if string(outputType.Value) == "Vector"
                     units.Items = {'inches','centimeters','points'};
                     format.Items = {'PDF','SVG'};
@@ -154,23 +176,86 @@ classdef PlotAxesExportDialog
             end
 
             function value = readDimension(control)
+            %READDIMENSION Read a dimension, using an empty value for automatic sizing.
                 input = strip(string(control.Value));
                 value = [];
                 if strlength(input) > 0, value = str2double(input); end
             end
 
             function outputTypeChanged()
+            %OUTPUTTYPECHANGED Preserve dimensions as available units and formats change.
+                nextUnits = currentUnits;
+                if string(outputType.Value) == "Vector" && currentUnits == "pixels"
+                    % Units that remain valid for the newly selected output type.
+                    nextUnits = "inches";
+                end
+                if ~convertDimensions(nextUnits)
+                    outputType.Value = 'Image';
+                    return;
+                end
                 updateOutputType();
+                units.Value = char(currentUnits);
                 updatePreview();
             end
 
-            function previewVisibilityChanged()
-                if showPreview.Value, movegui(fig,"east"); end
+            function unitsChanged()
+            %UNITSCHANGED Convert entered dimensions to the newly selected units.
+                if ~convertDimensions(string(units.Value))
+                    units.Value = char(currentUnits);
+                    return;
+                end
+                updatePreview();
+            end
+
+            function ok = convertDimensions(nextUnits)
+            %CONVERTDIMENSIONS Convert explicit dimensions while leaving Auto fields blank.
+                ok = true;
+                if currentUnits == nextUnits, return; end
+                % Resolution used only when converting to or from pixels.
+                dpi = resolution.Value;
+                if any([currentUnits,nextUnits] == "pixels") && (~isfinite(dpi) || dpi <= 0)
+                    uialert(fig,"Enter a positive resolution before converting pixel dimensions.", ...
+                        "Invalid Resolution");
+                    ok = false;
+                    return;
+                end
+                % Multiplier that preserves physical dimensions in the new units.
+                factor = matlabx.ui.axes.internal.exportUnitsPerInch(nextUnits,dpi) / ...
+                    matlabx.ui.axes.internal.exportUnitsPerInch(currentUnits,dpi);
+                for field = [width,height]
+                    value = readDimension(field);
+                    if ~isempty(value) && isreal(value) && isfinite(value)
+                        field.Value = sprintf('%.15g',value * factor);
+                    end
+                end
+                % Units in which the existing dimension entries are expressed.
+                currentUnits = nextUnits;
+            end
+
+            function restorePlotDefaults()
+            %RESTOREPLOTDEFAULTS Restore plot settings while leaving file options in place.
+                restoreDefaults();
+                updatePreview();
+            end
+
+            function revertChanges()
+            %REVERTCHANGES Restore the opening controls and their associated plot state.
+                outputType.Value = openingFileValues{1};
+                updateOutputType();
+                for k = 2:numel(fileControls)
+                    fileControls{k}.Value = openingFileValues{k};
+                end
+                % Units in which the existing dimension entries are expressed.
+                currentUnits = string(units.Value);
+                if ~isempty(previewFcn), showPreview.Value = false; end
+                revert();
                 updatePreview();
             end
 
             function updatePreview()
+            %UPDATEPREVIEW Apply valid options to the preview and refresh its displayed limits.
                 if ~isempty(previewFcn)
+                    % Latest valid export and axes settings, or empty for invalid input.
                     previewOptions = readOptions();
                     previewFcn(previewOptions,showPreview.Value);
                     drawnow nocallbacks;
@@ -179,6 +264,7 @@ classdef PlotAxesExportDialog
             end
 
             function acceptDialog()
+            %ACCEPTDIALOG Validate and return the accepted export options.
                 [accepted,message] = readOptions();
                 if isempty(accepted)
                     uialert(fig,message,"Invalid Export Options");
@@ -189,6 +275,7 @@ classdef PlotAxesExportDialog
             end
 
             function [selected,message] = readOptions()
+            %READOPTIONS Read the export fields and shared axes controls without applying them.
                 selected = [];
                 message = "";
                 outputWidth = readDimension(width);
@@ -231,6 +318,7 @@ classdef PlotAxesExportDialog
             end
 
             function [extension,contentType] = selectedFormat()
+            %SELECTEDFORMAT Map the displayed format to its extension and content type.
                 switch string(format.Value)
                     case "PDF"
                         extension = ".pdf";
@@ -248,6 +336,7 @@ classdef PlotAxesExportDialog
             end
 
             function closeDialog()
+            %CLOSEDIALOG Cancel the dialog and release its modal wait.
                 options = [];
                 if isgraphics(fig)
                     uiresume(fig);

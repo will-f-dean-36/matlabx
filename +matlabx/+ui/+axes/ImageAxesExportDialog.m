@@ -57,6 +57,10 @@ classdef ImageAxesExportDialog
                 {'Preserve physical sizes','Scale with output'}, ...
                 'Preserve physical sizes');
 
+            % Units in which the existing numeric dimension fields are expressed.
+            currentUnits = string(units.Value);
+            units.ValueChangedFcn = @(~,~) unitsChanged();
+
             buttons = uigridlayout(root,[1 3],Padding=0,RowSpacing=0, ...
                 ColumnSpacing=5,ColumnWidth={'1x',80,80},RowHeight={'fit'}, ...
                 BackgroundColor=background);
@@ -107,6 +111,26 @@ classdef ImageAxesExportDialog
                     FontColor=controlFontColor);
                 control.Layout.Row = row;
                 control.Layout.Column = 2;
+            end
+
+            function unitsChanged()
+            %UNITSCHANGED Convert entered dimensions to the newly selected units.
+                nextUnits = string(units.Value);
+                % Resolution used only when converting to or from pixels.
+                dpi = resolution.Value;
+                if any([currentUnits,nextUnits] == "pixels") && (~isfinite(dpi) || dpi <= 0)
+                    units.Value = char(currentUnits);
+                    uialert(fig,"Enter a positive resolution before converting pixel dimensions.", ...
+                        "Invalid Resolution");
+                    return;
+                end
+                % Multiplier that preserves physical dimensions in the new units.
+                factor = matlabx.ui.axes.internal.exportUnitsPerInch(nextUnits,dpi) / ...
+                    matlabx.ui.axes.internal.exportUnitsPerInch(currentUnits,dpi);
+                width.Value = width.Value * factor;
+                height.Value = height.Value * factor;
+                % Units in which the existing numeric dimension fields are expressed.
+                currentUnits = nextUnits;
             end
 
             function acceptDialog()

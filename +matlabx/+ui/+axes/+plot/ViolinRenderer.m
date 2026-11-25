@@ -199,13 +199,26 @@ classdef ViolinRenderer < matlabx.ui.axes.PlotContent
             end
         end
 
+        function defaults = axesViewDefaults(obj)
+        %AXESVIEWDEFAULTS Report configured limits and tick modes for the dialogs.
+            % Start with automatic framing and replace any configured ranges.
+            defaults = struct("XLim","auto","YLim","auto","YTickInterval","auto");
+            for property = ["XLim","YLim"]
+                if ~isempty(obj.Style.(property))
+                    defaults.(property) = obj.Style.(property);
+                end
+            end
+        end
+
         function capabilities = axesCapabilities(obj)
+        %AXESCAPABILITIES List the shared controls supported by this renderer.
             capabilities = axesCapabilities@matlabx.ui.axes.PlotContent(obj);
             % Category positions and labels are defined by the violin data.
             capabilities(capabilities == "XTickInterval") = [];
         end
 
         function limits = automaticAxesLimits(obj,axisName)
+        %AUTOMATICAXESLIMITS Keep category margins on the violin X axis.
             limits = [];
             if axisName == "X"
                 limits = [0,numel(obj.Data.Values)+1];
