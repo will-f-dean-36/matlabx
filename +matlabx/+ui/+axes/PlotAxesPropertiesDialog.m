@@ -27,8 +27,8 @@ classdef PlotAxesPropertiesDialog
             content = host.Content;
             % Live axes that receive the preview changes.
             ax = host.Axes;
-            % Opening host overrides, including inherited values.
-            originalView = host.AxesView;
+            % Opening host settings, including inherited values.
+            originalSettings = host.getAxesSettings();
             % Native appearance properties restored on cancellation.
             appearanceNames = {'Color','FontName','FontUnits','FontSize', ...
                 'LabelFontSizeMultiplier','TitleFontSizeMultiplier','XColor','YColor','ZColor', ...
@@ -80,11 +80,6 @@ classdef PlotAxesPropertiesDialog
 
             [read,refreshLimits,restoreDefaults,revert] = matlabx.ui.axes.internal.plotAxesControlTabs( ...
                 tabs,host,@() applyChanges(false),false);
-            [style,~] = read();
-            % Host appearance properties represented in the dialog.
-            styleNames = fieldnames(style);
-            % Original host appearance values used when reverting.
-            originalStyle = cellfun(@(name) host.(name),styleNames,UniformOutput=false);
             refreshLimits(ax);
 
             % A dialog belongs to the chart that supplied its controls.
@@ -106,18 +101,25 @@ classdef PlotAxesPropertiesDialog
                 try
                     % Whether live settings have been applied and may need rollback.
                     changed = true;
-                    args = namedargs2cell(view);
-                    host.setAxesView(args{:});
+                    % Merge the supported dialog fields into a complete snapshot.
+                    settings = host.getAxesSettings();
                     for property = reshape(string(fieldnames(style)),1,[])
-                        host.(property) = style.(property);
+                        settings.(property) = style.(property);
                     end
+                    for property = reshape(string(fieldnames(view)),1,[])
+                        settings.AxesView.(property) = view.(property);
+                    end
+                    host.applyAxesSettings_(settings);
                 catch exception
                     if commit, uialert(fig,exception.message,"Invalid Axes Properties"); end
                     return;
                 end
                 drawnow nocallbacks;
                 refreshLimits(ax);
-                if commit, delete(fig); end
+                if commit
+                    host.commitAxesProperties_();
+                    if isgraphics(fig), delete(fig); end
+                end
             end
 
             function restorePlotDefaults()
@@ -175,14 +177,7 @@ classdef PlotAxesPropertiesDialog
             %RESTOREOPENINGSTATE Restore the host settings and the opening native axes view.
                 if changed && isvalid(host) && isequal(content,host.Content) ...
                         && isvalid(ax) && ax.BeingDeleted == "off"
-                    for k = 1:numel(styleNames)
-                        host.(styleNames{k}) = originalStyle{k};
-                    end
-                    capabilities = host.getAxesCapabilities();
-                    if any(capabilities == "Legend"), capabilities(end+1) = "LegendVisible"; end
-                    view = rmfield(originalView,setdiff(string(fieldnames(originalView)),capabilities));
-                    args = namedargs2cell(view);
-                    host.setAxesView(args{:});
+                    host.applyAxesSettings_(originalSettings);
                     drawnow nocallbacks;
                     set(ax,appearanceNames,originalAppearance);
                     set(labels(:),{'Color','FontUnits'}, ...

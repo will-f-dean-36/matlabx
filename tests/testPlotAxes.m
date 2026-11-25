@@ -21,6 +21,7 @@ function tests = testPlotAxes
 end
 
 function setup(t)
+    t.applyFixture(matlab.unittest.fixtures.PathFixture(fileparts(mfilename('fullpath'))));
     f = uifigure('Visible','off');
     t.TestData.Figure = f;
     grid = uigridlayout(f,[1 2]);
@@ -309,6 +310,138 @@ function testSharedAxesViewPersistsAcrossRendererRefresh(t)
     t.verifyEqual(string(host.Axes.YLimMode),"auto");
     t.verifyEqual(string(host.Axes.XTickMode),"auto");
     t.verifyEmpty(host.Axes.Legend);
+end
+
+function testAxesSettingsRoundTripOnReusedHost(t)
+%TESTAXESSETTINGSROUNDTRIPONREUSEDHOST Restore independent chart snapshots.
+    host = t.TestData.A;
+    scatter = t.TestData.Scatter;
+    polar = TypographyOnlyPlotContent();
+    t.addTeardown(@() delete(polar));
+    host.mount(scatter);
+
+    % First snapshot mixes a manual range with an explicitly automatic range.
+    host.setAxesView(XLim=[1 5],YLim="auto",XTickInterval=2,LegendVisible="on");
+    host.BackgroundColorOverride = [0.8 0.7 0.6];
+    host.AxesColorOverride = "none";
+    host.ForegroundColorOverride = [0.2 0.3 0.4];
+    host.AxisLineWidth = 1.25;
+    first = host.getAxesSettings();
+
+    % The second snapshot delegates Y and colors to the renderer.
+    second = first;
+    second.AxesView.XLim = [0 3];
+    second.AxesView.YLim = [];
+    second.AxesView.XTickInterval = 1;
+    second.AxesView.LegendVisible = "off";
+    second.BackgroundColorOverride = [];
+    second.AxesColorOverride = [];
+    second.ForegroundColorOverride = [];
+    host.applyAxesSettings(second);
+    t.verifyEqual(host.getAxesSettings(),second);
+    t.verifyEqual(host.Axes.XTick,0:3);
+    t.verifyEmpty(host.Axes.Legend);
+    t.verifyEqual(host.Axes.Color,scatter.Style.BackgroundColor);
+
+    % Applying a Cartesian snapshot to a typography-only plot clears it.
+    host.mount(polar);
+    host.applyAxesSettings(first);
+    restricted = host.getAxesSettings();
+    t.verifyEmpty(restricted.AxesView.XLim);
+    t.verifyEmpty(restricted.AxesView.XTickInterval);
+    t.verifyEqual(restricted.AxesView.LegendVisible,"default");
+    t.verifyEmpty(restricted.AxesColorOverride);
+    t.verifyEmpty(restricted.BackgroundColorOverride);
+    t.verifyEmpty(restricted.ForegroundColorOverride);
+    t.verifyEqual(restricted.AxisLineWidth,0.5);
+    t.verifyEqual(host.Axes.XLim,[-5 5]);
+    t.verifyEqual(host.Axes.Color,[0.1 0.2 0.3]);
+    t.verifyEqual(host.Axes.LineWidth,2);
+
+    % Decode from JSON as an app would when restoring its saved settings.
+    host.mount(scatter);
+    host.applyAxesSettings(jsondecode(jsonencode(first)));
+    t.verifyEqual(host.getAxesSettings(),first);
+    t.verifyEqual(host.Axes.XTick,[2 4]);
+    t.verifyEqual(string(host.Axes.Legend.Visible),"on");
+    t.verifyEqual(string(host.Axes.Color),"none");
+    t.verifyEqual(host.Axes.XColor,first.ForegroundColorOverride);
+    scatter.setData(scatter.Data);
+    t.verifyEqual(host.Axes.XLim,[1 5]);
+    t.verifyEqual(string(host.Axes.YLimMode),"auto");
+end
+
+function testAxesPropertiesCommitEvent(t)
+%TESTAXESPROPERTIESCOMMITEVENT Notify once on Apply and only on Apply.
+    host = t.TestData.A;
+    host.mount(t.TestData.Scatter);
+    host.FontSize = 14;
+    host.setAxesView(XLim=[1 5]);
+    drawnow;
+    opening = host.getAxesSettings();
+
+    % Capture typed event data and the source supplied by notify.
+    events = {};
+    listener = addlistener(host,'AxesPropertiesCommitted',@record);
+    t.addTeardown(@() delete(listener));
+
+    host.openAxesProperties();
+    dialog = findall(groot,'Type','figure','Name','Axes Properties');
+    font = field("Tick-label size (pt)");
+    font.Value = 18;
+    font.ValueChangedFcn(font,[]);
+    t.verifyEqual(host.FontSize,18);
+    press("Revert changes");
+    t.verifyEqual(host.getAxesSettings(),opening);
+    t.verifyEmpty(events);
+    font.Value = 18;
+    font.ValueChangedFcn(font,[]);
+    press("Cancel");
+    t.verifyEqual(host.getAxesSettings(),opening);
+    t.verifyEmpty(events);
+
+    host.openAxesProperties();
+    dialog = findall(groot,'Type','figure','Name','Axes Properties');
+    % Invalid manual limits must leave the dialog open and the event silent.
+    maximum = field("X maximum");
+    maximum.Value = 0;
+    maximum.ValueChangedFcn(maximum,[]);
+    press("Apply");
+    t.verifyTrue(isgraphics(dialog));
+    t.verifyEmpty(events);
+    t.verifyEqual(host.getAxesSettings(),opening);
+    press("Restore defaults");
+    restored = host.getAxesSettings();
+    t.verifyNotEqual(restored,opening);
+    t.verifyEmpty(events);
+    press("Apply");
+    t.assertNumElements(events,1);
+    t.verifyClass(events{1},'matlabx.ui.axes.events.AxesPropertiesCommittedEventData');
+    t.verifyEqual(events{1}.Settings,restored);
+    t.verifyEqual(events{1}.Settings,host.getAxesSettings());
+
+    host.applyAxesSettings(opening);
+    t.verifyNumElements(events,1);
+
+    function record(source,data)
+    %RECORD Collect one commit and check the notifying host.
+        t.verifyEqual(source,host);
+        events{end+1} = data;
+    end
+
+    function control = field(label)
+    %FIELD Find the setting control in the same row as its label.
+        caption = findall(dialog,'Type','uilabel','Text',label);
+        controls = allchild(caption.Parent);
+        control = controls(arrayfun(@(h) isprop(h,'Value') ...
+            && isequal(h.Layout.Row,caption.Layout.Row),controls));
+    end
+
+    function press(label)
+    %PRESS Invoke the requested dialog button.
+        button = findall(dialog,'Type','uibutton','Text',label);
+        button.ButtonPushedFcn(button,[]);
+    end
 end
 
 function testSharedViolinViewKeepsCategoryTicks(t)

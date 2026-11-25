@@ -866,6 +866,28 @@ accepts `"on"`, `"off"`, or `"default"`. Read the current overrides from
 `host.AxesView` and the displayed limits from `host.Axes.XLim` and
 `host.Axes.YLim`.
 
+Apps can save one complete settings snapshot per plot type and restore it
+after mounting that plot on any host:
+
+```matlab
+settings = host.getAxesSettings();
+serialized = jsonencode(settings);
+otherHost.mount(renderer);
+otherHost.applyAxesSettings(jsondecode(serialized));
+```
+
+The snapshot stores requested view modes and appearance overrides. It contains
+plain values suitable for serialization. The displayed range of a zoomed or
+automatically framed plot is independent of the stored view settings.
+Restoring a snapshot replaces prior settings and clears controls the mounted
+renderer does not support.
+
+Listen to `AxesPropertiesCommitted` to save settings after the user clicks
+**Apply** in the native dialog. The source is the `PlotAxes` host, whose
+`Content` identifies the mounted plot. The event data's read-only `Settings`
+property contains the accepted snapshot. Live editing and programmatic
+`applyAxesSettings` calls leave the event silent.
+
 New renderers should implement the protected `PlotContent.refreshGraphics`
 method. The inherited `refresh` calls it and then applies the host's view.
 Use `axesCapabilities()` to customize which controls a renderer exposes.

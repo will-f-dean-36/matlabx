@@ -169,6 +169,11 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         ContentChanged
     end
 
+    events (NotifyAccess=private)
+        % Emitted once after the native Axes Properties dialog accepts Apply.
+        AxesPropertiesCommitted
+    end
+
     methods
 
         function set.Color(obj,value)
@@ -405,6 +410,39 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
+        function settings = getAxesSettings(obj)
+        %GETAXESSETTINGS Snapshot the requested axes appearance and view.
+        %   SETTINGS is a scalar struct of graphics-independent values for
+        %   storage and later use with applyAxesSettings. The nested AxesView
+        %   retains manual ranges, "auto", and inherited defaults ([]).
+        %   Panning and zooming the native axes do not change this snapshot.
+            settings = struct();
+            % Read host requests directly instead of reading rendered graphics.
+            groups = axesSettingsGroups_();
+            for group = reshape(string(fieldnames(groups)),1,[])
+                for name = groups.(group)
+                    value = obj.(name);
+                    if isa(value,'matlab.lang.OnOffSwitchState'), value = logical(value); end
+                    if ischar(value), value = string(value); end
+                    settings.(name) = value;
+                end
+            end
+            settings.AxesView = obj.AxesView;
+            for name = reshape(string(fieldnames(settings.AxesView)),1,[])
+                value = settings.AxesView.(name);
+                if ischar(value), settings.AxesView.(name) = string(value); end
+            end
+        end
+
+        function applyAxesSettings(obj,settings)
+        %APPLYAXESSETTINGS Replace the requested axes appearance and view.
+        %   Restore a complete getAxesSettings snapshot after mounting the
+        %   target renderer. Unsupported settings are cleared. This does not
+        %   emit AxesPropertiesCommitted.
+            obj.applyAxesSettings_(settings);
+            obj.applyAxesView();
+        end
+
         function setAxesView(obj,opts)
         %SETAXESVIEW Override selected limits, tick intervals, or legend visibility.
         %   SETAXESVIEW(XLim=[min max]) holds that view across renderer updates.
@@ -442,18 +480,18 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             end
             if isequal(view,oldView), return; end
             ax = obj.MainAxes;
+            obj.AxesView = view;
             for axisName = ["X","Y"]
                 limits = axisName + "Lim";
                 interval = axisName + "TickInterval";
-                if isempty(view.(limits)) && ~isempty(oldView.(limits))
+                if any(capabilities == limits) && isempty(view.(limits)) && ~isempty(oldView.(limits))
                     ax.(limits + "Mode") = 'auto';
                 end
-                if isempty(view.(interval)) && ~isempty(oldView.(interval))
+                if any(capabilities == interval) && isempty(view.(interval)) && ~isempty(oldView.(interval))
                     ax.(axisName + "TickMode") = 'auto';
                 end
             end
 
-            obj.AxesView = view;
             refresh = (isempty(view.XLim) && ~isempty(oldView.XLim)) ...
                 || (isempty(view.YLim) && ~isempty(oldView.YLim)) ...
                 || (isempty(view.XTickInterval) && ~isempty(oldView.XTickInterval)) ...
@@ -1193,6 +1231,62 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
 
     end
 
+    methods (Access=?matlabx.ui.axes.PlotAxesPropertiesDialog)
+        function applyAxesSettings_(obj,settings)
+        %APPLYAXESSETTINGS_ Validate and apply a full snapshot for either caller.
+            % Require the complete shape so an incomplete restore cannot silently
+            % retain settings from the previous plot.
+            groups = axesSettingsGroups_();
+            names = [groups.Colors,groups.Typography,groups.Grid,groups.Box,groups.Rulers];
+            validateSettingsFields_(settings,[names,"AxesView"]);
+            view = settings.AxesView;
+            viewNames = ["XLim","YLim","XTickInterval","YTickInterval","LegendVisible"];
+            validateSettingsFields_(view,viewNames);
+
+            % Drop unavailable settings before validation and restore host defaults
+            % so a later chart cannot pick up an old override.
+            capabilities = obj.getAxesCapabilities();
+            for group = reshape(string(fieldnames(groups)),1,[])
+                if any(capabilities == group), continue; end
+                for name = groups.(group)
+                    switch name
+                        case {"TitleVisible","GridVisible","BoxVisible"}
+                            settings.(name) = false;
+                        otherwise
+                            property = findprop(obj,name);
+                            settings.(name) = property.DefaultValue;
+                    end
+                end
+            end
+            for name = viewNames(1:4)
+                if ~any(capabilities == name), view.(name) = []; end
+                value = view.(name);
+                if isnumeric(value) && isvector(value), view.(name) = reshape(value,1,[]); end
+            end
+            if ~any(capabilities == "Legend"), view.LegendVisible = "default"; end
+
+            % Validate all appearance values before setAxesView changes the chart.
+            for name = [groups.Colors,"TickLength"]
+                value = settings.(name);
+                if isnumeric(value) && isvector(value), settings.(name) = reshape(value,1,[]); end
+            end
+            appearanceArgs = namedargs2cell(rmfield(settings,'AxesView'));
+            appearance = validateAxesAppearance_(appearanceArgs{:});
+            viewArgs = namedargs2cell(view);
+            obj.setAxesView(viewArgs{:});
+            for name = names
+                obj.(name) = appearance.(name);
+            end
+            obj.applyHostAppearance();
+        end
+
+        function commitAxesProperties_(obj)
+        %COMMITAXESPROPERTIES_ Notify listeners of an accepted native dialog.
+            data = matlabx.ui.axes.events.AxesPropertiesCommittedEventData(obj.getAxesSettings());
+            notify(obj,'AxesPropertiesCommitted',data);
+        end
+    end
+
     methods (Access=private)
 
         function showInitialToolbar_(obj)
@@ -1238,11 +1332,17 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 return;
             end
 
-            obj.Grid.BackgroundColor = colorOverride_(obj.BackgroundColor,obj.BackgroundColorOverride);
-            obj.MainAxes.Color = colorOverride_(obj.Color,obj.AxesColorOverride);
-            setAxesForeground_(obj.MainAxes,colorOverride_( ...
-                obj.ForegroundColor,obj.ForegroundColorOverride));
             capabilities = obj.getAxesCapabilities();
+            if any(capabilities == "Colors")
+                obj.Grid.BackgroundColor = colorOverride_(obj.BackgroundColor,obj.BackgroundColorOverride);
+                obj.MainAxes.Color = colorOverride_(obj.Color,obj.AxesColorOverride);
+                setAxesForeground_(obj.MainAxes,colorOverride_( ...
+                    obj.ForegroundColor,obj.ForegroundColorOverride));
+            else
+                % The container follows the base color even for a renderer
+                % that controls the native axes colors itself.
+                obj.Grid.BackgroundColor = obj.BackgroundColor;
+            end
             if any(capabilities == "Typography")
                 obj.MainAxes.FontName = char(obj.FontName);
                 obj.MainAxes.FontUnits = char(obj.FontUnits);
@@ -1550,4 +1650,43 @@ end
 function mustBeOptionalAxesColor_(value)
 %MUSTBEOPTIONALAXESCOLOR_ Validate an optional fill override or transparency token.
     if ~isempty(value), mustBeAxesColor_(value); end
+end
+
+function groups = axesSettingsGroups_()
+%AXESSETTINGSGROUPS Map snapshot appearance fields to chart capabilities.
+    groups = struct( ...
+        "Colors",["BackgroundColorOverride","AxesColorOverride","ForegroundColorOverride"], ...
+        "Typography",["FontName","FontUnits","FontSize","LabelFontSizeMultiplier", ...
+            "TitleFontSizeMultiplier","TitleVisible"], ...
+        "Grid","GridVisible","Box","BoxVisible", ...
+        "Rulers",["AxisLineWidth","TickLength","TickDirection"]);
+end
+
+function validateSettingsFields_(settings,expected)
+%VALIDATESETTINGSFIELDS_ Require the fields in a complete settings snapshot.
+    if ~isstruct(settings) || ~isscalar(settings) ...
+            || ~isequal(sort(string(fieldnames(settings))),sort(expected(:)))
+        error('matlabx:ui:axes:InvalidAxesSettings', ...
+            'Supply a complete snapshot from PlotAxes.getAxesSettings.');
+    end
+end
+
+function opts = validateAxesAppearance_(opts)
+%VALIDATEAXESAPPEARANCE_ Validate and normalize snapshot appearance values.
+    arguments
+        opts.BackgroundColorOverride double {mustBeOptionalRGB_}
+        opts.AxesColorOverride {mustBeOptionalAxesColor_}
+        opts.ForegroundColorOverride double {mustBeOptionalRGB_}
+        opts.FontName (1,1) string
+        opts.FontUnits (1,1) string {mustBeMember(opts.FontUnits,["points","pixels"])}
+        opts.FontSize (1,1) double {mustBePositive,mustBeFinite}
+        opts.LabelFontSizeMultiplier (1,1) double {mustBePositive,mustBeFinite}
+        opts.TitleFontSizeMultiplier (1,1) double {mustBePositive,mustBeFinite}
+        opts.TitleVisible (1,1) matlab.lang.OnOffSwitchState
+        opts.GridVisible (1,1) matlab.lang.OnOffSwitchState
+        opts.BoxVisible (1,1) matlab.lang.OnOffSwitchState
+        opts.AxisLineWidth (1,1) double {mustBePositive,mustBeFinite}
+        opts.TickLength (1,2) double {mustBeNonnegative,mustBeFinite}
+        opts.TickDirection (1,1) string {mustBeMember(opts.TickDirection,["in","out","both","none"])}
+    end
 end
