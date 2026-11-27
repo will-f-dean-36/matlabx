@@ -126,6 +126,12 @@ classdef PlotContent < handle
             defaults = struct();
         end
 
+        function colors = yAxisDefaultColors(~)
+        %YAXISDEFAULTCOLORS Return optional left and right renderer RGB rows.
+        %   Return [] to use the native axes color order.
+            colors = [];
+        end
+
         function limits = automaticAxesLimits(~,~)
         %AUTOMATICAXESLIMITS Return chart-specific Auto limits for "X" or "Y".
         %   An empty result delegates automatic limits to MATLAB.

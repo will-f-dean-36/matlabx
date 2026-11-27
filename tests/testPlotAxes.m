@@ -444,6 +444,141 @@ function testAxesPropertiesCommitEvent(t)
     end
 end
 
+function testDualYTransitionsAndSnapshots(t)
+%TESTDUALYTRANSITIONSANDSNAPSHOTS Preserve view, toolbar, and content ownership.
+    host = t.TestData.A;
+    % MATLAB resolves automatic limits during the visible figure's layout.
+    figure = ancestor(host.Axes,'figure');
+    figure.Visible = 'on';
+    first = DualYPlotContent();
+    second = DualYPlotContent();
+    t.addTeardown(@() delete(first));
+    t.addTeardown(@() delete(second));
+    for visible = ["on","off"]
+        host.ToolbarVisible = visible;
+        host.ToolbarExpanded = "off";
+        host.mount(first);
+        host.mount(second);
+        t.verifyTrue(all(isgraphics(first.Lines)));
+        host.mount(t.TestData.Scatter);
+        t.verifyNumElements(host.Axes.YAxis,1);
+        t.verifyTrue(all(isgraphics(second.Lines)));
+        t.verifyEqual(string(host.Axes.Toolbar.Visible),visible);
+        t.verifyEqual(string(host.Axes.Toolbar.Expanded),"off");
+        t.verifyNumElements(host.Axes.Toolbar.Children,2);
+        t.verifyEqual(host.Axes.ContextMenu,host.ContextMenu);
+        host.mount(first);
+        t.verifyNumElements(host.Axes.YAxis,2);
+        yyaxis(host.Axes,'left');
+        t.verifyTrue(any(host.Axes.Children == first.Lines(1)));
+        yyaxis(host.Axes,'right');
+        t.verifyTrue(any(host.Axes.Children == first.Lines(2)));
+    end
+
+    yyaxis(host.Axes,'right');
+    host.setAxesView(YLim=[0 6],RightYLim="auto",RightYColor=[0.8 0.2 0.1]);
+    settings = host.getAxesSettings();
+    first.RightScale = 10;
+    first.refresh();
+    % Native auto limits can lag the data update while the UI lays out.
+    deadline = tic;
+    while host.Axes.YAxis(2).Limits(2) < 300 && toc(deadline) < 5
+        pause(0.05);
+    end
+    t.verifyEqual(host.Axes.YAxis(1).Limits,[0 6]);
+    t.verifyGreaterThanOrEqual(host.Axes.YAxis(2).Limits(2),300);
+    t.verifyEqual(string(host.Axes.YAxis(2).LimitsMode),"auto");
+    t.verifyEqual(host.Axes.YAxis(2).Color,[0.8 0.2 0.1]);
+    t.verifyEqual(string(host.Axes.YAxisLocation),"right");
+
+    legacy = settings;
+    legacy.AxesView = rmfield(legacy.AxesView,{'RightYLim','LeftYColor','RightYColor'});
+    yyaxis(host.Axes,'left');
+    host.applyAxesSettings(legacy);
+    t.verifyEmpty(host.getAxesSettings().AxesView.RightYLim);
+    t.verifyEqual(string(host.Axes.YAxisLocation),"left");
+    host.applyAxesSettings(jsondecode(jsonencode(settings)));
+    t.verifyEqual(host.getAxesSettings(),settings);
+    host.mount(t.TestData.Scatter);
+    host.applyAxesSettings(settings);
+    t.verifyEmpty(host.getAxesSettings().AxesView.RightYLim);
+    t.verifyEmpty(host.getAxesSettings().AxesView.RightYColor);
+end
+
+function testDualYPropertiesCommitAndCancel(t)
+%TESTDUALYPROPERTIESCOMMITANDCANCEL Check live preview and typed snapshots.
+    host = t.TestData.A;
+    content = DualYPlotContent();
+    t.addTeardown(@() delete(content));
+    host.mount(content);
+    host.setAxesView(YLim=[0 6],RightYLim=[0 60]);
+    opening = host.getAxesSettings();
+    commits = {};
+    listener = addlistener(host,'AxesPropertiesCommitted',@committed);
+    t.addTeardown(@() delete(listener));
+
+    for action = ["Cancel","Apply"]
+        host.openAxesProperties();
+        dialog = findall(groot,'Type','figure','Name','Axes Properties');
+        change("Left Y axis maximum",5);
+        change("Right Y axis maximum",50);
+        changeColor("Left Y axis color",[0.6 0.1 0.2]);
+        changeColor("Right Y axis color",[0.3 0.7 0.2]);
+        t.verifyEqual(host.Axes.YAxis(1).Limits,[0 5]);
+        t.verifyEqual(host.Axes.YAxis(2).Limits,[0 50]);
+        t.verifyEmpty(commits);
+        button = findall(dialog,'Type','uibutton','Text',action);
+        button.ButtonPushedFcn(button,[]);
+        t.verifyEqual(string(host.Axes.YAxisLocation),"right");
+        if action == "Cancel"
+            t.verifyEqual(host.getAxesSettings(),opening);
+            t.verifyEqual(host.Axes.YAxis(1).Limits,[0 6]);
+            t.verifyEqual(host.Axes.YAxis(2).Limits,[0 60]);
+            t.verifyEqual(vertcat(host.Axes.YAxis.Color),content.yAxisDefaultColors());
+        end
+    end
+    t.assertNumElements(commits,1);
+    saved = commits{1}.Settings;
+    t.verifyEqual(saved,host.getAxesSettings());
+    t.verifyEqual(saved.AxesView.LeftYColor,[0.6 0.1 0.2]);
+    t.verifyEqual(saved.AxesView.RightYColor,[0.3 0.7 0.2]);
+    host.applyAxesSettings(opening);
+    host.applyAxesSettings(jsondecode(jsonencode(saved)));
+    t.verifyEqual(host.getAxesSettings(),saved);
+    t.verifyNumElements(commits,1);
+
+    function committed(~,data)
+    %COMMITTED Record an accepted snapshot for comparison.
+        commits{end+1} = data;
+    end
+
+    function change(label,value)
+    %CHANGE Edit one enabled numeric bound through the native callback.
+        field = control(label);
+        field.Value = value;
+        field.ValueChangedFcn(field,[]);
+    end
+
+    function changeColor(label,color)
+    %CHANGECOLOR Select Custom and apply an explicit ruler color.
+        grid = control(label);
+        picker = findall(grid,'Type','uicolorpicker');
+        mode = findall(grid,'Type','uidropdown');
+        mode.Value = 'custom';
+        mode.ValueChangedFcn(mode,[]);
+        picker.Value = color;
+        picker.ValueChangedFcn(picker,[]);
+    end
+
+    function result = control(label)
+    %CONTROL Find the editor adjacent to the labeled row.
+        caption = findall(dialog,'Type','uilabel','Text',label);
+        siblings = allchild(caption.Parent);
+        result = siblings(arrayfun(@(item) item ~= caption ...
+            && isequal(item.Layout.Row,caption.Layout.Row),siblings));
+    end
+end
+
 function testSharedViolinViewKeepsCategoryTicks(t)
     host=t.TestData.A; renderer=t.TestData.Violin;
     renderer.setStyle(matlabx.ui.axes.plot.ViolinStyle(XLim=[0.5 2.5]));

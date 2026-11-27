@@ -31,12 +31,12 @@ classdef PlotAxesPropertiesDialog
             originalSettings = host.getAxesSettings();
             % Native appearance properties restored on cancellation.
             appearanceNames = {'Color','FontName','FontUnits','FontSize', ...
-                'LabelFontSizeMultiplier','TitleFontSizeMultiplier','XColor','YColor','ZColor', ...
+                'LabelFontSizeMultiplier','TitleFontSizeMultiplier','XColor','ZColor', ...
                 'XGrid','YGrid','Box','TickLength','TickDir','LineWidth'};
             % Opening values of the native appearance properties.
             originalAppearance = get(ax,appearanceNames);
             % Text objects whose formatting is restored separately from the axes.
-            labels = [ax.Title,ax.Subtitle,ax.XLabel,ax.YLabel,ax.ZLabel];
+            labels = [ax.Title,ax.Subtitle,ax.XLabel,ax.YAxis.Label,ax.ZLabel];
             % Opening colors of the axes decorations.
             originalLabelColors = {labels.Color};
             % Opening font units of the axes decorations.
@@ -47,11 +47,16 @@ classdef PlotAxesPropertiesDialog
             originalLegendVisible = "";
             if ~isempty(ax.Legend), originalLegendVisible = string(ax.Legend.Visible); end
             % Native limits and tick properties affected by live editing.
-            originalViewNames = {'XLim','YLim','XTick','YTick','XTickLabel','YTickLabel'};
+            originalViewNames = {'XLim','XTick','XTickLabel'};
             % Actual opening view, which can differ from the stored host settings.
             originalNativeView = get(ax,originalViewNames);
             % Opening automatic or manual mode of each native view property.
             originalNativeModes = get(ax,strcat(originalViewNames,'Mode'));
+            % Preserve each ruler independently from the active yyaxis side.
+            yNames = {'Limits','TickValues','TickLabels','Color'};
+            yModes = {'LimitsMode','TickValuesMode','TickLabelsMode'};
+            originalYValues = get(ax.YAxis,yNames);
+            originalYModes = get(ax.YAxis,yModes);
             % Whether live settings have been applied and may need rollback.
             changed = false;
             fig = uifigure(Name="Axes Properties",Visible="off", ...
@@ -131,7 +136,7 @@ classdef PlotAxesPropertiesDialog
                 defaults = host.getAxesViewDefaults();
                 if isvalid(ax)
                     capabilities = host.getAxesCapabilities();
-                    for axisName = ["X","Y"]
+                    for axisName = ["X","Y","RightY"]
                         property = axisName + "Lim";
                         if isfield(defaults,property) && any(capabilities == property)
                             limits = defaults.(property);
@@ -139,16 +144,21 @@ classdef PlotAxesPropertiesDialog
                                 limits = [];
                                 if ~isempty(content), limits = content.automaticAxesLimits(axisName); end
                             end
-                            if isempty(limits)
-                                ax.(property + "Mode") = 'auto';
+                            if axisName == "X"
+                                if isempty(limits), ax.XLimMode = 'auto'; else, ax.XLim = limits; end
                             else
-                                ax.(property) = limits;
+                                ruler = ax.YAxis(1 + (axisName == "RightY"));
+                                if isempty(limits), ruler.LimitsMode = 'auto'; else, ruler.Limits = limits; end
                             end
                         end
                         property = axisName + "TickInterval";
                         if isfield(defaults,property) && any(capabilities == property) ...
                                 && isequal(string(defaults.(property)),"auto")
-                            ax.(axisName + "TickMode") = 'auto';
+                            if axisName == "Y"
+                                ax.YAxis(1).TickValuesMode = 'auto';
+                            else
+                                ax.XTickMode = 'auto';
+                            end
                         end
                     end
                     if any(capabilities == "Legend") && isfield(defaults,"LegendVisible") ...
@@ -189,6 +199,17 @@ classdef PlotAxesPropertiesDialog
                             ax.(name) = originalNativeView{k};
                         else
                             ax.([name 'Mode']) = originalNativeModes{k};
+                        end
+                    end
+                    for side = 1:numel(ax.YAxis)
+                        ruler = ax.YAxis(side);
+                        ruler.Color = originalYValues{side,4};
+                        for k = 1:numel(yModes)
+                            if strcmp(originalYModes{side,k},'manual')
+                                ruler.(yNames{k}) = originalYValues{side,k};
+                            else
+                                ruler.(yModes{k}) = originalYModes{side,k};
+                            end
                         end
                     end
                     if ~isempty(ax.Legend) && strlength(originalLegendVisible) > 0

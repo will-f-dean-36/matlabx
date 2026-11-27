@@ -108,7 +108,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
     properties (SetAccess=private)
         % Host view overrides. Empty fields inherit the plot defaults.
         AxesView struct = struct("XLim",[],"YLim",[], ...
-            "XTickInterval",[],"YTickInterval",[],"LegendVisible","default")
+            "XTickInterval",[],"YTickInterval",[],"LegendVisible","default", ...
+            "RightYLim",[],"LeftYColor",[],"RightYColor",[])
     end
 
     % Graphics, listener, and content references owned by the host lifecycle.
@@ -388,6 +389,12 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             else
                 capabilities = string(obj.Content_.axesCapabilities());
             end
+            if ~isempty(obj.MainAxes) && numel(obj.MainAxes.YAxis) == 2
+                if any(capabilities == "YLim"), capabilities(end+1) = "RightYLim"; end
+                if any(capabilities == "Colors")
+                    capabilities = [reshape(capabilities,1,[]),"LeftYColor","RightYColor"];
+                end
+            end
         end
 
         function [defaults,declared] = getAxesViewDefaults(obj)
@@ -396,7 +403,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         %   can inherit those settings and explicitly apply the host fallback
         %   for properties the renderer leaves unspecified.
             defaults = struct("XLim","auto","YLim","auto", ...
-                "XTickInterval","auto","YTickInterval","auto","LegendVisible","off");
+                "XTickInterval","auto","YTickInterval","auto","LegendVisible","off", ...
+                "RightYLim","auto","LeftYColor",[],"RightYColor",[]);
             declared = string.empty;
             if isempty(obj.Content_), return; end
 
@@ -439,6 +447,9 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         %   Restore a complete getAxesSettings snapshot after mounting the
         %   target renderer. Unsupported settings are cleared. This does not
         %   emit AxesPropertiesCommitted.
+        %   Legacy snapshots without the dual-Y fields are accepted for now.
+        %   Persist the full field set returned by getAxesSettings for
+        %   compatibility with future exact-field validation.
             obj.applyAxesSettings_(settings);
             obj.applyAxesView();
         end
@@ -447,6 +458,8 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
         %SETAXESVIEW Override selected limits, tick intervals, or legend visibility.
         %   SETAXESVIEW(XLim=[min max]) holds that view across renderer updates.
         %   Use "auto" for automatic framing or [] to inherit the plot default.
+        %   On dual-Y axes YLim addresses the left ruler and RightYLim the
+        %   right ruler. LeftYColor and RightYColor accept RGB or [] to inherit.
         %   Tick intervals are positive distances in data units on linear axes.
         %   Use "auto" for automatic ticks or [] for plot-defined ticks. LegendVisible accepts "on", "off",
         %   or "default". Omitted options retain their values.
@@ -454,6 +467,9 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 obj (1,1) matlabx.ui.axes.PlotAxes
                 opts.XLim {mustBeViewLimits_}
                 opts.YLim {mustBeViewLimits_}
+                opts.RightYLim {mustBeViewLimits_}
+                opts.LeftYColor double {mustBeOptionalRGB_}
+                opts.RightYColor double {mustBeOptionalRGB_}
                 opts.XTickInterval {mustBeTickInterval_}
                 opts.YTickInterval {mustBeTickInterval_}
                 opts.LegendVisible (1,1) string ...
@@ -485,19 +501,28 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 limits = axisName + "Lim";
                 interval = axisName + "TickInterval";
                 if any(capabilities == limits) && isempty(view.(limits)) && ~isempty(oldView.(limits))
-                    ax.(limits + "Mode") = 'auto';
+                    setPlotLimit_(ax,limits,[]);
                 end
                 if any(capabilities == interval) && isempty(view.(interval)) && ~isempty(oldView.(interval))
-                    ax.(axisName + "TickMode") = 'auto';
+                    setPlotTickMode_(ax,axisName);
                 end
             end
 
-            refresh = (isempty(view.XLim) && ~isempty(oldView.XLim)) ...
+            if any(capabilities == "RightYLim") && isempty(view.RightYLim) && ~isempty(oldView.RightYLim)
+                setPlotLimit_(ax,"RightYLim",[]);
+            end
+            refresh = (isempty(view.RightYLim) && ~isempty(oldView.RightYLim)) ...
+                || (isempty(view.XLim) && ~isempty(oldView.XLim)) ...
                 || (isempty(view.YLim) && ~isempty(oldView.YLim)) ...
                 || (isempty(view.XTickInterval) && ~isempty(oldView.XTickInterval)) ...
                 || (isempty(view.YTickInterval) && ~isempty(oldView.YTickInterval)) ...
                 || view.LegendVisible ~= oldView.LegendVisible;
             if refresh && ~isempty(obj.Content_) && isvalid(obj.Content_)
+                % A renderer may visit both sides when restoring its defaults.
+                if numel(ax.YAxis) == 2
+                    activeSide = ax.YAxisLocation;
+                    restoreSide = onCleanup(@() restorePlotYSide_(ax,activeSide));
+                end
                 obj.Content_.refresh();
             end
             obj.applyAxesView();
@@ -510,7 +535,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             ax = obj.MainAxes;
             if isempty(ax) || ~isvalid(ax) || ax.BeingDeleted == "on", return; end
             capabilities = obj.getAxesCapabilities();
-            for axisName = ["X","Y"]
+            for axisName = ["X","Y","RightY"]
                 property = axisName + "Lim";
                 limits = obj.AxesView.(property);
                 if isempty(limits) || ~any(capabilities == property), continue; end
@@ -520,11 +545,12 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                         limits = obj.Content_.automaticAxesLimits(axisName);
                     end
                 end
-                if isempty(limits)
-                    ax.(property + "Mode") = 'auto';
-                else
-                    ax.(property) = limits;
-                end
+                setPlotLimit_(ax,property,limits);
+            end
+            if numel(ax.YAxis) == 2 && any(capabilities == "LeftYColor")
+                colors = obj.getYAxisDefaultColors();
+                ax.YAxis(1).Color = colorOverride_(colors(1,:),obj.AxesView.LeftYColor);
+                ax.YAxis(2).Color = colorOverride_(colors(2,:),obj.AxesView.RightYColor);
             end
             obj.applyTickInterval_("X");
             obj.applyTickInterval_("Y");
@@ -534,6 +560,21 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                     if obj.AxesView.LegendVisible == "on", legend(ax,'show'); end
                 else
                     ax.Legend.Visible = obj.AxesView.LegendVisible;
+                end
+            end
+        end
+
+        function colors = getYAxisDefaultColors(obj)
+        %GETYAXISDEFAULTCOLORS Resolve renderer defaults for left and right.
+            % Use the same color-order entries as native yyaxis by default.
+            order = obj.MainAxes.ColorOrder;
+            colors = order([1,min(2,size(order,1))],:);
+            if ~isempty(obj.Content_)
+                rendererColors = obj.Content_.yAxisDefaultColors();
+                if ~isempty(rendererColors)
+                    validateattributes(rendererColors,{'double'}, ...
+                        {'size',[2 3],'finite','real','>=',0,'<=',1});
+                    colors = rendererColors;
                 end
             end
         end
@@ -599,6 +640,12 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 "GridVisible",string(obj.GridVisible), ...
                 "BoxVisible",string(obj.BoxVisible), ...
                 "Tools",string(fieldnames(obj.Tools)).');
+            if numel(obj.MainAxes.YAxis) == 2
+                S.YLim = obj.MainAxes.YAxis(1).Limits;
+                S.YScale = string(obj.MainAxes.YAxis(1).Scale);
+                S.RightYLim = obj.MainAxes.YAxis(2).Limits;
+                S.RightYScale = string(obj.MainAxes.YAxis(2).Scale);
+            end
         end
 
         function openStatusWindow(obj)
@@ -734,7 +781,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                     scale = matlabx.ui.axes.internal.exportStyleScale( ...
                         sourceInches,outputSize,opts.Units,opts.Resolution,preserveAspect);
                     % Automatic labels and titles follow the axes font size.
-                    labels = [ax.XLabel,ax.YLabel,ax.ZLabel,ax.Title,ax.Subtitle];
+                    labels = [ax.XLabel,plotYLabels_(ax),ax.ZLabel,ax.Title,ax.Subtitle];
                     manual = strcmp({labels.FontSizeMode},'manual');
                     ownedGraphics = [{ax},arrayfun(@(h) h,labels(manual),UniformOutput=false)];
                     axesStyleCleanup = matlabx.ui.axes.internal.scaleExportGraphics( ...
@@ -781,6 +828,9 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             if ~isempty(obj.Content_)
                 copyDefaults.XAutoLim = obj.Content_.automaticAxesLimits("X");
                 copyDefaults.YAutoLim = obj.Content_.automaticAxesLimits("Y");
+                if numel(exportAxes.YAxis) == 2
+                    copyDefaults.RightYAutoLim = obj.Content_.automaticAxesLimits("RightY");
+                end
             end
             drawnow;
 
@@ -1014,6 +1064,24 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 return;
             end
 
+            % Incoming renderers must start on a single ruler. At this point
+            % outgoing content has detached its owned graphics.
+            if numel(axes.YAxis) == 2 && isempty(obj.Content_)
+                toolbar = axes.Toolbar;
+                expanded = obj.ToolbarExpanded;
+                cla(axes,'reset');
+                if isempty(toolbar) || ~isvalid(toolbar) || ~isequal(axes.Toolbar,toolbar)
+                    if ~isempty(axes.Toolbar), axes.Toolbar.Visible = 'off'; end
+                    axes.Toolbar = axtoolbar(axes,{});
+                    obj.ToolManager.rebuildToolbarButtons();
+                end
+                axes.Toolbar.Expanded = expanded;
+                axes.Toolbar.Visible = obj.ToolbarVisible_;
+                axes.ContextMenu = obj.ContextMenuManager.Menu;
+                axes.Interactions = dataTipInteraction;
+                axes.Tag = char(obj.Name);
+            end
+
             % Remove annotations and axes-specific helpers created for the
             % outgoing presentation while retaining renderer-owned primitives.
             legend(axes,'off');
@@ -1021,7 +1089,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             axes.Title.String = '';
             axes.Subtitle.String = '';
             axes.XLabel.String = '';
-            axes.YLabel.String = '';
+            for ruler = reshape(axes.YAxis,1,[]), ruler.Label.String = ''; end
             axes.ZLabel.String = '';
 
             % Restore automatic Cartesian dimensions and tick generation.
@@ -1032,16 +1100,16 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             axes.YDir = 'normal';
             axes.ZDir = 'normal';
             axes.XLimMode = 'auto';
-            axes.YLimMode = 'auto';
+            set(axes.YAxis,'LimitsMode','auto');
             axes.ZLimMode = 'auto';
             axes.XTickMode = 'auto';
-            axes.YTickMode = 'auto';
+            set(axes.YAxis,'TickValuesMode','auto');
             axes.ZTickMode = 'auto';
             axes.XTickLabelMode = 'auto';
-            axes.YTickLabelMode = 'auto';
+            set(axes.YAxis,'TickLabelsMode','auto');
             axes.ZTickLabelMode = 'auto';
             axes.XAxis.Visible = 'on';
-            axes.YAxis.Visible = 'on';
+            set(axes.YAxis,'Visible','on');
             axes.ZAxis.Visible = 'off';
 
             % Restore general layout properties that plot types commonly alter.
@@ -1058,7 +1126,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             axes.YMinorTick = 'off';
             axes.ZMinorTick = 'off';
             axes.XAxisLocation = 'bottom';
-            axes.YAxisLocation = 'left';
+            if numel(axes.YAxis) == 1, axes.YAxisLocation = 'left'; end
             axes.Box = obj.BoxVisible_;
             axes.TickDir = 'in';
             axes.TickLength = [0.01 0.025];
@@ -1240,7 +1308,14 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
             names = [groups.Colors,groups.Typography,groups.Grid,groups.Box,groups.Rulers];
             validateSettingsFields_(settings,[names,"AxesView"]);
             view = settings.AxesView;
-            viewNames = ["XLim","YLim","XTickInterval","YTickInterval","LegendVisible"];
+            legacyViewNames = ["XLim","YLim","XTickInterval","YTickInterval","LegendVisible"];
+            dualViewNames = ["RightYLim","LeftYColor","RightYColor"];
+            if isstruct(view) && isscalar(view) ...
+                    && isequal(sort(string(fieldnames(view))),sort(legacyViewNames(:)))
+                % Older snapshots did not store the right range or ruler colors.
+                for name = dualViewNames, view.(name) = []; end
+            end
+            viewNames = [legacyViewNames,dualViewNames];
             validateSettingsFields_(view,viewNames);
 
             % Drop unavailable settings before validation and restore host defaults
@@ -1258,7 +1333,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                     end
                 end
             end
-            for name = viewNames(1:4)
+            for name = [viewNames(1:4),dualViewNames]
                 if ~any(capabilities == name), view.(name) = []; end
                 value = view.(name);
                 if isnumeric(value) && isvector(value), view.(name) = reshape(value,1,[]); end
@@ -1347,7 +1422,7 @@ classdef PlotAxes < matlab.ui.componentcontainer.ComponentContainer
                 obj.MainAxes.FontName = char(obj.FontName);
                 obj.MainAxes.FontUnits = char(obj.FontUnits);
                 textObjects = [obj.MainAxes.Title,obj.MainAxes.Subtitle, ...
-                    obj.MainAxes.XLabel,obj.MainAxes.YLabel,obj.MainAxes.ZLabel];
+                    obj.MainAxes.XLabel,plotYLabels_(obj.MainAxes),obj.MainAxes.ZLabel];
                 set(textObjects,'FontUnits',char(obj.FontUnits));
                 obj.MainAxes.FontSize = obj.FontSize;
                 obj.MainAxes.LabelFontSizeMultiplier = obj.LabelFontSizeMultiplier;
@@ -1481,15 +1556,63 @@ end
 
 function ax = copyPlotAxes_(source,fig)
 %COPYPLOTAXES_ Copy the axes and its linked legend and colorbar together.
-    objects = copyobj([source,source.Legend,source.Colorbar],fig);
-    ax = objects(1);
-    % Preserve the displayed ranges while leaving tick modes as copied.
-    set(ax,XLim=source.XLim,YLim=source.YLim,ZLim=source.ZLim);
+    if numel(source.YAxis) == 2
+        ax = copyDualPlotAxes_(source,fig);
+    else
+        objects = copyobj([source,source.Legend,source.Colorbar],fig);
+        ax = objects(1);
+        set(ax,XLim=source.XLim,YLim=source.YLim,ZLim=source.ZLim);
+    end
     if ~isempty(ax.Toolbar)
         ax.Toolbar.Visible = 'off';
     end
     ax.Units = 'normalized';
     ax.OuterPosition = [0 0 1 1];
+end
+
+function ax = copyDualPlotAxes_(source,fig)
+%COPYDUALPLOTAXES_ Recreate a dual-Y chart by copying each side's primitives.
+    % MATLAB cannot copy a yyaxis axes object as a whole.
+    side = source.YAxisLocation;
+    restoreSide = onCleanup(@() yyaxis(source,side));
+    ax = uiaxes(fig,NextPlot="add");
+    properties = {'Color','ColorOrder','FontName','FontUnits','FontSize', ...
+        'LabelFontSizeMultiplier','TitleFontSizeMultiplier','LineWidth','TickLength', ...
+        'TickDir','Box','XColor','XGrid','YGrid','XMinorGrid','YMinorGrid', ...
+        'GridColor','GridAlpha','GridLineStyle','XScale','XDir','XLim', ...
+        'XTick','XTickMode','XTickLabel','XTickLabelMode','XAxisLocation','CLim'};
+    set(ax,properties,get(source,properties));
+    colormap(ax,colormap(source));
+    copyPlotLabel_(source.Title,ax.Title);
+    copyPlotLabel_(source.Subtitle,ax.Subtitle);
+    copyPlotLabel_(source.XLabel,ax.XLabel);
+    for name = ["left","right"]
+        yyaxis(source,char(name));
+        yyaxis(ax,char(name));
+        % Only the active side's children appear in this property.
+        children = source.Children;
+        if ~isempty(children)
+            copies = copyobj(children,ax);
+            % The new axes' color and line style cycles can restyle auto lines.
+            % Keep the source appearance on the export copy.
+            for k = reshape(find(isgraphics(children,'line')),1,[])
+                copies(k).Color = children(k).Color;
+                copies(k).LineStyle = children(k).LineStyle;
+            end
+        end
+        properties = {'YScale','YDir','YLim','YColor','YTick','YTickMode', ...
+            'YTickLabel','YTickLabelMode','YMinorTick'};
+        set(ax,properties,get(source,properties));
+        copyPlotLabel_(source.YLabel,ax.YLabel);
+    end
+    yyaxis(ax,side);
+end
+
+function copyPlotLabel_(source,target)
+%COPYPLOTLABEL_ Copy text styling while retaining the target ruler association.
+    properties = {'String','Interpreter','FontName','FontUnits','FontSize', ...
+        'FontSizeMode','FontWeight','FontAngle','Color','Visible'};
+    set(target,properties,get(source,properties));
 end
 
 function dimensions = applyPlotCopyOptions_(fig,ax,opts,aspectRatio,defaults)
@@ -1510,7 +1633,7 @@ function dimensions = applyPlotCopyOptions_(fig,ax,opts,aspectRatio,defaults)
     end
     if isfield(style,"FontName")
         ax.FontUnits = style.FontUnits;
-        labels = [ax.Title,ax.Subtitle,ax.XLabel,ax.YLabel,ax.ZLabel];
+        labels = [ax.Title,ax.Subtitle,ax.XLabel,plotYLabels_(ax),ax.ZLabel];
         set(labels,FontUnits=style.FontUnits);
         set(ax,FontName=style.FontName,FontSize=style.FontSize, ...
             LabelFontSizeMultiplier=style.LabelFontSizeMultiplier, ...
@@ -1552,11 +1675,17 @@ end
 
 function defaults = snapshotPlotCopy_(ax)
 %SNAPSHOTPLOTCOPY_ Retain the source view for reversible preview edits.
-    defaults = struct("XLim",ax.XLim,"YLim",ax.YLim, ...
-        "XTick",ax.XTick,"YTick",ax.YTick, ...
-        "XTickMode",ax.XTickMode,"YTickMode",ax.YTickMode, ...
+    defaults = struct("XLim",ax.XLim,"YLim",ax.YAxis(1).Limits, ...
+        "XTick",ax.XTick,"YTick",ax.YAxis(1).TickValues, ...
+        "XTickMode",ax.XTickMode,"YTickMode",ax.YAxis(1).TickValuesMode, ...
         "Color",stringOrRGB_(ax.Color),"ForegroundColor",ax.XColor, ...
         "XAutoLim",[],"YAutoLim",[],"LegendVisible","off");
+    if numel(ax.YAxis) == 2
+        defaults.RightYLim = ax.YAxis(2).Limits;
+        defaults.LeftYColor = ax.YAxis(1).Color;
+        defaults.RightYColor = ax.YAxis(2).Color;
+        defaults.RightYAutoLim = [];
+    end
     if ~isempty(ax.Legend), defaults.LegendVisible = string(ax.Legend.Visible); end
 end
 
@@ -1567,33 +1696,40 @@ end
 
 function applyPlotCopyView_(ax,view,defaults)
 %APPLYPLOTCOPYVIEW_ Apply export-only view overrides against the source snapshot.
-    for axisName = ["X","Y"]
+    for axisName = ["X","Y","RightY"]
         property = axisName + "Lim";
-        if isfield(view,property)
-            limits = view.(property);
-            if isempty(limits)
-                ax.(property) = defaults.(property);
-            elseif isstring(limits)
-                autoLimits = defaults.(axisName + "AutoLim");
-                if isempty(autoLimits)
-                    ax.(property + "Mode") = 'auto';
-                else
-                    ax.(property) = autoLimits;
-                end
-            else
-                ax.(property) = limits;
-            end
+        if ~isfield(view,property) || ~isfield(defaults,property), continue; end
+        limits = view.(property);
+        if isempty(limits)
+            limits = defaults.(property);
+        elseif isstring(limits)
+            limits = defaults.(axisName + "AutoLim");
         end
+        setPlotLimit_(ax,property,limits);
+    end
+    for axisName = ["X","Y"]
         intervalName = axisName + "TickInterval";
-        if isfield(view,intervalName)
-            interval = view.(intervalName);
-            tick = axisName + "Tick";
-            if isempty(interval)
-                if strcmp(defaults.(tick + "Mode"),'manual'), ax.(tick) = defaults.(tick); end
-                ax.(tick + "Mode") = defaults.(tick + "Mode");
+        if ~isfield(view,intervalName), continue; end
+        interval = view.(intervalName);
+        tick = axisName + "Tick";
+        if isempty(interval)
+            if axisName == "Y"
+                ruler = ax.YAxis(1);
+                if strcmp(defaults.YTickMode,'manual'), ruler.TickValues = defaults.YTick; end
+                ruler.TickValuesMode = defaults.YTickMode;
             else
-                setPlotTickInterval_(ax,axisName,interval);
+                if strcmp(defaults.XTickMode,'manual'), ax.XTick = defaults.XTick; end
+                ax.XTickMode = defaults.XTickMode;
             end
+        else
+            setPlotTickInterval_(ax,axisName,interval);
+        end
+    end
+    if numel(ax.YAxis) == 2
+        for name = ["LeftYColor","RightYColor"]
+            if ~isfield(view,name), continue; end
+            color = view.(name);
+            ax.YAxis(1 + (name == "RightYColor")).Color = colorOverride_(defaults.(name),color);
         end
     end
     if isfield(view,"LegendVisible")
@@ -1612,26 +1748,34 @@ end
 
 function setPlotTickInterval_(ax,axisName,interval)
 %SETPLOTTICKINTERVAL_ Place ticks at fixed intervals on linear axes.
-    tickName = axisName + "Tick";
-    if ischar(interval) || isstring(interval) || strcmp(ax.(axisName + "Scale"),'log')
-        ax.(tickName + "Mode") = 'auto';
+    if axisName == "Y"
+        ruler = ax.YAxis(1);
+    else
+        ruler = ax.XAxis;
+    end
+    if ischar(interval) || isstring(interval) || strcmp(ruler.Scale,'log')
+        ruler.TickValuesMode = 'auto';
         return;
     end
-    bounds = ax.(axisName + "Lim") ./ interval;
+    bounds = ruler.Limits ./ interval;
     tolerance = min(1e-8,4*eps(max(abs(bounds))));
     endpoints = [ceil(bounds(1)-tolerance),floor(bounds(2)+tolerance)];
     % Retain readable ticks when a zoom-out would create a huge list.
     if any(~isfinite(endpoints)) || diff(endpoints) >= 1000
-        ax.(tickName + "Mode") = 'auto';
+        ruler.TickValuesMode = 'auto';
     else
-        ax.(tickName) = (endpoints(1):endpoints(2)) .* interval;
+        ruler.TickValues = (endpoints(1):endpoints(2)) .* interval;
     end
 end
 
 function setAxesForeground_(ax,color)
 %SETAXESFOREGROUND_ Apply a foreground color to the rulers and axes labels.
-    set(ax,XColor=color,YColor=color,ZColor=color);
-    set([ax.Title,ax.Subtitle,ax.XLabel,ax.YLabel,ax.ZLabel],Color=color);
+    set(ax,XColor=color,ZColor=color);
+    set([ax.Title,ax.Subtitle,ax.XLabel,ax.ZLabel],Color=color);
+    if numel(ax.YAxis) == 1
+        ax.YColor = color;
+        ax.YLabel.Color = color;
+    end
 end
 
 function color = colorOverride_(default,override)
@@ -1689,4 +1833,31 @@ function opts = validateAxesAppearance_(opts)
         opts.TickLength (1,2) double {mustBeNonnegative,mustBeFinite}
         opts.TickDirection (1,1) string {mustBeMember(opts.TickDirection,["in","out","both","none"])}
     end
+end
+
+function labels = plotYLabels_(ax)
+%PLOTYLABELS_ Return both native label handles on a dual-Y chart.
+    labels = [ax.YAxis.Label];
+end
+
+function restorePlotYSide_(ax,side)
+%RESTOREPLOTYSIDE_ Restore the previous side if both rulers still exist.
+    if isgraphics(ax) && numel(ax.YAxis) == 2 && ~strcmp(ax.YAxisLocation,side)
+        yyaxis(ax,side);
+    end
+end
+
+function setPlotLimit_(ax,property,limits)
+%SETPLOTLIMIT_ Apply a range without switching the active Y side.
+    if property == "XLim"
+        if isempty(limits), ax.XLimMode = 'auto'; else, ax.XLim = limits; end
+    else
+        ruler = ax.YAxis(1 + (property == "RightYLim"));
+        if isempty(limits), ruler.LimitsMode = 'auto'; else, ruler.Limits = limits; end
+    end
+end
+
+function setPlotTickMode_(ax,axisName)
+%SETPLOTTICKMODE_ Restore native automatic ticks for the requested ruler.
+    if axisName == "Y", ax.YAxis(1).TickValuesMode = 'auto'; else, ax.XTickMode = 'auto'; end
 end

@@ -866,6 +866,14 @@ accepts `"on"`, `"off"`, or `"default"`. Read the current overrides from
 `host.AxesView` and the displayed limits from `host.Axes.XLim` and
 `host.Axes.YLim`.
 
+For content that uses `yyaxis`, `YLim` always configures the left ruler and
+`RightYLim` configures the right ruler. Both accept a fixed range, `"auto"`,
+or `[]` to inherit. Read the displayed limits from
+`host.Axes.YAxis(1).Limits` and `host.Axes.YAxis(2).Limits`.
+`LeftYColor` and `RightYColor` accept RGB triples or `[]` for the renderer's
+color. The Axes Properties and export dialogs expose these settings for
+dual-Y content, with shared typography and grid controls.
+
 Apps can save one complete settings snapshot per plot type and restore it
 after mounting that plot on any host:
 
@@ -881,6 +889,12 @@ plain values suitable for serialization. The displayed range of a zoomed or
 automatically framed plot is independent of the stored view settings.
 Restoring a snapshot replaces prior settings and clears controls the mounted
 renderer does not support.
+
+Save the complete field set returned by `getAxesSettings()`, including every
+field in `AxesView`. Existing single-Y snapshots that predate the dual-Y
+fields still load, with the missing fields set to inherited defaults. Apps
+should plan to migrate older snapshots to the exact field set returned by the
+installed MATLABX version. A future release may require an exact match.
 
 Listen to `AxesPropertiesCommitted` to save settings after the user clicks
 **Apply** in the native dialog. The source is the `PlotAxes` host, whose
@@ -903,6 +917,12 @@ Implement `axesViewDefaults()` to expose configured limits, tick intervals,
 and legend visibility. Omitted fields use automatic limits, automatic tick
 spacing, or a hidden legend when the user restores defaults. Renderer
 capabilities determine which controls are available.
+
+Dual-Y renderers should attach their graphics to the intended `yyaxis` side
+and detach the graphics they own when leaving a host. They can supply the
+default ruler colors by overriding `yAxisDefaultColors()` and returning a
+2-by-3 RGB array in left, right order. The host's default color order is used
+when the hook returns empty.
 
 Low-level `matlabx.ui.axes.plot.Scatter` and `Violin` each own one logical dataset
 and several graphics primitives. `setParent(axes)` moves every owned primitive;

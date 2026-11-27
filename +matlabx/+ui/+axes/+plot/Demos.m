@@ -7,6 +7,7 @@ classdef Demos
 %
 %   [fig,host,renderer] = matlabx.ui.axes.plot.Demos.scatter();
 %   [fig,host,renderer] = matlabx.ui.axes.plot.Demos.violin();
+%   [fig,host,renderer] = matlabx.ui.axes.plot.Demos.dualY();
 %
 % See also matlabx.ui.axes.PlotAxes,
 % matlabx.ui.axes.plot.ScatterRenderer,
@@ -29,6 +30,34 @@ classdef Demos
 % with this program; if not, see <https://www.gnu.org/licenses/>.
 
     methods (Static)
+
+        function [fig,host,renderer] = dualY()
+        %DUALY Try independent ruler limits and colors on a native yyaxis plot.
+            % Use the shared demo layout so the host toolbar and menu are available.
+            [fig,accordion,host] = matlabx.ui.axes.plot.Demos.createShell("Dual Y-axis demo");
+            renderer = matlabx.ui.axes.internal.DualYDemoContent();
+            host.TitleVisible = "on";
+
+            % Each multiplier changes only its own series' data range.
+            pane = matlabx.ui.axes.plot.Demos.addSection(accordion,"Data",2);
+            left = matlabx.ui.axes.plot.Demos.numericControl(pane,1,"Left Y multiplier",1,0.1,10,0.1);
+            right = matlabx.ui.axes.plot.Demos.numericControl(pane,2,"Right Y multiplier",1,0.1,10,0.1);
+            left.Tag = "DualYLeftMultiplier";
+            right.Tag = "DualYRightMultiplier";
+            left.ValueChangedFcn = @(~,~) renderer.setMultipliers([left.Value right.Value]);
+            right.ValueChangedFcn = left.ValueChangedFcn;
+            accordion.getItem("Data").expand();
+            movegui(fig,"center");
+            fig.Visible = "on";
+            drawnow;
+            % Create both rulers after the visible figure has completed layout.
+            host.mount(renderer);
+            % Give the right ruler a layout pass before returning to the left.
+            yyaxis(host.Axes,'right');
+            drawnow;
+            yyaxis(host.Axes,'left');
+            drawnow;
+        end
 
         function [fig,host,renderer] = scatter()
         %SCATTER Open an interactive ScatterRenderer demonstration.

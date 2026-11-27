@@ -413,6 +413,15 @@ classdef PlotAxesToolManager < handle
             obj.uninstallMany(toolsToRemove);
         end
 
+        function rebuildToolbarButtons(obj)
+        %REBUILDTOOLBARBUTTONS Recreate buttons without reinstalling tools.
+            obj.Host.ToolbarButtons = struct();
+            tools = obj.installedToolValues();
+            for k = 1:numel(tools)
+                if tools{k}.ContributeToolbar, obj.addToolbarButton(tools{k}); end
+            end
+        end
+
         function addToolbarButton(obj, tool)
         %ADDTOOLBARBUTTON Create a MATLAB axes toolbar button for an installed tool.
             host = obj.Host;

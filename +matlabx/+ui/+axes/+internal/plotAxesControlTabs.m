@@ -123,11 +123,33 @@ function [read,refreshLimits,restoreDefaults,revert] = plotAxesControlTabs(tabs,
 
     % Limit mode and bound controls keyed by axis limit property.
     limitControls = struct();
-    if any(ismember(["XLim","YLim"],capabilities))
+    rulerColors = struct();
+    if any(ismember(["XLim","YLim","RightYLim","LeftYColor","RightYColor"],capabilities))
         pane = addTab("Limits");
-        for axisName = ["X","Y"]
-            property = axisName + "Lim";
-            if supports(property), limitControls.(property) = addLimits(pane,axisName); end
+        if supports("XLim"), limitControls.XLim = addLimits(pane,"XLim","X"); end
+        if numel(ax.YAxis) == 1
+            if supports("YLim"), limitControls.YLim = addLimits(pane,"YLim","Y"); end
+        else
+            colors = host.getYAxisDefaultColors();
+            for side = 1:2
+                labels = ["Left Y axis","Right Y axis"];
+                names = ["YLim","RightYLim"];
+                colorNames = ["LeftYColor","RightYColor"];
+                name = names(side);
+                colorName = colorNames(side);
+                if supports(name)
+                    limitControls.(name) = addLimits(pane,name,labels(side));
+                end
+                if supports(colorName)
+                    override = initialView.(colorName);
+                    if forExport && ~isequal(ax.YAxis(side).Color,colors(side,:))
+                        override = ax.YAxis(side).Color;
+                    end
+                    rulerColors.(colorName) = addColor(pane,labels(side)+" color", ...
+                        override,colors(side,:),ax.YAxis(side).Color,false);
+                    rulerColors.(colorName).Mode.Items = {'Auto','Custom'};
+                end
+            end
         end
     end
 
@@ -220,14 +242,13 @@ function [read,refreshLimits,restoreDefaults,revert] = plotAxesControlTabs(tabs,
         settingsControls{end+1} = control;
     end
 
-    function controls = addLimits(pane,axisName)
+    function controls = addLimits(pane,property,label)
     %ADDLIMITS Create the mode and bounds controls for an axis.
-        property = axisName + "Lim";
-        % Opening lower and upper bounds shown in the limits fields.
-        shown = ax.(property);
-        controls.Mode = addMode(pane,axisName+" limits",ax.(property+"Mode"));
-        controls.Minimum = addNumber(pane,axisName+" minimum",shown(1),[-Inf Inf]);
-        controls.Maximum = addNumber(pane,axisName+" maximum",shown(2),[-Inf Inf]);
+        % Bounds and mode come from the explicit ruler, independently of yyaxis.
+        [shown,mode] = readLimits(ax,property);
+        controls.Mode = addMode(pane,label+" limits",mode);
+        controls.Minimum = addNumber(pane,label+" minimum",shown(1),[-Inf Inf]);
+        controls.Maximum = addNumber(pane,label+" maximum",shown(2),[-Inf Inf]);
         controls.Mode.ValueChangedFcn = @(~,~) limitsModeChanged(controls,property);
         controls.Minimum.ValueChangedFcn = @(~,~) viewEdited(property);
         controls.Maximum.ValueChangedFcn = @(~,~) viewEdited(property);
@@ -308,9 +329,21 @@ function [read,refreshLimits,restoreDefaults,revert] = plotAxesControlTabs(tabs,
         for property = reshape(string(fieldnames(limitControls)),1,[])
             controls = limitControls.(property);
             if strcmp(controls.Mode.Value,'manual'), continue; end
-            limits = ax.(property);
+            limits = readLimits(ax,property);
             if isfinite(limits(1)), controls.Minimum.Value = limits(1); end
             if isfinite(limits(2)), controls.Maximum.Value = limits(2); end
+        end
+    end
+
+    function [limits,mode] = readLimits(nativeAxes,property)
+    %READLIMITS Return the requested side's realized bounds and mode.
+        if property == "XLim"
+            limits = nativeAxes.XLim;
+            mode = nativeAxes.XLimMode;
+        else
+            ruler = nativeAxes.YAxis(1 + (property == "RightYLim"));
+            limits = ruler.Limits;
+            mode = ruler.LimitsMode;
         end
     end
 
@@ -457,6 +490,16 @@ function [read,refreshLimits,restoreDefaults,revert] = plotAxesControlTabs(tabs,
                 view.(property) = interval;
             end
         end
+        for name = reshape(string(fieldnames(rulerColors)),1,[])
+            controls = rulerColors.(name);
+            view.(name) = [];
+            if strcmp(controls.Mode.Value,'custom')
+                view.(name) = controls.Picker.Value;
+            elseif forExport
+                % Encode Auto explicitly for the export copy's ruler.
+                view.(name) = controls.Default;
+            end
+        end
         if supports("Legend")
             view.LegendVisible = viewState.LegendVisible;
             if isfield(edited,"LegendVisible")
@@ -500,6 +543,11 @@ function [read,refreshLimits,restoreDefaults,revert] = plotAxesControlTabs(tabs,
                 viewState.(property) = [];
             end
             if isfield(edited,property), edited = rmfield(edited,property); end
+        end
+        for name = reshape(string(fieldnames(rulerColors)),1,[])
+            controls = rulerColors.(name);
+            controls.Mode.Value = 'default';
+            controls.Picker.Enable = 'off';
         end
         % Read appearance defaults from the class so constructor defaults
         % and the reset button stay in sync.
@@ -546,6 +594,11 @@ function [read,refreshLimits,restoreDefaults,revert] = plotAxesControlTabs(tabs,
         end
         for property = reshape(string(fieldnames(intervalControls)),1,[])
             updateIntervalField(intervalControls.(property));
+        end
+        for name = reshape(string(fieldnames(rulerColors)),1,[])
+            controls = rulerColors.(name);
+            controls.Picker.Enable = matlab.lang.OnOffSwitchState(strcmp(controls.Mode.Value,'custom'));
+            updateSwatches(controls);
         end
         if supports("Colors")
             for controls = [backgroundControl,axesColorControl,foregroundControl]
